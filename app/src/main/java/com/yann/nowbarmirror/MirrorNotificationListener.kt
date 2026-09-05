@@ -50,8 +50,12 @@ class MirrorNotificationListener : NotificationListenerService() {
     override fun onNotificationRemoved(sbn: StatusBarNotification) {
         if (!ready.get()) return
         if (sbn.packageName == packageName) {
-            val key = sbn.notification.extras.getString(EXTRA_ORIGINAL_KEY)
-            if (!key.isNullOrEmpty()) cancelOriginal(key)
+            // The extras bundle the system attaches to a *removed* StatusBarNotification is
+            // stripped down and no longer carries EXTRA_ORIGINAL_KEY, so it can't be read back
+            // here. Use the key we already kept in memory from when the mirror was created.
+            currentKey?.let { cancelOriginal(it) }
+            currentKey = null
+            currentSourcePackage = null
             return
         }
 
