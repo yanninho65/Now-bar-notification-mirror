@@ -3,9 +3,7 @@ package com.yann.nowbarmirror
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
-import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.drawable.AdaptiveIconDrawable
 import android.graphics.drawable.BitmapDrawable
@@ -14,22 +12,32 @@ import android.graphics.drawable.Icon
 import android.os.Build
 import android.os.Bundle
 import android.service.notification.NotificationListenerService
+import android.service.notification.NotificationListenerService.RankingMap
 import android.service.notification.StatusBarNotification
 import androidx.core.app.NotificationCompat
+import com.yann.nowbarmirror.settings.AppMirrorPrefs
+import com.yann.nowbarmirror.settings.MirrorMode
+import com.yann.nowbarmirror.settings.ServicePrefs
 import java.util.concurrent.atomic.AtomicBoolean
 
 class MirrorNotificationListener : NotificationListenerService() {
 
     companion object {
         const val CHANNEL_ID = "mirror"
-        const val MIRROR_ID = 9001
+        const val MIRROR_ID = 9001          // fixed slot shared by every app set to "Dernière notif"
+        const val ALL_MODE_ID_BASE = 9100   // "Toutes" mirrors get their own id, allocated from here
         const val EXTRA_ORIGINAL_KEY = "mirror.original.key"
         const val EXTRA_MIRROR = "mirror.is_mirror"
     }
 
     private val ready = AtomicBoolean(false)
-    private var currentKey: String? = null
-    private var currentSourcePackage: String? = null
+
+    // LATEST mode: one shared slot; whichever LATEST-mode app posted last occupies it.
+    private var latestOriginalKey: String? = null
+
+    // ALL mode: every distinct original notification key gets its own persistent mirror id.
+    private val allModeMirrors = mutableMapOf<String, Int>()
+    private var nextAllModeMirrorId = ALL_MODE_ID_BASE
 
     override fun onListenerConnected() {
         super.onListenerConnected()
@@ -39,34 +47,69 @@ class MirrorNotificationListener : NotificationListenerService() {
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         if (!ready.get()) return
+        if (!ServicePrefs.isEnabled(applicationContext)) return
         if (sbn.packageName == packageName) return
         if (sbn.isOngoing) return
         // Group-summary notifications (e.g. WhatsApp's "X new messages" bundle) carry no
         // per-conversation photo or actions — skip them so they don't overwrite the real one.
         if (sbn.notification.flags and Notification.FLAG_GROUP_SUMMARY != 0) return
-        mirror(sbn)
+
+        when (AppMirrorPrefs.getMode(applicationContext, sbn.packageName)) {
+            MirrorMode.ALL -> {
+                val mirrorId = allModeMirrors.getOrPut(sbn.key) { nextAllModeMirrorId++ }
+                mirror(sbn, mirrorId)
+            }
+            MirrorMode.LATEST -> {
+                latestOriginalKey = sbn.key
+                mirror(sbn, MIRROR_ID)
+            }
+            MirrorMode.NONE -> Unit
+        }
     }
 
-    override fun onNotificationRemoved(sbn: StatusBarNotification) {
+    override fun onNotificationRemoved(
+        sbn: StatusBarNotification,
+        rankingMap: RankingMap?,
+        reason: Int
+    ) {
         if (!ready.get()) return
+
         if (sbn.packageName == packageName) {
-            // The extras bundle the system attaches to a *removed* StatusBarNotification is
-            // stripped down and no longer carries EXTRA_ORIGINAL_KEY, so it can't be read back
-            // here. Use the key we already kept in memory from when the mirror was created.
-            currentKey?.let { cancelOriginal(it) }
-            currentKey = null
-            currentSourcePackage = null
+            // Only react to a *genuine* dismissal of one of our mirrors (user swipe, or
+            // "clear all"). REASON_APP_CANCEL means we cancelled it ourselves. The previous
+            // version always cancelled-then-reposted the shared slot to swap its content, which
+            // fired this same callback for our own cancel and raced against the state update —
+            // by the time the async removal event arrived, the tracked key had often already
+            // moved on to the *new* original, so that new original got wrongly cancelled.
+            // Filtering by reason removes the race entirely: an original is only ever cancelled
+            // when its mirror was actually swiped away by the user.
+            val userDismissed = reason == REASON_CANCEL || reason == REASON_CANCEL_ALL
+            if (!userDismissed) return
+
+            if (sbn.id == MIRROR_ID) {
+                latestOriginalKey?.let { cancelOriginal(it) }
+                latestOriginalKey = null
+            } else {
+                val originalKey = allModeMirrors.entries.firstOrNull { it.value == sbn.id }?.key
+                if (originalKey != null) {
+                    cancelOriginal(originalKey)
+                    allModeMirrors.remove(originalKey)
+                }
+            }
             return
         }
 
-        if (sbn.key == currentKey) {
-            cancelMirror()
-            currentKey = null
-            currentSourcePackage = null
+        // The original notification itself was removed (by its app, the user, whatever reason)
+        // -> drop its mirror too, if it currently has one.
+        if (sbn.key == latestOriginalKey) {
+            cancelMirror(MIRROR_ID)
+            latestOriginalKey = null
+            return
         }
+        allModeMirrors.remove(sbn.key)?.let { cancelMirror(it) }
     }
 
-    private fun mirror(sbn: StatusBarNotification) {
+    private fun mirror(sbn: StatusBarNotification, mirrorId: Int) {
         val n = sbn.notification
         val extras = n.extras
         val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.takeIf { it.isNotBlank() }
@@ -129,14 +172,15 @@ class MirrorNotificationListener : NotificationListenerService() {
                 .build()
         }
 
-        cancelMirror()
-        currentKey = sbn.key
-        currentSourcePackage = sbn.packageName
-        getSystemService(NotificationManager::class.java).notify(MIRROR_ID, notification)
+        // Posting to an id that's already showing is an in-place update as far as the system
+        // is concerned — no removal event is generated. That's what lets a LATEST-mode swap or
+        // an ALL-mode content refresh happen without ever triggering onNotificationRemoved for
+        // our own package, which is the other half of the race fix above.
+        getSystemService(NotificationManager::class.java).notify(mirrorId, notification)
     }
 
-    private fun cancelMirror() {
-        getSystemService(NotificationManager::class.java).cancel(MIRROR_ID)
+    private fun cancelMirror(mirrorId: Int) {
+        getSystemService(NotificationManager::class.java).cancel(mirrorId)
     }
 
     private fun cancelOriginal(key: String) {

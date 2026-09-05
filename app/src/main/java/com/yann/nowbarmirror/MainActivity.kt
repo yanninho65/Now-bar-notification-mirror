@@ -11,6 +11,7 @@ import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationManagerCompat
+import com.yann.nowbarmirror.settings.AppSelectionActivity
 
 class MainActivity : AppCompatActivity() {
 
@@ -43,11 +44,16 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+        val appSelection = Button(this).apply {
+            text = "Applications à mirrorer"
+            setOnClickListener { startActivity(Intent(this@MainActivity, AppSelectionActivity::class.java)) }
+        }
         status = TextView(this).apply { textSize = 15f; setPadding(0, 24, 0, 0) }
         layout.addView(title)
         layout.addView(info)
         layout.addView(access)
         layout.addView(notif)
+        layout.addView(appSelection)
         layout.addView(status)
         setContentView(layout)
         refreshStatus()
