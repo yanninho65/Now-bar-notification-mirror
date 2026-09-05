@@ -111,11 +111,9 @@ class MirrorNotificationListener : NotificationListenerService() {
 
         var notification = builder.build()
 
-        // Chip/status-bar icon slot. NOTE: Android renders the small icon as a monochrome
-        // alpha-mask silhouette in the classic status bar — this is a documented platform
-        // behavior, not specific to this app. Whether One UI 8.5's Live Update pill honors
-        // full color here is unverified; this is the thing to check on-device on the S26.
-        // Falls back to the app icon if there's no image or the OS ignores it.
+        // Small icon slot: same image as the large icon (reduced Now Bar) when available,
+        // so the pill shows the contact/notification photo instead of the app icon.
+        // Falls back to the app icon only when there's no extractable image.
         val chipIcon = image?.let { Icon.createWithBitmap(it) } ?: appIcon(sbn.packageName)
         chipIcon?.let { icon ->
             notification = Notification.Builder.recoverBuilder(this, notification)
@@ -184,14 +182,13 @@ class MirrorNotificationListener : NotificationListenerService() {
     }
 
     /**
-     * The Live Update chip is at most 96dp wide and only shows text if the whole string
-     * fits (roughly: <7 chars always shown, otherwise shown only if more than half fits,
-     * else icon-only). Prefer the message text over the title per product requirement,
-     * but trim it so it actually has a chance of rendering instead of collapsing to icon-only.
+     * Text shown in the collapsed pill. Prefer the message text over the title.
+     * No truncation here: Samsung's Now Bar appears to handle long text itself
+     * (marquee/scroll) rather than following the strict AOSP 96dp chip-fit rule,
+     * so cutting it in code would only hide that behavior.
      */
     private fun shortChipText(text: String, title: String): String {
-        val source = text.ifBlank { title }
-        return if (source.length <= 24) source else source.take(24).trimEnd() + "…"
+        return text.ifBlank { title }
     }
 
     private fun getAppName(pkg: String): String {
