@@ -1,10 +1,7 @@
 package com.yann.nowbarmirror
 
 import android.Manifest
-import android.app.NotificationManager
-import android.content.ComponentName
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
@@ -13,12 +10,14 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
-import androidx.core.content.ContextCompat
+import androidx.core.app.NotificationManagerCompat
 
 class MainActivity : AppCompatActivity() {
+
+    private lateinit var status: TextView
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(48, 48, 48, 48)
@@ -44,27 +43,23 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
-        val status = TextView(this).apply { textSize = 15f; setPadding(0, 24, 0, 0) }
+        status = TextView(this).apply { textSize = 15f; setPadding(0, 24, 0, 0) }
         layout.addView(title)
         layout.addView(info)
         layout.addView(access)
         layout.addView(notif)
         layout.addView(status)
         setContentView(layout)
-
-        fun refresh() {
-            val enabled = NotificationManager.getEnabledListenerPackages(this).contains(packageName)
-            status.text = if (enabled) "✓ Accès aux notifications activé" else "⚠ Accès aux notifications non activé"
-        }
-        refresh()
+        refreshStatus()
     }
 
     override fun onResume() {
         super.onResume()
-        // Listener state is displayed again when returning from Settings.
-        val tv = (findViewById<LinearLayout>(android.R.id.content)?.getChildAt(0) as? LinearLayout)
-            ?.getChildAt(4) as? TextView
-        tv?.text = if (NotificationManager.getEnabledListenerPackages(this).contains(packageName))
-            "✓ Accès aux notifications activé" else "⚠ Accès aux notifications non activé"
+        refreshStatus()
+    }
+
+    private fun refreshStatus() {
+        val enabled = NotificationManagerCompat.getEnabledListenerPackages(this).contains(packageName)
+        status.text = if (enabled) "✓ Accès aux notifications activé" else "⚠ Accès aux notifications non activé"
     }
 }
