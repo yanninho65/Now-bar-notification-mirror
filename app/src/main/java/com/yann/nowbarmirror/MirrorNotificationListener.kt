@@ -41,6 +41,9 @@ class MirrorNotificationListener : NotificationListenerService() {
         if (!ready.get()) return
         if (sbn.packageName == packageName) return
         if (sbn.isOngoing) return
+        // Group-summary notifications (e.g. WhatsApp's "X new messages" bundle) carry no
+        // per-conversation photo or actions — skip them so they don't overwrite the real one.
+        if (sbn.notification.flags and Notification.FLAG_GROUP_SUMMARY != 0) return
         mirror(sbn)
     }
 
@@ -86,7 +89,7 @@ class MirrorNotificationListener : NotificationListenerService() {
             .setWhen(n.`when`)
             .setShowWhen(true)
             .setContentIntent(n.contentIntent)
-            .setLargeIcon(image ?: appIconBitmap(sbn.packageName))   // drives the reduced Now Bar on lock screen
+            .setLargeIcon(appIconBitmap(sbn.packageName))   // top-right thumbnail in the expanded popup — app icon, not the contact photo
             .addExtras(Bundle().apply {
                 putBoolean(EXTRA_MIRROR, true)
                 putString(EXTRA_ORIGINAL_KEY, sbn.key)
@@ -111,9 +114,10 @@ class MirrorNotificationListener : NotificationListenerService() {
 
         var notification = builder.build()
 
-        // Small icon slot: same image as the large icon (reduced Now Bar) when available,
-        // so the pill shows the contact/notification photo instead of the app icon.
-        // Falls back to the app icon only when there's no extractable image.
+        // Small icon slot: the extracted photo when available, so the pill and the reduced
+        // lock-screen Now Bar show the contact/notification image. Independent from the
+        // large icon above, which now always shows the app icon (top-right thumbnail in
+        // the expanded popup). Falls back to the app icon here too if there's no image.
         val chipIcon = image?.let { Icon.createWithBitmap(it) } ?: appIcon(sbn.packageName)
         chipIcon?.let { icon ->
             notification = Notification.Builder.recoverBuilder(this, notification)
