@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">Now Bar Mirror</string>
+    <string name="channel_name">Now Bar Mirror</string>
+    <string name="channel_description">Mirrored notifications for the Now Bar</string>
+    <string name="open_settings">Notification access</string>
+    <string name="service_name">Now Bar Mirror notification listener</string>
+</resources>

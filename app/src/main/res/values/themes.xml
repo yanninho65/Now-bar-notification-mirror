@@ -1,0 +1,3 @@
+<resources>
+    <style name="Theme.NowBarMirror" parent="Theme.AppCompat.DayNight.NoActionBar" />
+</resources>
