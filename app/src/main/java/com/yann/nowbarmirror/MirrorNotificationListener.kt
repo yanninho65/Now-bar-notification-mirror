@@ -189,7 +189,7 @@ class MirrorNotificationListener : NotificationListenerService() {
      * else icon-only). Prefer the message text over the title per product requirement,
      * but trim it so it actually has a chance of rendering instead of collapsing to icon-only.
      */
-    private fun shortChipText(text: String, title: String): CharSequence {
+    private fun shortChipText(text: String, title: String): String {
         val source = text.ifBlank { title }
         return if (source.length <= 24) source else source.take(24).trimEnd() + "…"
     }
