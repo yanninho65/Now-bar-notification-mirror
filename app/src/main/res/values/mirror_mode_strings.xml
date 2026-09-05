@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_selection_title">Applications à mirrorer</string>
+
+    <!-- Order must match MirrorMode enum ordinals: NONE, LATEST, ALL -->
+    <string-array name="mirror_mode_labels">
+        <item>Aucun</item>
+        <item>Dernière notif</item>
+        <item>Toutes</item>
+    </string-array>
+
+    <string name="service_enabled_label">Service actif</string>
+    <string name="export_settings">Exporter</string>
+    <string name="import_settings">Importer</string>
+    <string name="export_success">Réglages exportés</string>
+    <string name="export_failed">Échec de l\'export</string>
+    <string name="import_success">Réglages importés</string>
+    <string name="import_failed">Échec de l\'import</string>
+</resources>
