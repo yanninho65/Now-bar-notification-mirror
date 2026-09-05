@@ -28,9 +28,15 @@
             <intent-filter>
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
+            <!--
+                Must include "ongoing" and "silent": our own mirror notification is both
+                (setOngoing(true) + an IMPORTANCE_LOW channel), so without these the system
+                never delivers onNotificationRemoved for the mirror itself, and the
+                mirror -> original delete sync silently never fires.
+            -->
             <meta-data
                 android:name="android.service.notification.default_filter_types"
-                android:value="conversations|alerting" />
+                android:value="ongoing|conversations|alerting|silent" />
         </service>
     </application>
 </manifest>
