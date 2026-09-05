@@ -20,6 +20,11 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".settings.AppSelectionActivity"
+            android:label="@string/app_selection_title"
+            android:exported="false" />
+
         <service
             android:name=".MirrorNotificationListener"
             android:label="@string/service_name"
