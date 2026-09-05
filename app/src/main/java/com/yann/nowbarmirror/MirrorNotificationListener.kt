@@ -3,7 +3,13 @@ package com.yann.nowbarmirror
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.drawable.BitmapDrawable
+import android.graphics.drawable.Drawable
+import android.graphics.drawable.Icon
 import android.os.Build
 import android.os.Bundle
 import android.service.notification.NotificationListenerService
@@ -40,7 +46,6 @@ class MirrorNotificationListener : NotificationListenerService() {
     override fun onNotificationRemoved(sbn: StatusBarNotification) {
         if (!ready.get()) return
         if (sbn.packageName == packageName) {
-            // The user removed our mirror (e.g. from the notification shade / Now Bar).
             val key = sbn.notification.extras.getString(EXTRA_ORIGINAL_KEY)
             if (!key.isNullOrEmpty()) cancelOriginal(key)
             return
@@ -67,6 +72,7 @@ class MirrorNotificationListener : NotificationListenerService() {
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setContentTitle(title)
             .setContentText(text)
+            .setShortCriticalText(title)   // what the collapsed pill shows — without this it defaults to a time/duration
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setOngoing(true)
             .setAutoCancel(false)
@@ -75,13 +81,12 @@ class MirrorNotificationListener : NotificationListenerService() {
             .setWhen(n.`when`)
             .setShowWhen(true)
             .setContentIntent(n.contentIntent)
-            .setLargeIcon(extractBitmap(extras) ?: appIconBitmap(sbn.packageName))
+            .setLargeIcon(extractImageBitmap(sbn) ?: appIconBitmap(sbn.packageName))
             .addExtras(Bundle().apply {
                 putBoolean(EXTRA_MIRROR, true)
                 putString(EXTRA_ORIGINAL_KEY, sbn.key)
             })
 
-        // Copy action buttons. Their PendingIntents remain owned by the source app.
         n.actions?.take(3)?.forEach { action ->
             val pi = action.actionIntent ?: return@forEach
             builder.addAction(
@@ -93,7 +98,6 @@ class MirrorNotificationListener : NotificationListenerService() {
             )
         }
 
-        // Android 16 promoted ongoing notifications can be eligible for Live Update surfaces.
         if (Build.VERSION.SDK_INT >= 36) {
             try {
                 builder.setRequestPromotedOngoing(true)
@@ -114,7 +118,6 @@ class MirrorNotificationListener : NotificationListenerService() {
         try {
             cancelNotification(key)
         } catch (_: Throwable) {
-            // Fallback for OEM variations: resolve active notification and cancel by fields.
             activeNotifications?.firstOrNull { it.key == key }?.let {
                 cancelNotification(it.key)
             }
@@ -137,14 +140,7 @@ class MirrorNotificationListener : NotificationListenerService() {
 
     private fun appIconBitmap(pkg: String): Bitmap? {
         return try {
-            val drawable = packageManager.getApplicationIcon(pkg)
-            val width = if (drawable.intrinsicWidth > 0) drawable.intrinsicWidth else 128
-            val height = if (drawable.intrinsicHeight > 0) drawable.intrinsicHeight else 128
-            val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-            val canvas = android.graphics.Canvas(bitmap)
-            drawable.setBounds(0, 0, canvas.width, canvas.height)
-            drawable.draw(canvas)
-            bitmap
+            drawableToBitmap(packageManager.getApplicationIcon(pkg))
         } catch (_: Throwable) { null }
     }
 
@@ -154,15 +150,53 @@ class MirrorNotificationListener : NotificationListenerService() {
         } catch (_: Exception) { pkg }
     }
 
-    private fun extractBitmap(extras: Bundle): Bitmap? {
-        return try {
-            extras.getParcelableCompat<Bitmap>(Notification.EXTRA_LARGE_ICON_BIG)
-                ?: extras.getParcelableCompat<Bitmap>(Notification.EXTRA_LARGE_ICON)
-        } catch (_: Throwable) { null }
+    /**
+     * Tries, in order:
+     * 1) the contact photo attached to the sender of a MessagingStyle notification
+     *    (WhatsApp, Messages, etc. put it here, NOT in the large icon),
+     * 2) a BigPictureStyle image (EXTRA_PICTURE),
+     * 3) the notification's actual large icon via the official getLargeIcon() accessor
+     *    (reading raw extras instead of this, like the previous version did, misses
+     *    most real-world notifications).
+     */
+    private fun extractImageBitmap(sbn: StatusBarNotification): Bitmap? {
+        val n = sbn.notification
+
+        NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(n)
+            ?.messages
+            ?.lastOrNull { it.person?.icon != null }
+            ?.person?.icon
+            ?.let { personIcon ->
+                drawableFromIcon(personIcon.toIcon(this))?.let { return it }
+            }
+
+        val bigPicture: Bitmap? = if (Build.VERSION.SDK_INT >= 33) {
+            n.extras.getParcelable(Notification.EXTRA_PICTURE, Bitmap::class.java)
+        } else {
+            @Suppress("DEPRECATION") n.extras.getParcelable(Notification.EXTRA_PICTURE) as? Bitmap
+        }
+        if (bigPicture != null) return bigPicture
+
+        n.getLargeIcon()?.let { icon ->
+            drawableFromIcon(icon)?.let { return it }
+        }
+
+        return null
     }
 
-}
+    private fun drawableFromIcon(icon: Icon): Bitmap? {
+        val drawable = try { icon.loadDrawable(this) } catch (_: Throwable) { null } ?: return null
+        return drawableToBitmap(drawable)
+    }
 
-private inline fun <reified T : android.os.Parcelable> Bundle.getParcelableCompat(key: String): T? {
-    return if (Build.VERSION.SDK_INT >= 33) getParcelable(key, T::class.java) else @Suppress("DEPRECATION") getParcelable(key)
+    private fun drawableToBitmap(drawable: Drawable): Bitmap {
+        if (drawable is BitmapDrawable && drawable.bitmap != null) return drawable.bitmap
+        val width = drawable.intrinsicWidth.coerceAtLeast(1)
+        val height = drawable.intrinsicHeight.coerceAtLeast(1)
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        drawable.setBounds(0, 0, canvas.width, canvas.height)
+        drawable.draw(canvas)
+        return bitmap
+    }
 }
