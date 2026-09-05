@@ -68,12 +68,16 @@ class MirrorNotificationListener : NotificationListenerService() {
             ?: extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()
             ?: ""
 
+        val image = extractImageBitmap(sbn)   // computed once, reused for the large icon and the chip attempt below
+
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setContentTitle(title)
             .setContentText(text)
-            .setShortCriticalText(title)   // what the collapsed pill shows — without this it defaults to a time/duration
+            // Collapsed pill content. Chip is max 96dp wide: text only renders if it fits,
+            // otherwise the system falls back to icon-only — keep this short.
+            .setShortCriticalText(shortChipText(text, title))
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setOngoing(true)
             .setAutoCancel(false)
@@ -82,7 +86,7 @@ class MirrorNotificationListener : NotificationListenerService() {
             .setWhen(n.`when`)
             .setShowWhen(true)
             .setContentIntent(n.contentIntent)
-            .setLargeIcon(extractImageBitmap(sbn) ?: appIconBitmap(sbn.packageName))
+            .setLargeIcon(image ?: appIconBitmap(sbn.packageName))   // drives the reduced Now Bar on lock screen
             .addExtras(Bundle().apply {
                 putBoolean(EXTRA_MIRROR, true)
                 putString(EXTRA_ORIGINAL_KEY, sbn.key)
@@ -106,7 +110,14 @@ class MirrorNotificationListener : NotificationListenerService() {
         }
 
         var notification = builder.build()
-        appIcon(sbn.packageName)?.let { icon ->
+
+        // Chip/status-bar icon slot. NOTE: Android renders the small icon as a monochrome
+        // alpha-mask silhouette in the classic status bar — this is a documented platform
+        // behavior, not specific to this app. Whether One UI 8.5's Live Update pill honors
+        // full color here is unverified; this is the thing to check on-device on the S26.
+        // Falls back to the app icon if there's no image or the OS ignores it.
+        val chipIcon = image?.let { Icon.createWithBitmap(it) } ?: appIcon(sbn.packageName)
+        chipIcon?.let { icon ->
             notification = Notification.Builder.recoverBuilder(this, notification)
                 .setSmallIcon(icon)
                 .build()
@@ -170,6 +181,17 @@ class MirrorNotificationListener : NotificationListenerService() {
                 Icon.createWithBitmap(bitmap)
             }
         } catch (_: Throwable) { null }
+    }
+
+    /**
+     * The Live Update chip is at most 96dp wide and only shows text if the whole string
+     * fits (roughly: <7 chars always shown, otherwise shown only if more than half fits,
+     * else icon-only). Prefer the message text over the title per product requirement,
+     * but trim it so it actually has a chance of rendering instead of collapsing to icon-only.
+     */
+    private fun shortChipText(text: String, title: String): CharSequence {
+        val source = text.ifBlank { title }
+        return if (source.length <= 24) source else source.take(24).trimEnd() + "…"
     }
 
     private fun getAppName(pkg: String): String {
