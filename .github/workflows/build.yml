@@ -25,7 +25,14 @@ jobs:
         with:
           gradle-version: 8.13
 
+      - name: Restore debug keystore
+        run: |
+          mkdir -p "$RUNNER_TEMP/keystore"
+          echo "${{ secrets.DEBUG_KEYSTORE_B64 }}" | base64 -d > "$RUNNER_TEMP/keystore/debug.keystore"
+
       - name: Build debug APK
+        env:
+          DEBUG_KEYSTORE_PATH: ${{ runner.temp }}/keystore/debug.keystore
         run: gradle assembleDebug --no-daemon
 
       - name: Upload APK
