@@ -43,6 +43,52 @@ class MirrorNotificationListener : NotificationListenerService() {
         super.onListenerConnected()
         ready.set(true)
         createChannel()
+        // This service is not a foreground service, so Android (One UI in particular) can and
+        // does kill its process in the background. When it comes back, onListenerConnected()
+        // fires again but latestOriginalKey / allModeMirrors have been reset to empty — any
+        // mirror already on screen from before the kill is now "orphaned" in memory, so
+        // swiping it never calls cancelOriginal() and the delete sync silently breaks. Fix:
+        // rebuild the bookkeeping from what's actually posted, using the original key we
+        // already stamp into each mirror's extras, instead of trusting in-memory state that
+        // may not have survived.
+        rebuildStateFromActiveNotifications()
+    }
+
+    private fun rebuildStateFromActiveNotifications() {
+        latestOriginalKey = null
+        allModeMirrors.clear()
+
+        val all = try {
+            activeNotifications ?: return
+        } catch (_: Throwable) {
+            return
+        }
+
+        val ourMirrors = all.filter { it.packageName == packageName }
+        if (ourMirrors.isEmpty()) return
+
+        for (mirrorSbn in ourMirrors) {
+            val extras = mirrorSbn.notification.extras
+            if (!extras.getBoolean(EXTRA_MIRROR, false)) continue
+            val originalKey = extras.getString(EXTRA_ORIGINAL_KEY) ?: continue
+
+            val originalStillPosted = all.any { it.key == originalKey }
+            if (!originalStillPosted) {
+                // The original disappeared while this service's process was dead, so we never
+                // got the removal event for it. Don't leave a stale mirror behind.
+                cancelMirror(mirrorSbn.id)
+                continue
+            }
+
+            if (mirrorSbn.id == MIRROR_ID) {
+                latestOriginalKey = originalKey
+            } else {
+                allModeMirrors[originalKey] = mirrorSbn.id
+                if (mirrorSbn.id >= nextAllModeMirrorId) {
+                    nextAllModeMirrorId = mirrorSbn.id + 1
+                }
+            }
+        }
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
