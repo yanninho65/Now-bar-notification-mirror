@@ -112,11 +112,19 @@ class MirrorNotificationListener : NotificationListenerService() {
     private fun mirror(sbn: StatusBarNotification, mirrorId: Int) {
         val n = sbn.notification
         val extras = n.extras
-        val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.takeIf { it.isNotBlank() }
+        val rawTitle = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.takeIf { it.isNotBlank() }
             ?: getAppName(sbn.packageName)
-        val text = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()
+        val rawText = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()
             ?: extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()
             ?: ""
+
+        // Some apps put the more useful string in the title rather than the text (e.g. a
+        // price alert app: title = "AAPL +5%", text = generic body copy). shortChipText()
+        // below prefers `text` for the collapsed pill, so swapping here is what actually
+        // puts the title in the pill for those apps.
+        val invert = AppMirrorPrefs.getInvertTitleText(applicationContext, sbn.packageName)
+        val title = if (invert) rawText.ifBlank { rawTitle } else rawTitle
+        val text = if (invert) rawTitle else rawText
 
         val image = extractImageBitmap(sbn)   // computed once, reused for the large icon and the chip attempt below
 
