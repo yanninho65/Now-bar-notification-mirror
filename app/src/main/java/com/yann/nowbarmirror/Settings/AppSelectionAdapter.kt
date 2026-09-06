@@ -7,6 +7,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
+import android.widget.CheckBox
 import android.widget.ImageView
 import android.widget.Spinner
 import android.widget.TextView
@@ -30,6 +31,7 @@ class AppSelectionAdapter(
         val icon: ImageView = view.findViewById(R.id.app_icon)
         val label: TextView = view.findViewById(R.id.app_label)
         val modeSpinner: Spinner = view.findViewById(R.id.mode_spinner)
+        val invertCheckbox: CheckBox = view.findViewById(R.id.invert_checkbox)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
@@ -63,6 +65,14 @@ class AppSelectionAdapter(
                 }
                 override fun onNothingSelected(parent: AdapterView<*>?) = Unit
             }
+        }
+
+        // Same detach/restore/reattach dance as the spinner above, so restoring the saved
+        // value doesn't immediately re-trigger a write.
+        holder.invertCheckbox.setOnCheckedChangeListener(null)
+        holder.invertCheckbox.isChecked = AppMirrorPrefs.getInvertTitleText(context, app.packageName)
+        holder.invertCheckbox.setOnCheckedChangeListener { _, isChecked ->
+            AppMirrorPrefs.setInvertTitleText(context, app.packageName, isChecked)
         }
     }
 }

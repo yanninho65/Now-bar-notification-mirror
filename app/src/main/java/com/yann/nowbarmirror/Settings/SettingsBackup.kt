@@ -17,10 +17,13 @@ object SettingsBackup {
         AppMirrorPrefs.getConfiguredPackages(context).forEach { (pkg, mode) ->
             modes.put(pkg, mode.name)
         }
+        val inverted = org.json.JSONArray()
+        AppMirrorPrefs.getInvertedPackages(context).forEach { inverted.put(it) }
         return JSONObject().apply {
             put("format_version", FORMAT_VERSION)
             put("service_enabled", ServicePrefs.isEnabled(context))
             put("modes", modes)
+            put("invert_title_text", inverted)
         }.toString(2)
     }
 
@@ -42,6 +45,17 @@ object SettingsBackup {
                 MirrorMode.NONE
             }
             AppMirrorPrefs.setMode(context, pkg, mode)
+        }
+
+        // Same clear-then-restore approach as the modes above, so a package no longer
+        // listed as inverted in the backup doesn't keep its old flag.
+        AppMirrorPrefs.getInvertedPackages(context).forEach { pkg ->
+            AppMirrorPrefs.setInvertTitleText(context, pkg, false)
+        }
+        root.optJSONArray("invert_title_text")?.let { inverted ->
+            for (i in 0 until inverted.length()) {
+                AppMirrorPrefs.setInvertTitleText(context, inverted.getString(i), true)
+            }
         }
 
         if (root.has("service_enabled")) {
