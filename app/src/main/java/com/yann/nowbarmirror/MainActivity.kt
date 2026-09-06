@@ -8,9 +8,12 @@ import android.provider.Settings
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import com.yann.nowbarmirror.settings.AppSelectionActivity
 
 class MainActivity : AppCompatActivity() {
@@ -19,6 +22,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(48, 48, 48, 48)
@@ -56,6 +60,22 @@ class MainActivity : AppCompatActivity() {
         layout.addView(appSelection)
         layout.addView(status)
         setContentView(layout)
+
+        // targetSdk 36 forces edge-to-edge: content draws behind the status/nav bars by
+        // default. Without this, the title (and on some screens a top control) ends up
+        // hidden under the status bar. Add the system bar insets on top of the base padding.
+        val basePadding = 48
+        ViewCompat.setOnApplyWindowInsetsListener(layout) { view, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            view.setPadding(
+                basePadding + bars.left,
+                basePadding + bars.top,
+                basePadding + bars.right,
+                basePadding + bars.bottom
+            )
+            insets
+        }
+
         refreshStatus()
     }
 
