@@ -21,9 +21,24 @@
         android:layout_marginStart="16dp"
         android:textSize="16sp" />
 
-    <Spinner
-        android:id="@+id/mode_spinner"
+    <LinearLayout
         android:layout_width="wrap_content"
-        android:layout_height="wrap_content" />
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:gravity="end">
+
+        <Spinner
+            android:id="@+id/mode_spinner"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content" />
+
+        <CheckBox
+            android:id="@+id/invert_checkbox"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/invert_title_text_label"
+            android:textSize="12sp" />
+
+    </LinearLayout>
 
 </LinearLayout>
