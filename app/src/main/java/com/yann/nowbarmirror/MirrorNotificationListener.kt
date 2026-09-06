@@ -219,7 +219,14 @@ class MirrorNotificationListener : NotificationListenerService() {
         // lock-screen Now Bar show the contact/notification image. Independent from the
         // large icon above, which now always shows the app icon (top-right thumbnail in
         // the expanded popup). Falls back to the app icon here too if there's no image.
-        val chipIcon = image?.let { Icon.createWithBitmap(it) } ?: appIcon(sbn.packageName)
+        val chipIcon = image?.let { bmp ->
+            // Same reasoning as appIcon() below: without this, a plain createWithBitmap() photo
+            // is treated as a "legacy" square icon, shrunk into the adaptive safe zone and given
+            // a synthesized background plate (usually white) to fill the rest of the circle.
+            // The photo is already full-bleed, so telling the OS it's adaptive lets it fill the
+            // whole circle with no background showing through.
+            if (Build.VERSION.SDK_INT >= 26) Icon.createWithAdaptiveBitmap(bmp) else Icon.createWithBitmap(bmp)
+        } ?: appIcon(sbn.packageName)
         chipIcon?.let { icon ->
             notification = Notification.Builder.recoverBuilder(this, notification)
                 .setSmallIcon(icon)
