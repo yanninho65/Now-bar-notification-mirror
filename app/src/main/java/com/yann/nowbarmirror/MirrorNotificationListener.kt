@@ -306,12 +306,13 @@ class MirrorNotificationListener : NotificationListenerService() {
 
         // The lock-screen widget mirrors whichever eligible notification arrived most recently
         // from ANY app configured with a mirror mode — no ALL vs LATEST distinction, unlike the
-        // system-notification mirror above. Reuses exactly the same title/text/image already
-        // computed for the mirror instead of recomputing them. Wrapped in try/catch: this is a
-        // nice-to-have on top of the core mirror, so a bug in it must never crash this service
-        // and take mirroring down with it.
+        // system-notification mirror above. pushLive() is handed n.contentIntent directly, right
+        // now, while it's still a live object — that's what makes the widget's tap open the
+        // exact conversation/article instead of just the source app. Wrapped in try/catch: this
+        // is a nice-to-have on top of the core mirror, so a bug in it must never crash this
+        // service and take mirroring down with it.
         try {
-            WidgetNotificationStore.save(
+            NowBarWidgetProvider.pushLive(
                 context = applicationContext,
                 key = sbn.key,
                 title = title,
@@ -320,7 +321,6 @@ class MirrorNotificationListener : NotificationListenerService() {
                 contentIntent = n.contentIntent,
                 image = image
             )
-            NowBarWidgetProvider.requestUpdate(applicationContext)
         } catch (t: Throwable) {
             // TEMPORARY diagnostic: surfaces the exact failure on screen since this device
             // can't be hooked up to Android Studio for logcat. Safe to remove once the widget

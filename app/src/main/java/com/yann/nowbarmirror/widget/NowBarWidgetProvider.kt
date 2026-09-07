@@ -32,18 +32,47 @@ class NowBarWidgetProvider : AppWidgetProvider() {
 
     companion object {
 
-        /** Pushes the current WidgetNotificationStore content to every placed instance. */
+        /**
+         * Called right when a notification is mirrored, with THAT notification's own live
+         * PendingIntent. This is the only reliable way to give the widget a working "open the
+         * exact conversation/article" tap: handing a PendingIntent to AppWidgetManager here goes
+         * through a real Binder transaction (same as NotificationManager.notify() already does
+         * for the system-notification mirror), which is what actually preserves it — trying to
+         * save and later reconstruct a PendingIntent from SharedPreferences does not.
+         */
+        fun pushLive(
+            context: Context,
+            key: String,
+            title: String,
+            text: String,
+            packageName: String,
+            contentIntent: PendingIntent?,
+            image: Bitmap?
+        ) {
+            WidgetNotificationStore.save(context, key, title, text, packageName, image)
+            pushToAllWidgets(context, buildViews(context, liveContentIntent = contentIntent))
+        }
+
+        /**
+         * Rebuilds and pushes from whatever WidgetNotificationStore currently holds, with no
+         * live PendingIntent available (used when just clearing the widget, refreshing after a
+         * staleness check, or when the system calls onUpdate() independently of any specific
+         * notification event). The tap falls back to opening the source app in that case.
+         */
         fun requestUpdate(context: Context) {
+            pushToAllWidgets(context, buildViews(context))
+        }
+
+        private fun pushToAllWidgets(context: Context, views: RemoteViews) {
             val manager = AppWidgetManager.getInstance(context)
             val ids = manager.getAppWidgetIds(ComponentName(context, NowBarWidgetProvider::class.java))
             if (ids.isEmpty()) return
-            val views = buildViews(context)
             ids.forEach { id -> manager.updateAppWidget(id, views) }
         }
 
-        private fun buildViews(context: Context): RemoteViews {
+        private fun buildViews(context: Context, liveContentIntent: PendingIntent? = null): RemoteViews {
             return try {
-                buildViewsUnsafe(context)
+                buildViewsUnsafe(context, liveContentIntent)
             } catch (t: Throwable) {
                 // TEMPORARY diagnostic: surfaces the exact failure on screen since this device
                 // can't be hooked up to Android Studio for logcat. Safe to remove once the
@@ -68,14 +97,10 @@ class NowBarWidgetProvider : AppWidgetProvider() {
             return views
         }
 
-        private fun buildViewsUnsafe(context: Context): RemoteViews {
+        private fun buildViewsUnsafe(context: Context, liveContentIntent: PendingIntent?): RemoteViews {
+            val data = WidgetNotificationStore.get(context) ?: return emptyViews(context)
+
             val views = RemoteViews(context.packageName, R.layout.widget_now_bar)
-            val data = WidgetNotificationStore.get(context)
-
-            if (data == null) {
-                return emptyViews(context)
-            }
-
             views.setTextViewText(R.id.widget_title, data.title)
             views.setTextViewText(R.id.widget_text, data.text)
 
@@ -97,7 +122,7 @@ class NowBarWidgetProvider : AppWidgetProvider() {
             views.setViewVisibility(R.id.widget_dismiss, View.VISIBLE)
             views.setOnClickPendingIntent(R.id.widget_dismiss, dismissPendingIntent(context, data.key))
 
-            val openIntent = data.contentIntent ?: launchAppPendingIntent(context, data.packageName)
+            val openIntent = liveContentIntent ?: launchAppPendingIntent(context, data.packageName)
             if (openIntent != null) {
                 views.setOnClickPendingIntent(R.id.widget_root, openIntent)
             }
@@ -119,9 +144,9 @@ class NowBarWidgetProvider : AppWidgetProvider() {
         }
 
         /**
-         * Best-effort fallback for the rare case where there's no restorable "open" PendingIntent
-         * (e.g. it couldn't be reconstructed after a process restart): opens the source app
-         * itself rather than leaving the tap dead.
+         * Fallback used whenever there's no live PendingIntent to attach (i.e. every render
+         * that isn't happening right at the moment a notification was posted): opens the
+         * source app itself rather than leaving the tap dead.
          */
         private fun launchAppPendingIntent(context: Context, packageName: String): PendingIntent? {
             val launchIntent = context.packageManager.getLaunchIntentForPackage(packageName) ?: return null

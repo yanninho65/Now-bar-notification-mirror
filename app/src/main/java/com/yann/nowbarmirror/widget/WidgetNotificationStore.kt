@@ -1,11 +1,7 @@
 package com.yann.nowbarmirror.widget
 
-import android.app.PendingIntent
 import android.content.Context
 import android.graphics.Bitmap
-import android.os.Build
-import android.os.Parcel
-import android.util.Base64
 import java.io.File
 import java.io.FileOutputStream
 
@@ -16,6 +12,15 @@ import java.io.FileOutputStream
  * mirror in MirrorNotificationListener). Survives the listener service's process being killed
  * and restarted, since the widget can be tapped or dismissed at any time independently of
  * whether the app is currently running.
+ *
+ * Deliberately does NOT try to persist the notification's "open" PendingIntent here. A
+ * PendingIntent's real state lives in the system process, and while it can be handed off
+ * correctly through an actual Binder transaction (e.g. AppWidgetManager.updateAppWidget(),
+ * exactly like NotificationManager.notify() already does for the system-notification mirror),
+ * round-tripping it through Parcel.marshall()/unmarshall() into SharedPreferences and back does
+ * NOT reliably reconstruct a working one — that was the earlier bug where the widget's tap
+ * always fell back to opening the source app instead of the exact conversation/article. See
+ * NowBarWidgetProvider.pushLive(), which is given the live PendingIntent directly instead.
  */
 object WidgetNotificationStore {
 
@@ -24,7 +29,6 @@ object WidgetNotificationStore {
     private const val KEY_TITLE = "title"
     private const val KEY_TEXT = "text"
     private const val KEY_PACKAGE = "package"
-    private const val KEY_CONTENT_INTENT = "content_intent"
     private const val IMAGE_FILE_NAME = "widget_notification_image.png"
 
     data class Data(
@@ -32,7 +36,6 @@ object WidgetNotificationStore {
         val title: String,
         val text: String,
         val packageName: String,
-        val contentIntent: PendingIntent?,
         val imageFile: File?
     )
 
@@ -47,7 +50,6 @@ object WidgetNotificationStore {
         title: String,
         text: String,
         packageName: String,
-        contentIntent: PendingIntent?,
         image: Bitmap?
     ) {
         val file = imageFile(context)
@@ -66,15 +68,6 @@ object WidgetNotificationStore {
             putString(KEY_TITLE, title)
             putString(KEY_TEXT, text)
             putString(KEY_PACKAGE, packageName)
-            // Marshalling can fail in edge cases (e.g. an unusual PendingIntent shape) — never
-            // let that abort saving the rest (title/text/image), which is still useful on its
-            // own even without a restorable "open" action.
-            val marshalled = try {
-                contentIntent?.let(::marshall)
-            } catch (_: Throwable) {
-                null
-            }
-            if (marshalled != null) putString(KEY_CONTENT_INTENT, marshalled) else remove(KEY_CONTENT_INTENT)
             apply()
         }
     }
@@ -90,46 +83,7 @@ object WidgetNotificationStore {
         val pkg = p.getString(KEY_PACKAGE, null) ?: return null
         val title = p.getString(KEY_TITLE, "") ?: ""
         val text = p.getString(KEY_TEXT, "") ?: ""
-        val contentIntent = p.getString(KEY_CONTENT_INTENT, null)?.let(::unmarshall)
         val file = imageFile(context).takeIf { it.exists() }
-        return Data(key, title, text, pkg, contentIntent, file)
-    }
-
-    /**
-     * PendingIntents can't be serialized to plain SharedPreferences values directly, but they
-     * are Parcelable — and unlike most Parcelables, their real state lives in the system process
-     * (ActivityManagerService), not in ours. Marshalling one to bytes and unmarshalling it back
-     * later, even from a freshly restarted process, restores a working PendingIntent as long as
-     * the device hasn't rebooted since it was created and the source app is still installed.
-     * That's what lets the widget's "open" tap keep working after this app's own process has
-     * been killed and restarted by the system in the background.
-     */
-    private fun marshall(pendingIntent: PendingIntent): String {
-        val parcel = Parcel.obtain()
-        return try {
-            parcel.writeParcelable(pendingIntent, 0)
-            Base64.encodeToString(parcel.marshall(), Base64.NO_WRAP)
-        } finally {
-            parcel.recycle()
-        }
-    }
-
-    private fun unmarshall(encoded: String): PendingIntent? {
-        val parcel = Parcel.obtain()
-        return try {
-            val bytes = Base64.decode(encoded, Base64.NO_WRAP)
-            parcel.unmarshall(bytes, 0, bytes.size)
-            parcel.setDataPosition(0)
-            if (Build.VERSION.SDK_INT >= 33) {
-                parcel.readParcelable(PendingIntent::class.java.classLoader, PendingIntent::class.java)
-            } else {
-                @Suppress("DEPRECATION")
-                parcel.readParcelable(PendingIntent::class.java.classLoader)
-            }
-        } catch (_: Throwable) {
-            null
-        } finally {
-            parcel.recycle()
-        }
+        return Data(key, title, text, pkg, file)
     }
 }
