@@ -74,6 +74,13 @@ class AppSelectionActivity : AppCompatActivity() {
             }
         }
 
+        findViewById<Switch>(R.id.latest_mode_fallback_switch).apply {
+            isChecked = LatestModePrefs.isFallbackEnabled(this@AppSelectionActivity)
+            setOnCheckedChangeListener { _: CompoundButton, isChecked: Boolean ->
+                LatestModePrefs.setFallbackEnabled(this@AppSelectionActivity, isChecked)
+            }
+        }
+
         findViewById<Button>(R.id.export_button).setOnClickListener {
             exportLauncher.launch("nowbarmirror-settings.json")
         }

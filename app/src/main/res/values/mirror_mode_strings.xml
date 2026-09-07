@@ -10,6 +10,7 @@
     </string-array>
 
     <string name="service_enabled_label">Service actif</string>
+    <string name="latest_mode_fallback_label">Revenir à la précédente après suppression</string>
     <string name="export_settings">Exporter</string>
     <string name="import_settings">Importer</string>
     <string name="export_success">Réglages exportés</string>

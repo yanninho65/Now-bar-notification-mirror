@@ -4,9 +4,9 @@ import android.content.Context
 import org.json.JSONObject
 
 /**
- * Serializes the per-app mirror modes (and the enabled/disabled switch) to a small JSON
- * document, and restores them from one. Uses org.json (built into Android) so no extra
- * dependency is needed.
+ * Serializes the per-app mirror modes (and the enabled/disabled and fallback switches) to a
+ * small JSON document, and restores them from one. Uses org.json (built into Android) so no
+ * extra dependency is needed.
  */
 object SettingsBackup {
 
@@ -22,6 +22,7 @@ object SettingsBackup {
         return JSONObject().apply {
             put("format_version", FORMAT_VERSION)
             put("service_enabled", ServicePrefs.isEnabled(context))
+            put("latest_mode_fallback", LatestModePrefs.isFallbackEnabled(context))
             put("modes", modes)
             put("invert_title_text", inverted)
         }.toString(2)
@@ -60,6 +61,9 @@ object SettingsBackup {
 
         if (root.has("service_enabled")) {
             ServicePrefs.setEnabled(context, root.getBoolean("service_enabled"))
+        }
+        if (root.has("latest_mode_fallback")) {
+            LatestModePrefs.setFallbackEnabled(context, root.getBoolean("latest_mode_fallback"))
         }
     }
 }

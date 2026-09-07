@@ -16,6 +16,7 @@ import android.service.notification.NotificationListenerService.RankingMap
 import android.service.notification.StatusBarNotification
 import androidx.core.app.NotificationCompat
 import com.yann.nowbarmirror.settings.AppMirrorPrefs
+import com.yann.nowbarmirror.settings.LatestModePrefs
 import com.yann.nowbarmirror.settings.MirrorMode
 import com.yann.nowbarmirror.settings.ServicePrefs
 import java.util.concurrent.atomic.AtomicBoolean
@@ -39,6 +40,12 @@ class MirrorNotificationListener : NotificationListenerService() {
     private val allModeMirrors = mutableMapOf<String, Int>()
     private var nextAllModeMirrorId = ALL_MODE_ID_BASE
 
+    // LATEST mode: every currently active (not-yet-removed) original from a LATEST-mode app,
+    // kept in insertion order so the last entry is always the most recent -> this is the
+    // fallback queue used to promote the next-most-recent one when the current mirror or its
+    // original gets dismissed, instead of just clearing the shared slot.
+    private val latestModeActive = LinkedHashMap<String, StatusBarNotification>()
+
     override fun onListenerConnected() {
         super.onListenerConnected()
         ready.set(true)
@@ -57,12 +64,25 @@ class MirrorNotificationListener : NotificationListenerService() {
     private fun rebuildStateFromActiveNotifications() {
         latestOriginalKey = null
         allModeMirrors.clear()
+        latestModeActive.clear()
 
         val all = try {
             activeNotifications ?: return
         } catch (_: Throwable) {
             return
         }
+
+        // Rebuild the LATEST-mode fallback queue from every currently posted notification
+        // belonging to an app set to "Dernière notif" (same eligibility filters as
+        // onNotificationPosted), oldest -> newest, so a swipe right after a process restart
+        // still has the right candidate to promote.
+        all.asSequence()
+            .filter { it.packageName != packageName }
+            .filter { !it.isOngoing }
+            .filter { it.notification.flags and Notification.FLAG_GROUP_SUMMARY == 0 }
+            .filter { AppMirrorPrefs.getMode(applicationContext, it.packageName) == MirrorMode.LATEST }
+            .sortedBy { it.postTime }
+            .forEach { latestModeActive[it.key] = it }
 
         val ourMirrors = all.filter { it.packageName == packageName }
         if (ourMirrors.isEmpty()) return
@@ -106,6 +126,10 @@ class MirrorNotificationListener : NotificationListenerService() {
                 mirror(sbn, mirrorId)
             }
             MirrorMode.LATEST -> {
+                // Remove-then-reinsert bumps this key to the end of the queue on an update
+                // (same original key reposted), so insertion order always tracks recency.
+                latestModeActive.remove(sbn.key)
+                latestModeActive[sbn.key] = sbn
                 latestOriginalKey = sbn.key
                 mirror(sbn, MIRROR_ID)
             }
@@ -133,8 +157,15 @@ class MirrorNotificationListener : NotificationListenerService() {
             if (!userDismissed) return
 
             if (sbn.id == MIRROR_ID) {
-                latestOriginalKey?.let { cancelOriginal(it) }
+                // User swiped the shared slot: cancel the original that was showing in it,
+                // drop it from the fallback queue, then promote whatever is now the most
+                // recent survivor instead of leaving the slot empty.
+                latestOriginalKey?.let { key ->
+                    cancelOriginal(key)
+                    latestModeActive.remove(key)
+                }
                 latestOriginalKey = null
+                promoteNextLatestMode()
             } else {
                 val originalKey = allModeMirrors.entries.firstOrNull { it.value == sbn.id }?.key
                 if (originalKey != null) {
@@ -145,14 +176,36 @@ class MirrorNotificationListener : NotificationListenerService() {
             return
         }
 
-        // The original notification itself was removed (by its app, the user, whatever reason)
-        // -> drop its mirror too, if it currently has one.
-        if (sbn.key == latestOriginalKey) {
-            cancelMirror(MIRROR_ID)
-            latestOriginalKey = null
+        // The original notification itself was removed (by its app, the user, whatever reason).
+        if (latestModeActive.remove(sbn.key) != null) {
+            // It belonged to the LATEST-mode queue. If it was the one currently shown in the
+            // shared slot, promote the next-most-recent survivor; if it wasn't (e.g. it was
+            // sitting in the shade behind the current mirror and got swiped on its own), just
+            // drop it from the queue and leave the current mirror untouched.
+            if (sbn.key == latestOriginalKey) {
+                latestOriginalKey = null
+                promoteNextLatestMode()
+            }
             return
         }
         allModeMirrors.remove(sbn.key)?.let { cancelMirror(it) }
+    }
+
+    /**
+     * Re-posts the shared LATEST-mode slot with whatever is now the most recent entry left in
+     * the fallback queue, or clears the slot if the queue is empty or the option is turned off.
+     * Called whenever the currently-mirrored original (or its mirror) is dismissed.
+     */
+    private fun promoteNextLatestMode() {
+        val next = latestModeActive.entries.lastOrNull()
+        if (next != null && LatestModePrefs.isFallbackEnabled(applicationContext)) {
+            latestOriginalKey = next.key
+            mirror(next.value, MIRROR_ID)
+        } else {
+            // Option disabled, or nothing left to fall back to: clear the slot, same as the
+            // original behavior before this option existed.
+            cancelMirror(MIRROR_ID)
+        }
     }
 
     private fun mirror(sbn: StatusBarNotification, mirrorId: Int) {
