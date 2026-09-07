@@ -16,6 +16,7 @@ import android.service.notification.NotificationListenerService
 import android.service.notification.NotificationListenerService.RankingMap
 import android.service.notification.StatusBarNotification
 import androidx.core.app.NotificationCompat
+import android.widget.Toast
 import com.yann.nowbarmirror.settings.AppMirrorPrefs
 import com.yann.nowbarmirror.settings.LatestModePrefs
 import com.yann.nowbarmirror.settings.MirrorMode
@@ -91,9 +92,14 @@ class MirrorNotificationListener : NotificationListenerService() {
             // Clear the widget right away instead of waiting for the onNotificationRemoved
             // round-trip, so the tap always feels instant even if cancelOriginal() above is
             // deferred (not yet connected) or silently no-ops (original already gone).
-            if (key != null && WidgetNotificationStore.get(applicationContext)?.key == key) {
-                WidgetNotificationStore.clear(applicationContext)
-                NowBarWidgetProvider.requestUpdate(applicationContext)
+            try {
+                if (key != null && WidgetNotificationStore.get(applicationContext)?.key == key) {
+                    WidgetNotificationStore.clear(applicationContext)
+                    NowBarWidgetProvider.requestUpdate(applicationContext)
+                }
+            } catch (_: Throwable) {
+                // The widget is a nice-to-have on top of the core mirror — never let a failure
+                // here take down this service.
             }
             stopSelf(startId)
             return START_NOT_STICKY
@@ -128,11 +134,16 @@ class MirrorNotificationListener : NotificationListenerService() {
         // notification that's no longer posted (removed while this process was dead), there
         // will never be an onNotificationRemoved callback for it — clear it explicitly instead
         // of leaving a dismiss button on screen that dismisses nothing.
-        WidgetNotificationStore.get(applicationContext)?.let { widgetData ->
-            if (all.none { it.key == widgetData.key }) {
-                WidgetNotificationStore.clear(applicationContext)
-                NowBarWidgetProvider.requestUpdate(applicationContext)
+        try {
+            WidgetNotificationStore.get(applicationContext)?.let { widgetData ->
+                if (all.none { it.key == widgetData.key }) {
+                    WidgetNotificationStore.clear(applicationContext)
+                    NowBarWidgetProvider.requestUpdate(applicationContext)
+                }
             }
+        } catch (_: Throwable) {
+            // The widget is a nice-to-have on top of the core mirror — never let a failure
+            // here take down this service.
         }
 
         val ourMirrors = all.filter { it.packageName == packageName }
@@ -230,11 +241,16 @@ class MirrorNotificationListener : NotificationListenerService() {
         // The widget shows whichever eligible notification was mirrored most recently,
         // decoupled from ALL vs LATEST — clear it whenever ITS specific original disappears,
         // regardless of which mirror-mode branch below ends up handling the removal.
-        WidgetNotificationStore.get(applicationContext)?.let { widgetData ->
-            if (widgetData.key == sbn.key) {
-                WidgetNotificationStore.clear(applicationContext)
-                NowBarWidgetProvider.requestUpdate(applicationContext)
+        try {
+            WidgetNotificationStore.get(applicationContext)?.let { widgetData ->
+                if (widgetData.key == sbn.key) {
+                    WidgetNotificationStore.clear(applicationContext)
+                    NowBarWidgetProvider.requestUpdate(applicationContext)
+                }
             }
+        } catch (_: Throwable) {
+            // The widget is a nice-to-have on top of the core mirror — never let a failure
+            // here take down this service.
         }
 
         // The original notification itself was removed (by its app, the user, whatever reason).
@@ -291,17 +307,30 @@ class MirrorNotificationListener : NotificationListenerService() {
         // The lock-screen widget mirrors whichever eligible notification arrived most recently
         // from ANY app configured with a mirror mode — no ALL vs LATEST distinction, unlike the
         // system-notification mirror above. Reuses exactly the same title/text/image already
-        // computed for the mirror instead of recomputing them.
-        WidgetNotificationStore.save(
-            context = applicationContext,
-            key = sbn.key,
-            title = title,
-            text = text,
-            packageName = sbn.packageName,
-            contentIntent = n.contentIntent,
-            image = image
-        )
-        NowBarWidgetProvider.requestUpdate(applicationContext)
+        // computed for the mirror instead of recomputing them. Wrapped in try/catch: this is a
+        // nice-to-have on top of the core mirror, so a bug in it must never crash this service
+        // and take mirroring down with it.
+        try {
+            WidgetNotificationStore.save(
+                context = applicationContext,
+                key = sbn.key,
+                title = title,
+                text = text,
+                packageName = sbn.packageName,
+                contentIntent = n.contentIntent,
+                image = image
+            )
+            NowBarWidgetProvider.requestUpdate(applicationContext)
+        } catch (t: Throwable) {
+            // TEMPORARY diagnostic: surfaces the exact failure on screen since this device
+            // can't be hooked up to Android Studio for logcat. Safe to remove once the widget
+            // update path is confirmed stable.
+            Toast.makeText(
+                applicationContext,
+                "Widget: ${t.javaClass.simpleName}: ${t.message}",
+                Toast.LENGTH_LONG
+            ).show()
+        }
 
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_dialog_info)

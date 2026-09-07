@@ -18,6 +18,7 @@ import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import android.view.View
 import android.widget.RemoteViews
+import android.widget.Toast
 import com.yann.nowbarmirror.MirrorNotificationListener
 import com.yann.nowbarmirror.R
 
@@ -41,16 +42,38 @@ class NowBarWidgetProvider : AppWidgetProvider() {
         }
 
         private fun buildViews(context: Context): RemoteViews {
+            return try {
+                buildViewsUnsafe(context)
+            } catch (t: Throwable) {
+                // TEMPORARY diagnostic: surfaces the exact failure on screen since this device
+                // can't be hooked up to Android Studio for logcat. Safe to remove once the
+                // widget rendering path is confirmed stable — until then, a fallback empty
+                // widget is returned so this can never crash the shared app process.
+                Toast.makeText(
+                    context,
+                    "Widget: ${t.javaClass.simpleName}: ${t.message}",
+                    Toast.LENGTH_LONG
+                ).show()
+                emptyViews(context)
+            }
+        }
+
+        private fun emptyViews(context: Context): RemoteViews {
+            val views = RemoteViews(context.packageName, R.layout.widget_now_bar)
+            views.setTextViewText(R.id.widget_title, context.getString(R.string.widget_empty_title))
+            views.setTextViewText(R.id.widget_text, "")
+            views.setImageViewResource(R.id.widget_app_icon, R.drawable.ic_stat_mirror)
+            views.setViewVisibility(R.id.widget_image, View.GONE)
+            views.setViewVisibility(R.id.widget_dismiss, View.GONE)
+            return views
+        }
+
+        private fun buildViewsUnsafe(context: Context): RemoteViews {
             val views = RemoteViews(context.packageName, R.layout.widget_now_bar)
             val data = WidgetNotificationStore.get(context)
 
             if (data == null) {
-                views.setTextViewText(R.id.widget_title, context.getString(R.string.widget_empty_title))
-                views.setTextViewText(R.id.widget_text, "")
-                views.setImageViewResource(R.id.widget_app_icon, R.drawable.ic_stat_mirror)
-                views.setViewVisibility(R.id.widget_image, View.GONE)
-                views.setViewVisibility(R.id.widget_dismiss, View.GONE)
-                return views
+                return emptyViews(context)
             }
 
             views.setTextViewText(R.id.widget_title, data.title)
@@ -131,7 +154,7 @@ class NowBarWidgetProvider : AppWidgetProvider() {
 
         /** Crops [source] into a circle, matching the round chips in the reference design. */
         private fun circularBitmap(source: Bitmap): Bitmap {
-            val size = minOf(source.width, source.height)
+            val size = minOf(source.width, source.height).coerceAtLeast(1)
             val output = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
             val canvas = Canvas(output)
             val paint = Paint(Paint.ANTI_ALIAS_FLAG)

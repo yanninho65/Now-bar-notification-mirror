@@ -66,11 +66,15 @@ object WidgetNotificationStore {
             putString(KEY_TITLE, title)
             putString(KEY_TEXT, text)
             putString(KEY_PACKAGE, packageName)
-            if (contentIntent != null) {
-                putString(KEY_CONTENT_INTENT, marshall(contentIntent))
-            } else {
-                remove(KEY_CONTENT_INTENT)
+            // Marshalling can fail in edge cases (e.g. an unusual PendingIntent shape) — never
+            // let that abort saving the rest (title/text/image), which is still useful on its
+            // own even without a restorable "open" action.
+            val marshalled = try {
+                contentIntent?.let(::marshall)
+            } catch (_: Throwable) {
+                null
             }
+            if (marshalled != null) putString(KEY_CONTENT_INTENT, marshalled) else remove(KEY_CONTENT_INTENT)
             apply()
         }
     }
