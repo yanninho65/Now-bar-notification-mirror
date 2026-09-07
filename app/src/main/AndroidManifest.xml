@@ -57,5 +57,22 @@
                 android:name="android.service.notification.default_filter_types"
                 android:value="ongoing|conversations|alerting|silent" />
         </service>
+
+        <!--
+            exported="false" is enough: android.appwidget.action.APPWIDGET_UPDATE is a protected
+            system broadcast, so only the OS can send it regardless of this flag — that's also
+            what lets a lock-screen widget host like Samsung's LockStar bind and refresh this
+            widget through the normal AppWidgetHost APIs.
+        -->
+        <receiver
+            android:name=".widget.NowBarWidgetProvider"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/now_bar_widget_info" />
+        </receiver>
     </application>
 </manifest>

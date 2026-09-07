@@ -5,4 +5,6 @@
     <string name="open_settings">Notification access</string>
     <string name="service_name">Now Bar Mirror notification listener</string>
     <string name="invert_title_text_label">Titre ↔ texte</string>
+    <string name="widget_empty_title">Aucune notification</string>
+    <string name="widget_description">Affiche la dernière notification reçue, style Now Bar.</string>
 </resources>

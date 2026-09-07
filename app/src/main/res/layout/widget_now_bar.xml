@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    4x1 widget, no background by design (Yann wants it to sit directly over the lock screen
+    wallpaper via LockStar, not on a card). Layout left to right: app icon, title+text
+    (1 line + 2 lines max), notification image, small dismiss button.
+-->
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@android:color/transparent"
+    android:paddingStart="8dp"
+    android:paddingEnd="8dp"
+    android:paddingTop="4dp"
+    android:paddingBottom="4dp">
+
+    <ImageView
+        android:id="@+id/widget_app_icon"
+        android:layout_width="32dp"
+        android:layout_height="32dp"
+        android:layout_centerVertical="true"
+        android:layout_alignParentStart="true"
+        android:scaleType="centerCrop"
+        android:contentDescription="@null" />
+
+    <ImageView
+        android:id="@+id/widget_dismiss"
+        android:layout_width="22dp"
+        android:layout_height="22dp"
+        android:layout_centerVertical="true"
+        android:layout_alignParentEnd="true"
+        android:padding="4dp"
+        android:background="@drawable/widget_dismiss_background"
+        android:src="@drawable/ic_widget_dismiss"
+        android:contentDescription="@null" />
+
+    <ImageView
+        android:id="@+id/widget_image"
+        android:layout_width="32dp"
+        android:layout_height="32dp"
+        android:layout_centerVertical="true"
+        android:layout_toStartOf="@id/widget_dismiss"
+        android:layout_marginEnd="10dp"
+        android:scaleType="centerCrop"
+        android:contentDescription="@null" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_centerVertical="true"
+        android:layout_toStartOf="@id/widget_image"
+        android:layout_toEndOf="@id/widget_app_icon"
+        android:layout_marginStart="10dp"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/widget_title"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:textColor="@android:color/white"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:text="Titre de la notification" />
+
+        <TextView
+            android:id="@+id/widget_text"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:maxLines="2"
+            android:ellipsize="end"
+            android:textColor="@android:color/white"
+            android:textSize="12sp"
+            android:text="Aperçu du texte de la notification, qui peut être un peu plus long que le titre." />
+    </LinearLayout>
+
+</RelativeLayout>

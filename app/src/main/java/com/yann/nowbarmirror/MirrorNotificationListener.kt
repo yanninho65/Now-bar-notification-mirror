@@ -3,6 +3,7 @@ package com.yann.nowbarmirror
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.drawable.AdaptiveIconDrawable
@@ -19,6 +20,8 @@ import com.yann.nowbarmirror.settings.AppMirrorPrefs
 import com.yann.nowbarmirror.settings.LatestModePrefs
 import com.yann.nowbarmirror.settings.MirrorMode
 import com.yann.nowbarmirror.settings.ServicePrefs
+import com.yann.nowbarmirror.widget.NowBarWidgetProvider
+import com.yann.nowbarmirror.widget.WidgetNotificationStore
 import java.util.concurrent.atomic.AtomicBoolean
 
 class MirrorNotificationListener : NotificationListenerService() {
@@ -29,9 +32,16 @@ class MirrorNotificationListener : NotificationListenerService() {
         const val ALL_MODE_ID_BASE = 9100   // "Toutes" mirrors get their own id, allocated from here
         const val EXTRA_ORIGINAL_KEY = "mirror.original.key"
         const val EXTRA_MIRROR = "mirror.is_mirror"
+        const val ACTION_DISMISS_WIDGET = "com.yann.nowbarmirror.widget.ACTION_DISMISS"
+        const val EXTRA_DISMISS_KEY = "mirror.widget.dismiss_key"
     }
 
     private val ready = AtomicBoolean(false)
+
+    // Set by onStartCommand() when a widget dismiss arrives before onListenerConnected() has
+    // fired (e.g. this process was just woken up to handle the tap) — processed as soon as the
+    // listener is actually connected, instead of silently failing to cancel anything.
+    private var pendingDismissKey: String? = null
 
     // LATEST mode: one shared slot; whichever LATEST-mode app posted last occupies it.
     private var latestOriginalKey: String? = null
@@ -59,6 +69,36 @@ class MirrorNotificationListener : NotificationListenerService() {
         // already stamp into each mirror's extras, instead of trusting in-memory state that
         // may not have survived.
         rebuildStateFromActiveNotifications()
+        pendingDismissKey?.let { key ->
+            pendingDismissKey = null
+            cancelOriginal(key)
+        }
+    }
+
+    /**
+     * The system keeps this service bound for the notification-listener callbacks, but a bound
+     * service can also be started explicitly — that's how the widget's dismiss button reaches
+     * it: its PendingIntent (PendingIntent.getService) targets this component directly with
+     * ACTION_DISMISS_WIDGET, so the tap keeps working even if this process had been killed and
+     * needs the system to spin it back up first.
+     */
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_DISMISS_WIDGET) {
+            val key = intent.getStringExtra(EXTRA_DISMISS_KEY)
+            if (key != null) {
+                if (ready.get()) cancelOriginal(key) else pendingDismissKey = key
+            }
+            // Clear the widget right away instead of waiting for the onNotificationRemoved
+            // round-trip, so the tap always feels instant even if cancelOriginal() above is
+            // deferred (not yet connected) or silently no-ops (original already gone).
+            if (key != null && WidgetNotificationStore.get(applicationContext)?.key == key) {
+                WidgetNotificationStore.clear(applicationContext)
+                NowBarWidgetProvider.requestUpdate(applicationContext)
+            }
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
+        return super.onStartCommand(intent, flags, startId)
     }
 
     private fun rebuildStateFromActiveNotifications() {
@@ -83,6 +123,17 @@ class MirrorNotificationListener : NotificationListenerService() {
             .filter { AppMirrorPrefs.getMode(applicationContext, it.packageName) == MirrorMode.LATEST }
             .sortedBy { it.postTime }
             .forEach { latestModeActive[it.key] = it }
+
+        // Same staleness concern as the mirrors below: if the widget was pointing at a
+        // notification that's no longer posted (removed while this process was dead), there
+        // will never be an onNotificationRemoved callback for it — clear it explicitly instead
+        // of leaving a dismiss button on screen that dismisses nothing.
+        WidgetNotificationStore.get(applicationContext)?.let { widgetData ->
+            if (all.none { it.key == widgetData.key }) {
+                WidgetNotificationStore.clear(applicationContext)
+                NowBarWidgetProvider.requestUpdate(applicationContext)
+            }
+        }
 
         val ourMirrors = all.filter { it.packageName == packageName }
         if (ourMirrors.isEmpty()) return
@@ -176,6 +227,16 @@ class MirrorNotificationListener : NotificationListenerService() {
             return
         }
 
+        // The widget shows whichever eligible notification was mirrored most recently,
+        // decoupled from ALL vs LATEST — clear it whenever ITS specific original disappears,
+        // regardless of which mirror-mode branch below ends up handling the removal.
+        WidgetNotificationStore.get(applicationContext)?.let { widgetData ->
+            if (widgetData.key == sbn.key) {
+                WidgetNotificationStore.clear(applicationContext)
+                NowBarWidgetProvider.requestUpdate(applicationContext)
+            }
+        }
+
         // The original notification itself was removed (by its app, the user, whatever reason).
         if (latestModeActive.remove(sbn.key) != null) {
             // It belonged to the LATEST-mode queue. If it was the one currently shown in the
@@ -226,6 +287,21 @@ class MirrorNotificationListener : NotificationListenerService() {
         val text = if (invert) rawTitle else rawText
 
         val image = extractImageBitmap(sbn)   // computed once, reused for the large icon and the chip attempt below
+
+        // The lock-screen widget mirrors whichever eligible notification arrived most recently
+        // from ANY app configured with a mirror mode — no ALL vs LATEST distinction, unlike the
+        // system-notification mirror above. Reuses exactly the same title/text/image already
+        // computed for the mirror instead of recomputing them.
+        WidgetNotificationStore.save(
+            context = applicationContext,
+            key = sbn.key,
+            title = title,
+            text = text,
+            packageName = sbn.packageName,
+            contentIntent = n.contentIntent,
+            image = image
+        )
+        NowBarWidgetProvider.requestUpdate(applicationContext)
 
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
