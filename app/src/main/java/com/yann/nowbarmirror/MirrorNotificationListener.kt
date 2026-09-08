@@ -23,6 +23,7 @@ import com.yann.nowbarmirror.settings.MirrorMode
 import com.yann.nowbarmirror.settings.ServicePrefs
 import com.yann.nowbarmirror.settings.WidgetActionsPrefs
 import com.yann.nowbarmirror.widget.NowBarWidgetProvider
+import com.yann.nowbarmirror.widget.WidgetAction
 import com.yann.nowbarmirror.widget.WidgetNotificationStore
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -316,7 +317,7 @@ class MirrorNotificationListener : NotificationListenerService() {
                 ?.take(2)
                 ?.mapNotNull { action ->
                     val pi = action.actionIntent ?: return@mapNotNull null
-                    NowBarWidgetProvider.WidgetAction(
+                    WidgetAction(
                         label = action.title?.toString() ?: "",
                         icon = action.getIcon(),
                         pendingIntent = pi
