@@ -81,6 +81,13 @@ class AppSelectionActivity : AppCompatActivity() {
             }
         }
 
+        findViewById<Switch>(R.id.widget_actions_switch).apply {
+            isChecked = WidgetActionsPrefs.isEnabled(this@AppSelectionActivity)
+            setOnCheckedChangeListener { _: CompoundButton, isChecked: Boolean ->
+                WidgetActionsPrefs.setEnabled(this@AppSelectionActivity, isChecked)
+            }
+        }
+
         findViewById<Button>(R.id.export_button).setOnClickListener {
             exportLauncher.launch("nowbarmirror-settings.json")
         }

@@ -21,6 +21,7 @@ import com.yann.nowbarmirror.settings.AppMirrorPrefs
 import com.yann.nowbarmirror.settings.LatestModePrefs
 import com.yann.nowbarmirror.settings.MirrorMode
 import com.yann.nowbarmirror.settings.ServicePrefs
+import com.yann.nowbarmirror.settings.WidgetActionsPrefs
 import com.yann.nowbarmirror.widget.NowBarWidgetProvider
 import com.yann.nowbarmirror.widget.WidgetNotificationStore
 import java.util.concurrent.atomic.AtomicBoolean
@@ -304,6 +305,28 @@ class MirrorNotificationListener : NotificationListenerService() {
 
         val image = extractImageBitmap(sbn)   // computed once, reused for the large icon and the chip attempt below
 
+        // Up to two of the notification's own action buttons (e.g. "Reply", "Mark as read"),
+        // handed over as live PendingIntents right now while they're still valid Binder
+        // references (same reasoning as contentIntent below) -- capped at two rather than the
+        // three the system-notification mirror keeps, since the widget row has a lot less
+        // horizontal room to work with. Gated behind the setting so the widget stays exactly as
+        // compact as before for anyone who hasn't opted in.
+        val widgetActions = if (WidgetActionsPrefs.isEnabled(applicationContext)) {
+            n.actions
+                ?.take(2)
+                ?.mapNotNull { action ->
+                    val pi = action.actionIntent ?: return@mapNotNull null
+                    NowBarWidgetProvider.WidgetAction(
+                        label = action.title?.toString() ?: "",
+                        icon = action.getIcon(),
+                        pendingIntent = pi
+                    )
+                }
+                ?: emptyList()
+        } else {
+            emptyList()
+        }
+
         // The lock-screen widget mirrors whichever eligible notification arrived most recently
         // from ANY app configured with a mirror mode — no ALL vs LATEST distinction, unlike the
         // system-notification mirror above. pushLive() is handed n.contentIntent directly, right
@@ -319,7 +342,8 @@ class MirrorNotificationListener : NotificationListenerService() {
                 text = text,
                 packageName = sbn.packageName,
                 contentIntent = n.contentIntent,
-                image = image
+                image = image,
+                actions = widgetActions
             )
         } catch (t: Throwable) {
             // TEMPORARY diagnostic: surfaces the exact failure on screen since this device
