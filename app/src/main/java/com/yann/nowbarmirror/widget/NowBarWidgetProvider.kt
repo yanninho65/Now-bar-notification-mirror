@@ -25,6 +25,13 @@ import com.yann.nowbarmirror.MirrorNotificationListener
 import com.yann.nowbarmirror.R
 import com.yann.nowbarmirror.settings.WidgetActionsPrefs
 
+/** One notification action, ready to render as a small tappable icon in the widget. */
+data class WidgetAction(
+    val label: String,
+    val icon: Icon?,
+    val pendingIntent: PendingIntent
+)
+
 /**
  * Home-screen App Widget (4x1, transparent background) meant to be placed on the lock screen
  * through a third-party lock-widget host such as Samsung's LockStar. Mirrors whatever
@@ -34,13 +41,6 @@ import com.yann.nowbarmirror.settings.WidgetActionsPrefs
 class NowBarWidgetProvider : AppWidgetProvider() {
 
     companion object {
-
-        /** One notification action, ready to render as a small tappable icon in the widget. */
-        data class WidgetAction(
-            val label: String,
-            val icon: Icon?,
-            val pendingIntent: PendingIntent
-        )
 
         // Actions are deliberately NOT persisted to WidgetNotificationStore/SharedPreferences,
         // for the same reason the content PendingIntent isn't (see the class doc on
