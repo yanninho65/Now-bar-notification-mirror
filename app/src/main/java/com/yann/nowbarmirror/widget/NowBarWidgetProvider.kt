@@ -9,7 +9,6 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
-import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.PorterDuff
 import android.graphics.PorterDuffXfermode
@@ -17,7 +16,6 @@ import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
-import android.graphics.drawable.Icon
 import android.view.View
 import android.widget.RemoteViews
 import android.widget.Toast
@@ -25,10 +23,9 @@ import com.yann.nowbarmirror.MirrorNotificationListener
 import com.yann.nowbarmirror.R
 import com.yann.nowbarmirror.settings.WidgetActionsPrefs
 
-/** One notification action, ready to render as a small tappable icon in the widget. */
+/** One notification action, rendered as a small text button (the action's own label) in the widget. */
 data class WidgetAction(
     val label: String,
-    val icon: Icon?,
     val pendingIntent: PendingIntent
 )
 
@@ -162,13 +159,12 @@ class NowBarWidgetProvider : AppWidgetProvider() {
         }
 
         /**
-         * Populates up to two action buttons when the option is enabled in Settings AND we
-         * still hold live PendingIntents for THIS exact notification (see the liveActions doc
-         * above) — otherwise hides the whole row rather than showing dead buttons. Icons are
-         * force-tinted white via setColorFilter to match the rest of this widget's white,
-         * background-less style; a source app that hands over a full-color (non-template) icon
-         * here could look off, but most notification action icons are simple monochrome glyphs
-         * meant to be tinted by whoever renders them, same as the system does natively.
+         * Populates up to three text action buttons when the option is enabled in Settings AND
+         * we still hold live PendingIntents for THIS exact notification (see the liveActions
+         * doc above) — otherwise hides the whole row rather than showing dead buttons. Text
+         * (the action's own label, e.g. "Répondre") rather than an icon: most notification
+         * action icons are meant to be tinted/rendered by the system itself, so a raw icon
+         * dropped into the widget was often unreadable — the label reads reliably regardless.
          */
         private fun applyActions(context: Context, views: RemoteViews, dataKey: String) {
             val actions = if (WidgetActionsPrefs.isEnabled(context) && liveActionsKey == dataKey) {
@@ -177,21 +173,18 @@ class NowBarWidgetProvider : AppWidgetProvider() {
                 emptyList()
             }
 
-            val slots = listOf(R.id.widget_action_1 to actions.getOrNull(0), R.id.widget_action_2 to actions.getOrNull(1))
+            val slots = listOf(
+                R.id.widget_action_1 to actions.getOrNull(0),
+                R.id.widget_action_2 to actions.getOrNull(1),
+                R.id.widget_action_3 to actions.getOrNull(2)
+            )
             for ((viewId, action) in slots) {
                 if (action == null) {
                     views.setViewVisibility(viewId, View.GONE)
                     continue
                 }
                 views.setViewVisibility(viewId, View.VISIBLE)
-                val icon = action.icon
-                if (icon != null) {
-                    views.setImageViewIcon(viewId, icon)
-                } else {
-                    views.setImageViewResource(viewId, android.R.drawable.ic_menu_send)
-                }
-                views.setInt(viewId, "setColorFilter", Color.WHITE)
-                views.setContentDescription(viewId, action.label)
+                views.setTextViewText(viewId, action.label)
                 views.setOnClickPendingIntent(viewId, action.pendingIntent)
             }
 

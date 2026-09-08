@@ -306,22 +306,20 @@ class MirrorNotificationListener : NotificationListenerService() {
 
         val image = extractImageBitmap(sbn)   // computed once, reused for the large icon and the chip attempt below
 
-        // Up to two of the notification's own action buttons (e.g. "Reply", "Mark as read"),
+        // Up to three of the notification's own action buttons (e.g. "Reply", "Mark as read"),
         // handed over as live PendingIntents right now while they're still valid Binder
-        // references (same reasoning as contentIntent below) -- capped at two rather than the
-        // three the system-notification mirror keeps, since the widget row has a lot less
-        // horizontal room to work with. Gated behind the setting so the widget stays exactly as
-        // compact as before for anyone who hasn't opted in.
+        // references (same reasoning as contentIntent below) -- same cap as the
+        // system-notification mirror. Rendered as text (the action's own label) in the widget
+        // rather than an icon, and an action with no usable title is skipped rather than shown
+        // as an empty button. Gated behind the setting so the widget stays exactly as compact
+        // as before for anyone who hasn't opted in.
         val widgetActions = if (WidgetActionsPrefs.isEnabled(applicationContext)) {
             n.actions
-                ?.take(2)
+                ?.take(3)
                 ?.mapNotNull { action ->
                     val pi = action.actionIntent ?: return@mapNotNull null
-                    WidgetAction(
-                        label = action.title?.toString() ?: "",
-                        icon = action.getIcon(),
-                        pendingIntent = pi
-                    )
+                    val label = action.title?.toString()?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                    WidgetAction(label = label, pendingIntent = pi)
                 }
                 ?: emptyList()
         } else {

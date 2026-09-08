@@ -3,8 +3,9 @@
     4x1 widget, no background by design (Yann wants it to sit directly over the lock screen
     wallpaper via LockStar, not on a card). Two rows: the usual single line (app icon, title+text,
     notification image, dismiss button), and — only when "Actions dans le widget" is on and the
-    current notification has live action PendingIntents — a second row underneath with up to two
-    action buttons, indented to sit under the title/text rather than under the app icon.
+    current notification has live action PendingIntents — a second row underneath with up to
+    three small text buttons (the action's own label, e.g. "Répondre"), indented to sit under
+    the title/text rather than under the app icon.
 
     The actions row defaults to gone in the XML itself, so an instance where the setting is off
     (or hasn't been rebuilt since it was added) renders pixel-identical to before this option
@@ -111,23 +112,51 @@
         android:gravity="center_vertical"
         android:visibility="gone">
 
-        <ImageView
+        <TextView
             android:id="@+id/widget_action_1"
-            android:layout_width="22dp"
-            android:layout_height="22dp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
             android:layout_marginEnd="6dp"
-            android:padding="3dp"
-            android:background="@drawable/widget_dismiss_background"
-            android:scaleType="fitCenter"
+            android:paddingStart="10dp"
+            android:paddingEnd="10dp"
+            android:paddingTop="4dp"
+            android:paddingBottom="4dp"
+            android:background="@drawable/widget_action_background"
+            android:textColor="@android:color/white"
+            android:textSize="11sp"
+            android:maxLines="1"
+            android:ellipsize="end"
             android:visibility="gone" />
 
-        <ImageView
+        <TextView
             android:id="@+id/widget_action_2"
-            android:layout_width="22dp"
-            android:layout_height="22dp"
-            android:padding="3dp"
-            android:background="@drawable/widget_dismiss_background"
-            android:scaleType="fitCenter"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="6dp"
+            android:paddingStart="10dp"
+            android:paddingEnd="10dp"
+            android:paddingTop="4dp"
+            android:paddingBottom="4dp"
+            android:background="@drawable/widget_action_background"
+            android:textColor="@android:color/white"
+            android:textSize="11sp"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/widget_action_3"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:paddingStart="10dp"
+            android:paddingEnd="10dp"
+            android:paddingTop="4dp"
+            android:paddingBottom="4dp"
+            android:background="@drawable/widget_action_background"
+            android:textColor="@android:color/white"
+            android:textSize="11sp"
+            android:maxLines="1"
+            android:ellipsize="end"
             android:visibility="gone" />
 
     </LinearLayout>
