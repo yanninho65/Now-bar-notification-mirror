@@ -1,3 +1,13 @@
 <resources>
-    <style name="Theme.NowBarMirror" parent="Theme.AppCompat.DayNight.NoActionBar" />
+    <style name="Theme.NowBarMirror" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/one_ui_primary</item>
+        <item name="colorPrimaryDark">@color/one_ui_primary</item>
+        <item name="colorAccent">@color/one_ui_primary</item>
+        <item name="colorOnPrimary">@color/one_ui_on_primary</item>
+        <item name="colorSurface">@color/one_ui_surface</item>
+        <item name="android:colorBackground">@color/one_ui_background</item>
+        <item name="android:windowBackground">@color/one_ui_background</item>
+        <item name="android:textColorPrimary">@color/one_ui_text_primary</item>
+        <item name="android:textColorSecondary">@color/one_ui_text_secondary</item>
+    </style>
 </resources>

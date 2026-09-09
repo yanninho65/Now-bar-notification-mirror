@@ -7,4 +7,10 @@
     <string name="invert_title_text_label">Titre ↔ texte</string>
     <string name="widget_empty_title">Aucune notification</string>
     <string name="widget_description">Affiche la dernière notification reçue, style Now Bar.</string>
+
+    <string name="main_description">Cette app reflète la dernière notification reçue dans une notification persistante compatible Now Bar.\n\nElle nécessite l’accès aux notifications.</string>
+    <string name="allow_notification_access">Autoriser l’accès aux notifications</string>
+    <string name="allow_app_notifications">Autoriser les notifications de l’app</string>
+    <string name="status_enabled">✓ Accès aux notifications activé</string>
+    <string name="status_disabled">⚠ Accès aux notifications non activé</string>
 </resources>

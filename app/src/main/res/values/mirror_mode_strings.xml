@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_selection_title">Applications à mirrorer</string>
+    <string name="installed_apps_section_label">Applications installées</string>
 
     <!-- Order must match MirrorMode enum ordinals: NONE, LATEST, ALL -->
     <string-array name="mirror_mode_labels">
@@ -8,6 +9,11 @@
         <item>Dernière notif</item>
         <item>Toutes</item>
     </string-array>
+
+    <!-- Short labels for the segmented mode buttons -->
+    <string name="mode_button_none">Aucun</string>
+    <string name="mode_button_latest">Dernière</string>
+    <string name="mode_button_all">Toutes</string>
 
     <string name="service_enabled_label">Service actif</string>
     <string name="latest_mode_fallback_label">Revenir à la précédente après suppression</string>

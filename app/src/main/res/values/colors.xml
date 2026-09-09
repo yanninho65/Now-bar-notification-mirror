@@ -1,1 +1,19 @@
-<resources><color name="transparent">#00000000</color></resources>
+<resources>
+    <color name="transparent">#00000000</color>
+
+    <!-- One UI palette (light) -->
+    <color name="one_ui_background">#F2F2F2</color>
+    <color name="one_ui_surface">#FFFFFF</color>
+    <color name="one_ui_primary">#0B69FF</color>
+    <color name="one_ui_on_primary">#FFFFFF</color>
+    <color name="one_ui_text_primary">#1A1A1A</color>
+    <color name="one_ui_text_secondary">#6B6B6B</color>
+    <color name="one_ui_divider">#E4E4E4</color>
+    <color name="one_ui_stroke">#D6D6D6</color>
+    <color name="one_ui_row_active_bg">#E6EFFF</color>
+    <color name="one_ui_row_inactive_bg">#FFFFFF</color>
+
+    <!-- Fixed brand colors for the launcher icon (same in light and dark mode) -->
+    <color name="icon_background">#0B69FF</color>
+    <color name="icon_pill">#1C1C1E</color>
+</resources>

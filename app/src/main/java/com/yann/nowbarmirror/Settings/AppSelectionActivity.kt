@@ -6,7 +6,6 @@ import android.os.Build
 import android.os.Bundle
 import android.widget.Button
 import android.widget.CompoundButton
-import android.widget.Switch
 import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
@@ -15,6 +14,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.google.android.material.switchmaterial.SwitchMaterial
 import com.yann.nowbarmirror.R
 
 class AppSelectionActivity : AppCompatActivity() {
@@ -56,7 +56,7 @@ class AppSelectionActivity : AppCompatActivity() {
         enableEdgeToEdge()
         setContentView(R.layout.activity_app_selection)
 
-        // Same edge-to-edge fix as MainActivity: without this the "activer le service" row
+        // Same edge-to-edge fix as MainActivity: without this the title/switches row
         // (the very first view here) ends up drawn under the status bar.
         ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.root)) { view, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
@@ -67,21 +67,21 @@ class AppSelectionActivity : AppCompatActivity() {
         recyclerView = findViewById(R.id.app_list)
         recyclerView.layoutManager = LinearLayoutManager(this)
 
-        findViewById<Switch>(R.id.service_enabled_switch).apply {
+        findViewById<SwitchMaterial>(R.id.service_enabled_switch).apply {
             isChecked = ServicePrefs.isEnabled(this@AppSelectionActivity)
             setOnCheckedChangeListener { _: CompoundButton, isChecked: Boolean ->
                 ServicePrefs.setEnabled(this@AppSelectionActivity, isChecked)
             }
         }
 
-        findViewById<Switch>(R.id.latest_mode_fallback_switch).apply {
+        findViewById<SwitchMaterial>(R.id.latest_mode_fallback_switch).apply {
             isChecked = LatestModePrefs.isFallbackEnabled(this@AppSelectionActivity)
             setOnCheckedChangeListener { _: CompoundButton, isChecked: Boolean ->
                 LatestModePrefs.setFallbackEnabled(this@AppSelectionActivity, isChecked)
             }
         }
 
-        findViewById<Switch>(R.id.widget_actions_switch).apply {
+        findViewById<SwitchMaterial>(R.id.widget_actions_switch).apply {
             isChecked = WidgetActionsPrefs.isEnabled(this@AppSelectionActivity)
             setOnCheckedChangeListener { _: CompoundButton, isChecked: Boolean ->
                 WidgetActionsPrefs.setEnabled(this@AppSelectionActivity, isChecked)

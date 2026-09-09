@@ -1,44 +1,111 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/row_container"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:orientation="horizontal"
-    android:gravity="center_vertical"
-    android:paddingHorizontal="16dp"
-    android:paddingVertical="12dp">
-
-    <ImageView
-        android:id="@+id/app_icon"
-        android:layout_width="40dp"
-        android:layout_height="40dp"
-        android:contentDescription="@null" />
-
-    <TextView
-        android:id="@+id/app_label"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:layout_weight="1"
-        android:layout_marginStart="16dp"
-        android:textSize="16sp" />
+    android:orientation="vertical"
+    android:layout_marginHorizontal="16dp"
+    android:layout_marginVertical="4dp"
+    android:paddingHorizontal="14dp"
+    android:paddingVertical="12dp"
+    android:background="@drawable/bg_app_row_inactive">
 
     <LinearLayout
-        android:layout_width="wrap_content"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:gravity="end">
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
 
-        <Spinner
-            android:id="@+id/mode_spinner"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content" />
+        <ImageView
+            android:id="@+id/app_icon"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:contentDescription="@null" />
+
+        <TextView
+            android:id="@+id/app_label"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="14dp"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:textColor="@color/one_ui_text_primary"
+            android:maxLines="1"
+            android:ellipsize="end" />
 
         <CheckBox
             android:id="@+id/invert_checkbox"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="@string/invert_title_text_label"
+            android:textColor="@color/one_ui_text_secondary"
             android:textSize="12sp" />
 
     </LinearLayout>
+
+    <com.google.android.material.button.MaterialButtonToggleGroup
+        android:id="@+id/mode_toggle_group"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="10dp"
+        app:singleSelection="true"
+        app:selectionRequired="true">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_mode_none"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:layout_width="0dp"
+            android:layout_height="36dp"
+            android:layout_weight="1"
+            android:layout_marginEnd="6dp"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:paddingHorizontal="4dp"
+            android:text="@string/mode_button_none"
+            android:textAllCaps="false"
+            android:textSize="12sp"
+            android:textColor="@color/toggle_button_text"
+            app:backgroundTint="@color/toggle_button_bg"
+            app:strokeColor="@color/toggle_button_stroke"
+            app:cornerRadius="18dp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_mode_latest"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:layout_width="0dp"
+            android:layout_height="36dp"
+            android:layout_weight="1"
+            android:layout_marginEnd="6dp"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:paddingHorizontal="4dp"
+            android:text="@string/mode_button_latest"
+            android:textAllCaps="false"
+            android:textSize="12sp"
+            android:textColor="@color/toggle_button_text"
+            app:backgroundTint="@color/toggle_button_bg"
+            app:strokeColor="@color/toggle_button_stroke"
+            app:cornerRadius="18dp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_mode_all"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:layout_width="0dp"
+            android:layout_height="36dp"
+            android:layout_weight="1"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:paddingHorizontal="4dp"
+            android:text="@string/mode_button_all"
+            android:textAllCaps="false"
+            android:textSize="12sp"
+            android:textColor="@color/toggle_button_text"
+            app:backgroundTint="@color/toggle_button_bg"
+            app:strokeColor="@color/toggle_button_stroke"
+            app:cornerRadius="18dp" />
+
+    </com.google.android.material.button.MaterialButtonToggleGroup>
 
 </LinearLayout>

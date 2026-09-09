@@ -1,0 +1,27 @@
+<!--
+    Stylized "Now Bar": a dark pill/capsule (like Samsung's Live Activity bar) holding a
+    small avatar dot on the left and two content lines on the right, centered in the
+    adaptive-icon safe zone (the OS masks the 108x108 canvas down to a ~66dp centered area).
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Pill body -->
+    <path
+        android:fillColor="@color/icon_pill"
+        android:pathData="M33,43 H75 A11,11 0 0 1 86,54 A11,11 0 0 1 75,65 H33 A11,11 0 0 1 22,54 A11,11 0 0 1 33,43 Z" />
+    <!-- Avatar dot -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M36,54 m-6,0 a6,6 0 1,0 12,0 a6,6 0 1,0 -12,0" />
+    <!-- Title line -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M46,48 h28 v4 h-28 Z" />
+    <!-- Subtitle line -->
+    <path
+        android:fillColor="#CCFFFFFF"
+        android:pathData="M46,57 h20 v3 h-20 Z" />
+</vector>
