@@ -128,6 +128,7 @@ class MirrorNotificationListener : NotificationListenerService() {
             .filter { it.packageName != packageName }
             .filter { !it.isOngoing }
             .filter { it.notification.flags and Notification.FLAG_GROUP_SUMMARY == 0 }
+            .filter { !isMediaPlaybackNotification(it) }
             .filter { AppMirrorPrefs.getMode(applicationContext, it.packageName) == MirrorMode.LATEST }
             .sortedBy { it.postTime }
             .forEach { latestModeActive[it.key] = it }
@@ -183,6 +184,11 @@ class MirrorNotificationListener : NotificationListenerService() {
         // Group-summary notifications (e.g. WhatsApp's "X new messages" bundle) carry no
         // per-conversation photo or actions — skip them so they don't overwrite the real one.
         if (sbn.notification.flags and Notification.FLAG_GROUP_SUMMARY != 0) return
+        // Media-playback controls (e.g. a radio "now playing" notification) shouldn't
+        // overwrite a real mirror just because the source app also sends normal alerts
+        // (e.g. France Info: articles vs. its radio player). Some apps don't mark this
+        // notification ongoing, so isOngoing() above can't be relied on alone.
+        if (isMediaPlaybackNotification(sbn)) return
 
         when (AppMirrorPrefs.getMode(applicationContext, sbn.packageName)) {
             MirrorMode.ALL -> {
@@ -419,6 +425,20 @@ class MirrorNotificationListener : NotificationListenerService() {
         // an ALL-mode content refresh happen without ever triggering onNotificationRemoved for
         // our own package, which is the other half of the race fix above.
         getSystemService(NotificationManager::class.java).notify(mirrorId, notification)
+    }
+
+    /**
+     * True for a media-playback control notification (radio/music "now playing": play, pause,
+     * skip). This is how the system itself tells a media notification apart from an ordinary
+     * one, so it works regardless of how a given app flags (or doesn't flag) it as ongoing:
+     * - CATEGORY_TRANSPORT is the category media apps put on their playback notification, or
+     * - EXTRA_MEDIA_SESSION carries the app's MediaSession token, present on any notification
+     *   built with MediaStyle even if the app didn't also set the category above.
+     */
+    private fun isMediaPlaybackNotification(sbn: StatusBarNotification): Boolean {
+        val n = sbn.notification
+        if (n.category == Notification.CATEGORY_TRANSPORT) return true
+        return n.extras.containsKey(Notification.EXTRA_MEDIA_SESSION)
     }
 
     private fun cancelMirror(mirrorId: Int) {
