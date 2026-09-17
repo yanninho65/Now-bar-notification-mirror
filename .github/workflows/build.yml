@@ -30,13 +30,19 @@ jobs:
           mkdir -p "$RUNNER_TEMP/keystore"
           echo "${{ secrets.DEBUG_KEYSTORE_B64 }}" | base64 -d > "$RUNNER_TEMP/keystore/debug.keystore"
 
-      - name: Build debug APK
+      - name: Build debug APKs (app + wear)
         env:
           DEBUG_KEYSTORE_PATH: ${{ runner.temp }}/keystore/debug.keystore
-        run: gradle assembleDebug --no-daemon
+        run: gradle :app:assembleDebug :wear:assembleDebug --no-daemon
 
-      - name: Upload APK
+      - name: Upload phone APK
         uses: actions/upload-artifact@v4
         with:
           name: NowBarMirror-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Upload watch APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: NowBarMirror-wear-debug-apk
+          path: wear/build/outputs/apk/debug/wear-debug.apk
