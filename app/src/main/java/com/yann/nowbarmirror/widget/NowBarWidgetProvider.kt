@@ -146,12 +146,21 @@ class NowBarWidgetProvider : AppWidgetProvider() {
         // Same idea again for the "Toutes notifs" view, EXCEPT this one is additive rather than
         // fully replaced on every push (see pushToAllNotifications): unlike the Sofascore map
         // above, entries here persist across many push events (it's a history, not a
-        // recomputed-from-scratch active set), so a push only ADDS/refreshes its own key and then
-        // trims down to exactly the keys WidgetAllNotificationsStore is still keeping — an older
-        // entry's live PendingIntent survives in memory for as long as it stays in the capped
-        // history AND this process stays alive; once either drops it, the tile falls back to
-        // launchAppPendingIntent (or Sofascore's package for a SOFASCORE_MATCH entry).
+        // recomputed-from-scratch active set), so a push only ADDS/refreshes its own entry and
+        // then trims down to exactly the entries WidgetAllNotificationsStore is still keeping —
+        // an older entry's live PendingIntent survives in memory for as long as it stays in the
+        // capped history AND this process stays alive; once either drops it, the tile falls back
+        // to launchAppPendingIntent (or Sofascore's package for a SOFASCORE_MATCH entry).
+        //
+        // Keyed by [allNotifEntryId] (key + postTimeMillis), NOT by key alone (fixed 17/09/2026,
+        // same identity fix as WidgetAllNotificationsStore — see its class doc): several tiles
+        // can now share the same underlying notification key (a "Dernière notif"-mode app reusing
+        // its notification id across distinct items), and each one must open ITS OWN article/
+        // conversation when tapped, not whichever of them happened to push most recently.
         private var liveAllNotifIntents: Map<String, PendingIntent> = emptyMap()
+
+        /** Composite identity for [liveAllNotifIntents] — see that field's doc. */
+        private fun allNotifEntryId(key: String, postTimeMillis: Long) = "$key::$postTimeMillis"
 
         /**
          * Called right when a notification is mirrored, with THAT notification's own live
@@ -221,13 +230,16 @@ class NowBarWidgetProvider : AppWidgetProvider() {
         }
 
         /**
-         * Called by MirrorNotificationListener.mirror() for every mirrored notification (any app,
-         * ALL or LATEST mode alike) and by SofascoreNotificationListenerService.onNotificationPosted
-         * for every Sofascore notification event — see WidgetAllNotificationsStore's class doc for
-         * why both funnel into this ONE shared history rather than each having their own. Merges
-         * [entry] into the persisted history (same key = update in place, bumped to the front),
-         * then trims [liveAllNotifIntents] down to exactly the keys still kept — see that field's
-         * doc — before rebuilding whichever view is currently showing.
+         * Called by MirrorNotificationListener.mirror()/pushAllNotifsHistoryOnly() for every
+         * received notification (any app, ALL or LATEST mode alike) and by
+         * SofascoreNotificationListenerService.onNotificationPosted (plus its own listener-connect
+         * catch-up) for every Sofascore notification event — see WidgetAllNotificationsStore's
+         * class doc for why both funnel into this ONE shared history rather than each having their
+         * own. Merges [entry] into the persisted history (same (key, postTimeMillis) PAIR = update
+         * in place, bumped to the front; same key with a DIFFERENT postTimeMillis = a new tile —
+         * see WidgetAllNotificationsStore's IDENTITY section, fixed 17/09/2026), then trims
+         * [liveAllNotifIntents] down to exactly the entries still kept — see that field's doc —
+         * before rebuilding whichever view is currently showing.
          */
         fun pushToAllNotifications(context: Context, entry: AllNotifEntryPush) {
             val kept = WidgetAllNotificationsStore.push(
@@ -249,11 +261,12 @@ class NowBarWidgetProvider : AppWidgetProvider() {
                 )
             )
 
-            val keptKeys = kept.map { it.key }.toSet()
+            val entryId = allNotifEntryId(entry.key, entry.postTimeMillis)
+            val keptIds = kept.map { allNotifEntryId(it.key, it.postTimeMillis) }.toSet()
             liveAllNotifIntents = buildMap {
-                entry.contentIntent?.let { put(entry.key, it) }
-                keptKeys.forEach { k ->
-                    if (k != entry.key) liveAllNotifIntents[k]?.let { put(k, it) }
+                entry.contentIntent?.let { put(entryId, it) }
+                keptIds.forEach { id ->
+                    if (id != entryId) liveAllNotifIntents[id]?.let { put(id, it) }
                 }
             }
 
@@ -512,7 +525,7 @@ class NowBarWidgetProvider : AppWidgetProvider() {
                 } else {
                     entry.packageName
                 }
-                val openIntent = liveAllNotifIntents[entry.key]
+                val openIntent = liveAllNotifIntents[allNotifEntryId(entry.key, entry.postTimeMillis)]
                     ?: fallbackPackage?.let { launchAppPendingIntent(context, it) }
                 if (openIntent != null) {
                     views.setOnClickPendingIntent(ids.container, openIntent)

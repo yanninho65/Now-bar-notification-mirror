@@ -36,6 +36,26 @@ import java.io.FileOutputStream
  *   image+title one (see NowBarWidgetProvider.applyAllNotifs), without this store or the generic
  *   mirror listener needing to know anything about Sofascore's own parsing.
  *
+ * IDENTITY (fixed 17/09/2026 — Yann: "si plusieurs notifications ont été envoyées parmi les
+ * applications marquées comme dernière notif, seule la dernière notif apparaît [...] ce
+ * comportement ne doit être utilisé que pour la Now Bar, je veux que toutes les notifs puissent
+ * apparaître dans cette barre"): an entry's identity here is the PAIR ([PersistableEntry.key],
+ * [PersistableEntry.postTimeMillis]), NOT [PersistableEntry.key] alone. A "Dernière notif"-mode
+ * app is typically set to that mode BECAUSE it keeps a single rolling Android notification (same
+ * notification id/tag — i.e. the same [StatusBarNotification.getKey]) and just replaces its
+ * content for each new item — that's the correct, intentional behavior for the actual Now Bar
+ * mirror's shared LATEST slot (see MirrorNotificationListener), but collapsing every one of those
+ * distinct notifications into a single "Toutes notifs" tile just because they share that reused
+ * key was wrong: from Yann's point of view five different Le Monde articles are five different
+ * received notifications, and should occupy up to five of this history's slots, exactly like an
+ * "ALL"-mode app's five notifications would (those already got their own tiles, since apps in
+ * ALL mode typically use a distinct key per item). [StatusBarNotification.postTime] changes on
+ * every `notify()` call — including in-place updates to the same id — so pairing it with [key]
+ * distinguishes "a genuinely new/updated posting" (new tile) from "the exact same posting being
+ * re-pushed" (e.g. MirrorNotificationListener.rebuildStateFromActiveNotifications() re-mirroring
+ * an already-active notification on listener reconnect — same key AND same postTime, so [push]
+ * still updates that one tile in place rather than duplicating it).
+ *
  * Storage mirrors SofascoreWidgetStore (JSON in SharedPreferences for the fields, one PNG file per
  * SLOT INDEX for images) but, being a history rather than a full-replace-every-time set, [push]
  * has to merge the new entry into whatever's already persisted rather than just being handed the
@@ -95,12 +115,15 @@ object WidgetAllNotificationsStore {
         File(context.filesDir, "widget_all_notif_$slot.png")
 
     /**
-     * Merges [entry] into the currently persisted history: same [PersistableEntry.key] as an
-     * existing entry updates it in place (bumped to the front, like Sofascore's own "update in
-     * place" notifications), otherwise it's inserted as the newest. Capped to [MAX_SLOTS],
-     * dropping the oldest beyond that. Returns the resulting list (already in the same order
-     * [get] would return) so the caller (NowBarWidgetProvider.pushToAllNotifications) can trim its
-     * in-memory PendingIntent map to exactly the keys still kept, without a second read.
+     * Merges [entry] into the currently persisted history: the SAME (key, postTimeMillis) PAIR as
+     * an existing entry updates it in place (bumped to the front — this is the "re-pushing the
+     * exact same posting" case, see the class doc's IDENTITY section), otherwise it's inserted as
+     * a NEW tile — even when [PersistableEntry.key] matches an existing entry's, since a
+     * "Dernière notif"-mode app reusing its notification id for a new item is a genuinely new
+     * received notification here, not an update of the old one. Capped to [MAX_SLOTS], dropping
+     * the oldest beyond that. Returns the resulting list (already in the same order [get] would
+     * return) so the caller (NowBarWidgetProvider.pushToAllNotifications) can trim its in-memory
+     * PendingIntent map to exactly the (key, postTimeMillis) pairs still kept, without a second read.
      */
     fun push(context: Context, entry: PersistableEntry): List<Data> {
         val existing = get(context)
@@ -108,7 +131,7 @@ object WidgetAllNotificationsStore {
         val merged = buildList {
             add(entry)
             existing.forEach { data ->
-                if (data.key != entry.key) {
+                if (!(data.key == entry.key && data.postTimeMillis == entry.postTimeMillis)) {
                     add(
                         PersistableEntry(
                             key = data.key,
@@ -176,16 +199,21 @@ object WidgetAllNotificationsStore {
     }
 
     /**
-     * Drops the entry with [key], if present — see the class doc for why (a notification
-     * dismissed from the shade must also disappear from "Toutes notifs"). No-op if [key] isn't
-     * currently kept (never mirrored, or already pushed out by newer entries), so callers can
-     * call this unconditionally on every onNotificationRemoved without checking first.
+     * Drops the entry matching BOTH [key] and [postTimeMillis], if present — see the class doc's
+     * IDENTITY section for why postTimeMillis is part of the identity here too (17/09/2026): with
+     * a reused Android notification id, several tiles here can share the same [key] but each has
+     * its own postTimeMillis, and only the specific posting that was actually dismissed should
+     * disappear — the app's earlier, already-superseded postings for that same id stay until
+     * they age out of the capped history on their own, exactly like an ALL-mode app's history
+     * entries do. No-op if no entry matches both (never mirrored, or already pushed out by newer
+     * entries), so callers can call this unconditionally on every onNotificationRemoved without
+     * checking first.
      */
-    fun remove(context: Context, key: String) {
+    fun remove(context: Context, key: String, postTimeMillis: Long) {
         val existing = get(context)
-        if (existing.none { it.key == key }) return
+        if (existing.none { it.key == key && it.postTimeMillis == postTimeMillis }) return
 
-        val kept = existing.filter { it.key != key }.map { data ->
+        val kept = existing.filter { !(it.key == key && it.postTimeMillis == postTimeMillis) }.map { data ->
             PersistableEntry(
                 key = data.key,
                 kind = data.kind,
