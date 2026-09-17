@@ -4,6 +4,7 @@
     <string name="channel_description">Mirrored notifications for the Now Bar</string>
     <string name="open_settings">Notification access</string>
     <string name="service_name">Now Bar Mirror notification listener</string>
+    <string name="sport_service_name">Now Bar Mirror — Sport (Sofascore)</string>
     <string name="invert_title_text_label">Titre ↔ texte</string>
     <string name="widget_empty_title">Aucune notification</string>
     <string name="widget_description">Affiche la dernière notification reçue, style Now Bar.</string>
@@ -13,4 +14,7 @@
     <string name="allow_app_notifications">Autoriser les notifications de l’app</string>
     <string name="status_enabled">✓ Accès aux notifications activé</string>
     <string name="status_disabled">⚠ Accès aux notifications non activé</string>
+
+    <string name="tab_home">Accueil</string>
+    <string name="tab_sport">Sport</string>
 </resources>

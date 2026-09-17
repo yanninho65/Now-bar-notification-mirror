@@ -1,6 +1,6 @@
 # Now Bar Mirror
 
-Android app that mirrors selected apps' notifications into persistent notification(s) intended to be eligible for Samsung One UI / Android Live Update surfaces, plus a lock-screen widget showing the latest one.
+Android app that mirrors selected apps' notifications into persistent notification(s) intended to be eligible for Samsung One UI / Android Live Update surfaces, plus a lock-screen widget showing the latest one. Since the fusion with Sport Watch Complication (see below), it's now a two-module project: the phone app (`app/`) and a Wear OS watch app (`wear/`) that shows a live Sofascore score complication.
 
 ## What it does
 
@@ -19,6 +19,7 @@ Android app that mirrors selected apps' notifications into persistent notificati
 - If an original notification is removed, its mirror is removed.
 - If a mirror is removed by the user (swipe, or "clear all"), the original notification is cancelled through the notification-listener API. Removing our own mirror to replace its content (LATEST-mode swap, ALL-mode update) does **not** trigger this — only a genuine user dismissal does.
 - "Revenir à la précédente après suppression" (on by default) — when the shared "Dernière notif" slot is dismissed while other LATEST-mode originals are still active elsewhere, the slot is re-posted with the next most recent survivor instead of just being cleared.
+- On listener connect/reconnect (app restart, permission just granted), any already-active eligible notification from a selected app is mirrored immediately rather than waiting for the next one to be posted — matching the behavior the Sport tab's Sofascore listener already had (see "Fusion avec Sport Watch Complication" below).
 - A "Service actif" switch lets you pause mirroring entirely without uninstalling or revoking notification access; existing delete-sync keeps working for mirrors already showing while paused.
 - Settings (per-app modes, invert flags, service on/off, widget actions, fallback) can be exported to / imported from a JSON file via the system file picker.
 - On Android 16+, requests a promoted ongoing notification so the system can consider it for Live Update surfaces.
@@ -36,6 +37,43 @@ It's meant to sit directly on the lock screen over the wallpaper (no card backgr
 
 Open **Now Bar Mirror** → **Applications à mirrorer**. Each installed app with a launcher icon is listed with a segmented mode selector (Aucun / Dernière / Toutes) and the invert-title/text checkbox. The same screen has the service on/off switch, the "revenir à la précédente" fallback switch, the widget-actions switch, and the export/import buttons.
 
+## Fusion avec Sport Watch Complication
+
+Now Bar Mirror absorbed the standalone **Sport Watch Complication** app
+(`github.com/yanninho65/Sport-watch-complication`): a live Sofascore score
+complication for a Wear OS watch. Full rationale, file-by-file changes and
+first-install steps are in [`FUSION_SPORT_WATCH.md`](FUSION_SPORT_WATCH.md)
+— summary below.
+
+### Sport tab
+
+The main screen now has two tabs:
+- **Accueil** — the generic mirroring screen described above, unchanged.
+- **Sport** — Sofascore, handled entirely separately from the generic
+  per-app mirroring (its own package, `com.yann.nowbarmirror.sport`, own
+  `NotificationListenerService`, own toggle in system notification-access
+  settings). It lists Sofascore's currently active match notifications
+  ("Dernière notification" always first), lets you pick which one drives
+  the watch complication, and optionally links a match to TheSportsDB or
+  the Live Tennis API to refine its score/period.
+
+### Watch module (`wear/`)
+
+A new Gradle module, `wear/`, builds the Wear OS app that shows the "Score
+en direct" complication (LONG_TEXT and/or SMALL_IMAGE) on the watch face.
+It talks to the phone app over the Wear Data Layer API — which requires
+the phone and watch apps to share both the same `applicationId`
+(`com.yann.nowbarmirror`) and the same signing key, so the watch app had to
+be reinstalled once from scratch after this merge (see
+`FUSION_SPORT_WATCH.md` for the exact steps). Phone-side signing/updates
+are unaffected.
+
+### Shared image extraction
+
+`MirrorNotificationListener` and the Sport tab's notification listener now
+share one image-extraction helper, `NotificationImageExtractor` — see
+`FUSION_SPORT_WATCH.md` for the merged fallback order.
+
 ## Style
 
 The app follows Samsung's One UI look: rounded cards grouping related settings, a bold large-title header on each screen, and a light/dark palette that follows the system theme. In the app list, each app's mode is a segmented Aucun/Dernière/Toutes control — the active mode is filled in blue, the others stay outlined — and the whole row is tinted when that app is actively mirrored, so it's obvious at a glance which apps are on. The launcher icon is a stylized rendition of the Now Bar itself: a dark capsule holding an avatar dot and two content lines, on a blue background, with a themed-icon layer for Android 13+ / One UI icon theming.
@@ -44,8 +82,9 @@ The app follows Samsung's One UI look: rounded cards grouping related settings, 
 
 ```
 app/src/main/java/com/yann/nowbarmirror/
-├── MainActivity.kt                    entry screen: permissions + link to app selection
-├── MirrorNotificationListener.kt      the NotificationListenerService itself
+├── MainActivity.kt                    entry screen: tabs (Accueil/Sport) + permissions + link to app selection
+├── MirrorNotificationListener.kt      the generic NotificationListenerService (Accueil tab)
+├── NotificationImageExtractor.kt      image extraction shared with the Sport tab's listener
 ├── settings/
 │   ├── MirrorMode.kt                  NONE / LATEST / ALL
 │   ├── AppMirrorPrefs.kt              per-package mode + invert-title/text storage
@@ -55,9 +94,28 @@ app/src/main/java/com/yann/nowbarmirror/
 │   ├── SettingsBackup.kt              JSON export/import of the above
 │   ├── AppSelectionActivity.kt        the settings screen
 │   └── AppSelectionAdapter.kt         RecyclerView adapter for the app list
+├── sport/                             Sport tab — Sofascore, handled separately (see "Fusion avec Sport Watch Complication")
+│   ├── SofascoreNotificationListenerService.kt  its own NotificationListenerService
+│   ├── SofascoreNotificationParser.kt
+│   ├── SofascorePrefs.kt              LATEST / CHOSEN fallback choice
+│   ├── SofascoreApiOverridePrefs.kt   per-notification score/period override from TheSportsDB/Live Tennis
+│   ├── ApiOverrideCache.kt
+│   ├── ApiOverrideFollowService.kt    background polling for the active override
+│   ├── SportsDbApi.kt / LiveTennisApi.kt
+│   ├── TennisApiKeyPrefs.kt
+│   ├── WatchSync.kt                   sends match data to the watch (Wear Data Layer API)
+│   ├── Models.kt
+│   ├── SofascoreHomeAdapter.kt / SimpleListAdapter.kt / MatchesAdapter.kt
 └── widget/
     ├── NowBarWidgetProvider.kt        the 4x1 lock-screen widget
     └── WidgetNotificationStore.kt     persists the widget's current notification
+
+wear/src/main/kotlin/com/yann/nowbarmirror/wear/
+├── ScoreComplicationService.kt        LONG_TEXT / SMALL_IMAGE complication data source
+├── MatchListenerService.kt            receives match data from the phone
+├── MatchClock.kt                      formats status/period per sport
+├── MatchScore.kt
+└── ComplicationImageComposer.kt
 ```
 
 ## Important limitation
@@ -75,10 +133,11 @@ Since the app targets API 30+, it declares a `<queries>` entry for the `MAIN`/`L
 The APK is built via the GitHub Actions workflow in this repo (`.github/workflows/build.yml`) rather than locally in Android Studio, since the day-to-day workflow here is phone-only:
 
 1. Push to `main`, or trigger it manually from the **Actions** tab → "Build debug APK" → **Run workflow**.
-2. Once the run finishes, open it and download the `NowBarMirror-debug-apk` artifact.
-3. Unzip it on the phone and install `app-debug.apk`.
-4. Open **Now Bar Mirror**, enable **Notification access**, allow the app's own notifications (Android 13+), and pick which apps to mirror.
+2. Once the run finishes, open it and download the `NowBarMirror-debug-apk` artifact (phone) and, if the watch app changed, `NowBarMirror-wear-debug-apk` too.
+3. Unzip the phone artifact and install `app-debug.apk`.
+4. Open **Now Bar Mirror**, enable **Notification access** (Accueil tab), allow the app's own notifications (Android 13+), and pick which apps to mirror. On the **Sport** tab, grant notification access separately for Sofascore — it's a distinct toggle in system settings.
 5. To place the widget: add it from the home-screen widget picker, or through a lock-widget host like LockStar for the lock screen itself.
+6. For the watch app, unzip `wear-debug.apk` and install it on the watch (e.g. via GeminiMan WearOS Manager), then assign the "Score en direct" complication on the watch face. See `FUSION_SPORT_WATCH.md` for the one-time reinstall steps required the first time this module is installed.
 
 The debug signing key is generated once via the separate "Generate debug keystore" workflow and stored as the `DEBUG_KEYSTORE_B64` repo secret — no need to re-run it unless the secret is lost.
 
@@ -98,6 +157,7 @@ Use Samsung Messages, WhatsApp, Signal or another app that produces a normal ale
 8. Toggle "Service actif" off, confirm new notifications from selected apps stop mirroring, then toggle it back on.
 9. Toggle "Titre ↔ texte" for one app and confirm the swap on its next notification.
 10. Export settings, change a mode, import the file back, and confirm the mode is restored.
+11. On the **Sport** tab, with a live Sofascore match notification active, confirm it appears in the list and drives the watch complication within a few seconds.
 
 ## Next iteration
 

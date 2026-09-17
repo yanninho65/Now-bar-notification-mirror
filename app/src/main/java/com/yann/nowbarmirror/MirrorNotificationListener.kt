@@ -150,7 +150,6 @@ class MirrorNotificationListener : NotificationListenerService() {
         }
 
         val ourMirrors = all.filter { it.packageName == packageName }
-        if (ourMirrors.isEmpty()) return
 
         for (mirrorSbn in ourMirrors) {
             val extras = mirrorSbn.notification.extras
@@ -172,6 +171,40 @@ class MirrorNotificationListener : NotificationListenerService() {
                 if (mirrorSbn.id >= nextAllModeMirrorId) {
                     nextAllModeMirrorId = mirrorSbn.id + 1
                 }
+            }
+        }
+
+        // Bootstrap mirrors for notifications that were ALREADY active before this listener
+        // (re)connected — first install, access just granted, an app just switched from NONE to
+        // ALL/LATEST, or a process restart that raced a new notification. Before this, a mirror
+        // was only ever created in onNotificationPosted(), i.e. for notifications posted AFTER
+        // the listener was connected — ones already sitting in the shade were silently ignored.
+        // Yann compared this to Sport Watch Complication's Sofascore listener, which always reads
+        // activeNotifications() on connect and mirrors whatever's already there, and asked for
+        // that behavior here too (see README.md, section "Fusion avec Sport Watch Complication").
+        // Skipped while the service is paused (ServicePrefs), same as onNotificationPosted().
+        if (!ServicePrefs.isEnabled(applicationContext)) return
+
+        all.asSequence()
+            .filter { it.packageName != packageName }
+            .filter { !it.isOngoing }
+            .filter { it.notification.flags and Notification.FLAG_GROUP_SUMMARY == 0 }
+            .filter { !isMediaPlaybackNotification(it) }
+            .filter { AppMirrorPrefs.getMode(applicationContext, it.packageName) == MirrorMode.ALL }
+            .filter { it.key !in allModeMirrors }
+            .sortedBy { it.postTime }
+            .forEach { sbn ->
+                val mirrorId = allModeMirrors.getOrPut(sbn.key) { nextAllModeMirrorId++ }
+                mirror(sbn, mirrorId)
+            }
+
+        // The LATEST-mode fallback queue was already rebuilt above (before the ourMirrors loop);
+        // if none of those survivors already occupies the shared slot, show the most recent one
+        // now rather than leaving the slot empty until the next new notification arrives.
+        if (latestOriginalKey == null) {
+            latestModeActive.values.lastOrNull()?.let { sbn ->
+                latestOriginalKey = sbn.key
+                mirror(sbn, MIRROR_ID)
             }
         }
     }
@@ -310,7 +343,9 @@ class MirrorNotificationListener : NotificationListenerService() {
         val title = if (invert) rawText.ifBlank { rawTitle } else rawTitle
         val text = if (invert) rawTitle else rawText
 
-        val image = extractImageBitmap(sbn)   // computed once, reused for the large icon and the chip attempt below
+        // Extraction fusionnée avec le traitement Sofascore lors du rapprochement avec
+        // Sport Watch Complication — voir NotificationImageExtractor.
+        val image = NotificationImageExtractor.extract(applicationContext, sbn)   // computed once, reused for the large icon and the chip attempt below
 
         // Up to three of the notification's own action buttons (e.g. "Reply", "Mark as read"),
         // handed over as live PendingIntents right now while they're still valid Binder
@@ -520,36 +555,12 @@ class MirrorNotificationListener : NotificationListenerService() {
      *    (reading raw extras instead of this, like the previous version did, misses
      *    most real-world notifications).
      */
-    private fun extractImageBitmap(sbn: StatusBarNotification): Bitmap? {
-        val n = sbn.notification
-
-        NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(n)
-            ?.messages
-            ?.lastOrNull { it.person?.icon != null }
-            ?.person?.icon
-            ?.let { personIcon ->
-                drawableFromIcon(personIcon.toIcon(this))?.let { return it }
-            }
-
-        val bigPicture: Bitmap? = if (Build.VERSION.SDK_INT >= 33) {
-            n.extras.getParcelable(Notification.EXTRA_PICTURE, Bitmap::class.java)
-        } else {
-            @Suppress("DEPRECATION") n.extras.getParcelable(Notification.EXTRA_PICTURE) as? Bitmap
-        }
-        if (bigPicture != null) return bigPicture
-
-        n.getLargeIcon()?.let { icon ->
-            drawableFromIcon(icon)?.let { return it }
-        }
-
-        return null
-    }
-
-    private fun drawableFromIcon(icon: Icon): Bitmap? {
-        val drawable = try { icon.loadDrawable(this) } catch (_: Throwable) { null } ?: return null
-        return drawableToBitmap(drawable)
-    }
-
+    // extractImageBitmap()/drawableFromIcon() ont été retirées lors de la fusion avec Sport
+    // Watch Complication : cette logique vit maintenant dans NotificationImageExtractor,
+    // partagée avec com.yann.nowbarmirror.sport.SofascoreNotificationListenerService (voir
+    // README.md, section "Fusion avec Sport Watch Complication"). drawableToBitmap() reste ici
+    // : encore utilisée par appIconBitmap()/appIcon() ci-dessous, sans rapport avec
+    // l'extraction d'image de notification.
     private fun drawableToBitmap(drawable: Drawable): Bitmap {
         if (drawable is BitmapDrawable && drawable.bitmap != null) return drawable.bitmap
         val width = drawable.intrinsicWidth.coerceAtLeast(1)
