@@ -34,11 +34,16 @@ Open **Now Bar Mirror** → **Applications à mirrorer** (Accueil tab). Each ins
 
 ### Lock-screen widget
 
-A 4x1, background-less widget (`NowBarWidgetProvider`) mirrors whichever selected app posted most recently — across ALL- and LATEST-mode apps together, unlike the system mirror slots which keep them separate. It shows the source app's icon, title/text, the notification's image if any, and a dismiss button; tapping it opens the original notification, or launches the source app if the live `PendingIntent` isn't available anymore (e.g. after a process restart).
+A 4x1, background-less widget (`NowBarWidgetProvider`) has two views, switched by a small rotating-arrows button under the icon on the left (`WidgetViewModePrefs` remembers which one is currently showing):
+
+- **Dernière notif** (default) — mirrors whichever selected app posted most recently, across ALL- and LATEST-mode apps together, unlike the system mirror slots which keep them separate. Shows the source app's icon, title/text, the notification's image if any, and a dismiss button; tapping it opens the original notification, or launches the source app if the live `PendingIntent` isn't available anymore (e.g. after a process restart).
+- **Sport** — up to 4 Sofascore matches side by side, one per currently active Sofascore notification (`SofascoreWidgetStore`): the combined team image, score (bracket around whichever side just scored, same convention as the Sofascore notification itself), and period/status — same top-to-bottom order as the watch's `SMALL_IMAGE` complication (see [Watch complication](#watch-complication-wear)), reworked to phone-sized proportions by `SofascoreMatchPresentation`. Live matches (and anything finished less than 5 minutes ago) sort first, most-recently-notified within each group; anything finished longer ago than that sorts after — recomputed on every render, not just when a new Sofascore notification arrives. Score/period always come straight from the Sofascore notification text, never the API override described below (that system only follows a single match, not all of them at once). Tapping a match opens it in Sofascore, via that notification's own `PendingIntent` exactly like tapping the notification itself, **without** cancelling the source notification — this view deliberately has no dismiss button.
+
+The toggle only appears in the Dernière notif view once there's at least one Sofascore match to switch to; it always stays visible in the Sport view so you can get back, even if the matches shown drop to zero while you're on it (a small "Aucun match" takes the tiles' place in that case).
 
 It's meant to sit directly on the lock screen over the wallpaper (no card background), placed there through a third-party lock-widget host such as Samsung's LockStar — it can also be added like any normal widget from the home-screen widget picker.
 
-"Actions dans le widget" (off by default) adds up to three of the notification's own text action buttons (e.g. "Répondre", "Marquer comme lu") in a second row under the title/text — only while this app's process has stayed alive since that exact notification arrived, since a `PendingIntent` can't be reconstructed from storage after a process restart (same limitation as the tap-to-open).
+"Actions dans le widget" (off by default) adds up to three of the notification's own text action buttons (e.g. "Répondre", "Marquer comme lu") in a second row under the title/text, in the Dernière notif view only — only while this app's process has stayed alive since that exact notification arrived, since a `PendingIntent` can't be reconstructed from storage after a process restart (same limitation as tap-to-open in either view).
 
 ## Sport tab — live scores on the watch
 
@@ -64,6 +69,7 @@ The two tabs are deliberately kept separate rather than folded into one system, 
 
 - **Notification image extraction** (`NotificationImageExtractor`, top-level package) — one shared helper, used by both `MirrorNotificationListener` and `sport.SofascoreNotificationListenerService`. Tries, in order: MessagingStyle contact photo → `EXTRA_PICTURE` → `getLargeIcon()` → `EXTRA_LARGE_ICON`.
 - **"Catch up on already-active notifications" on listener connect** — both listeners mirror/refresh from whatever is already in the notification center the moment they (re)connect, not just notifications posted afterward.
+- **The widget's Sport view** (`widget.SofascoreWidgetStore`, `widget.SofascoreMatchPresentation`) — the one deliberate exception to the package split below: `sport.SofascoreNotificationListenerService` pushes match data straight into `widget.NowBarWidgetProvider`, the same way `MirrorNotificationListener` already does for the Dernière notif view. `SofascoreMatchPresentation` duplicates (rather than shares — the `:wear` module isn't reachable from `:app`) the score/period formatting logic in `wear/MatchScore.kt` and `wear/MatchClock.kt`.
 
 Everything else is intentionally independent: separate `NotificationListenerService`s, separate preference stores, separate packages (`com.yann.nowbarmirror` for the Accueil tab and widget, `com.yann.nowbarmirror.sport` for the Sport tab).
 
@@ -104,8 +110,11 @@ app/src/main/java/com/yann/nowbarmirror/
 │   ├── Models.kt                      TeamResult / PlayerResult / LeagueResult / MatchResult
 │   └── SofascoreHomeAdapter.kt / SimpleListAdapter.kt / MatchesAdapter.kt
 └── widget/
-    ├── NowBarWidgetProvider.kt        the 4x1 lock-screen widget
-    └── WidgetNotificationStore.kt     persists the widget's current notification
+    ├── NowBarWidgetProvider.kt         the 4x1 lock-screen widget — both views (Dernière notif + Sport)
+    ├── WidgetNotificationStore.kt      persists the widget's current notification (Dernière notif view)
+    ├── SofascoreWidgetStore.kt         persists up to 4 Sofascore matches (Sport view)
+    ├── SofascoreMatchPresentation.kt   phone-side score/period formatting for the Sport view
+    └── WidgetViewModePrefs.kt          which of the two widget views is currently showing
 
 wear/src/main/kotlin/com/yann/nowbarmirror/wear/
 ├── ScoreComplicationService.kt        LONG_TEXT / SMALL_IMAGE complication data source
@@ -119,7 +128,8 @@ wear/src/main/kotlin/com/yann/nowbarmirror/wear/
 
 - The Android notification listener API can observe and cancel notifications, and notification actions expose their `PendingIntent`s. Samsung ultimately controls whether and how an ongoing notification appears in the Now Bar. This project therefore deliberately uses the public Android notification APIs plus the Samsung ongoing-activity hint; it does not attempt to depend on undocumented Samsung framework internals.
 - Inline-reply `RemoteInput` actions are not yet reconstructed, either in the system-notification mirror or in the widget.
-- Both the widget's tap-to-open and its action buttons, and ALL-mode mirror tracking, rely on a live `PendingIntent`/in-memory state held since the notification was mirrored — after the app's process is killed and restarted these reset (tap-to-open falls back to opening the source app; actions just don't show) until the next notification arrives.
+- Both the widget's tap-to-open — in the Dernière notif view and in the Sport view's match tiles alike — and the Dernière notif view's action buttons, and ALL-mode mirror tracking, rely on a live `PendingIntent`/in-memory state held since the notification was mirrored — after the app's process is killed and restarted these reset (tap-to-open falls back to opening the source app, or Sofascore itself for a match tile; actions just don't show) until the next notification arrives.
+- The widget's Sport view never shows the API override (that system only follows one match at a time, see the Sport tab above) and, unlike the watch, doesn't show a live tennis set's game score (just "En direct") or an upcoming match's kickoff time — kept simple to fit 4 small tiles side by side (`SofascoreMatchPresentation`).
 - Since the app targets API 30+, it declares a `<queries>` entry for the `MAIN`/`LAUNCHER` intent (for the app-selection screen) plus one for `com.sofascore.results` (for the Sport tab) in the manifest — without the first, Android's package-visibility restrictions would hide every user-installed app from the app-selection screen, leaving only system apps visible.
 - The Sport tab depends entirely on how Sofascore words its own notifications — a wording change on their end could break parsing until updated here. "Match commencé" (kickoff) briefly shows 0-0 with the football-style status on every sport, including basketball/tennis/set-sports, until their first period actually ends and the sport-specific vocabulary can kick in — a few minutes of cosmetic imprecision, no functional impact.
 - The watch complication only updates while the phone is reachable over the Wear Data Layer API (both devices on, Bluetooth/Wi-Fi connected as usual for a paired watch).
@@ -159,6 +169,13 @@ To build locally instead (Android Studio, JDK 17): open the folder, let Gradle s
 11. Confirm it appears in the Sport tab's list and drives the watch complication within a few seconds.
 12. Pick a different match from the list and confirm the complication switches to it.
 13. Link a match to a TheSportsDB/Live Tennis result via the "API" button and confirm the chosen field(s) (score and/or period) switch to that source.
+
+**Widget — Sport view** — with at least one Sofascore match active:
+
+14. Confirm the rotating-arrows toggle appears on the widget and switches it to up to 4 match tiles.
+15. Confirm each tile shows the combined team image, score (with a bracket if a side just scored), and period/status.
+16. Tap a tile: confirm it opens Sofascore on that exact match, and that the tile's source notification is still present afterward (not dismissed).
+17. Tap the toggle again and confirm it switches back to the Dernière notif view.
 
 ## Next iteration
 
