@@ -14,8 +14,9 @@
       NowBarWidgetProvider.applyLatestContent). A widget instance with no Sofascore data at all
       still renders pixel-identical to before this change (toggle hidden, only this block shown).
     - widget_sofascore_content: up to 5 Sofascore matches side by side (widget_match_1..5, a
-      fixed-slot pattern like widget_action_1..3 above), or widget_sofascore_empty if there's
-      currently nothing to show. (5th slot added 17/09/2026 at Yann's request — was 4.)
+      fixed-SLOT-COUNT pattern like widget_action_1..3 above — but, since 17/09/2026, no longer a
+      fixed-WIDTH one, see that block's own doc comment below), or widget_sofascore_empty if
+      there's currently nothing to show. (5th slot added 17/09/2026 at Yann's request — was 4.)
 
     widget_view_toggle (the small rotating-arrows button under the icon) switches between LATEST
     and whichever of the two other views was shown last — see
@@ -32,6 +33,39 @@
     toggle button, widget_view_toggle_right, at the far right edge of the widget (own column,
     symmetric to the left one but icon-less) — it flips directly between SPORT and ALL_NOTIFS only
     (see WidgetViewModePrefs), and stays hidden while LATEST is showing.
+
+    FIXED 17/09/2026 (Yann: "L'augmentation de la taille des logos a fait que la cinquième notif
+    est trop sur le côté. Réduire espace pour que ça passe avec 5. Rendre les espaces dynamiques
+    si besoin en fonction de la taille du widget.") — both 5-tile rows (widget_sofascore_content
+    and widget_all_notifs_content) used to give every tile a hard-coded 62dp width plus a 6dp
+    android:layout_marginEnd gap, sized for an assumed widget width. When the logos grew from
+    20dp to 30dp tall the same day, nothing shrank to compensate, so on a lock-widget host that
+    doesn't give the widget quite that much room the 5th tile spilled past the edge instead of
+    just being drawn smaller. Both rows are now WIDTH-RESPONSIVE instead: the row itself is
+    android:layout_width="match_parent" (so it always claims exactly whatever width
+    widget_content_area actually has right now — that FrameLayout is itself weighted to fill the
+    remaining space in widget_root next to the fixed-width icon column and, when visible, the
+    right toggle button, so this is always the real available width, not a guess), each of the 5
+    tile columns is android:layout_width="0dp" with android:layout_weight="1" instead of a fixed
+    62dp, and the fixed 6dp gaps are now thin android:layout_weight="0.1" spacer Views between the
+    tiles instead of a marginEnd on each — so both the tiles AND the gaps between them shrink or
+    grow together with the widget's actual width, which is the "espaces dynamiques" Yann asked
+    for. The row declares an explicit android:weightSum="5.4" (5 tiles x weight 1 + 4 gaps x
+    weight 0.1) precisely so this doesn't misbehave when there are FEWER than 5 entries to show:
+    without an explicit weightSum, a LinearLayout only sums the weights of its currently VISIBLE
+    children, so the 3 tiles left GONE when there are only 2 matches/notifications would have had
+    their weight silently redistributed onto the 2 visible ones, stretching them to roughly double
+    their normal size. With weightSum fixed at the FULL 5.4 regardless of how many tiles are
+    GONE right now, each visible tile still only ever claims its own 1/5.4 share of the row, and a
+    GONE tile just leaves its share of the row as blank trailing space — exactly the original
+    look, just no longer hard-coded to one assumed widget width. Inside each tile, the elements
+    that used to be pinned to a literal 62dp (the combined-logo/notification-photo ImageView, and,
+    in "Toutes notifs", the image FrameLayout and the title TextView) now stretch to
+    android:layout_width="match_parent" so they fill whatever width their own tile ends up with;
+    the logo ImageView keeps android:adjustViewBounds="true" and android:scaleType="fitCenter" (and
+    the android:maxWidth="62dp" that used to cap it is gone, since the tile itself is the cap now),
+    so it still scales down to fit while keeping its aspect ratio, just against a flexible box
+    instead of a fixed one.
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/widget_root"
@@ -215,7 +249,7 @@
         </LinearLayout>
 
         <!--
-            Sofascore "Sport" view. Up to 5 fixed match slots (same fixed-slot pattern as
+            Sofascore "Sport" view. Up to 5 fixed match SLOTS (same fixed-slot-COUNT pattern as
             widget_action_1..3 above, rather than a RemoteViews collection, since the cap is a
             small fixed number) — see NowBarWidgetProvider.applySofascoreMatches. Each slot is a
             small vertical card: combined team image on top (Sofascore's own notification image —
@@ -226,37 +260,46 @@
             complication (wear/ComplicationImageComposer.kt), reworked to compact phone
             proportions rather than copying its pixel sizes (tuned for a 320px circular bitmap).
 
-            Tile 62dp wide, logo 30dp tall (grown from 52dp/20dp on 17/09/2026 at Yann's request:
-            "Pour la vue sport, grossir les logos"). The Sofascore-match tiles inside "Toutes
-            notifs" below (widget_notif_N_match_image) grew to this same 62dp/30dp size the same
-            day, once Yann clarified that an appearance change to a Sofascore tile here should
-            always carry over there too — see that view's own doc comment below for the corrected
-            reasoning. 5 tiles at this width make the row noticeably wider than before — widen
-            further on your lock-widget host if needed, same note as the original 4->5 slot change
-            below.
+            Logo 30dp tall (grown from 20dp on 17/09/2026 at Yann's request: "Pour la vue sport,
+            grossir les logos"). The Sofascore-match tiles inside "Toutes notifs" below
+            (widget_notif_N_match_image) grew to this same 30dp height the same day, once Yann
+            clarified that an appearance change to a Sofascore tile here should always carry over
+            there too — see that view's own doc comment below for the corrected reasoning.
+
+            Tile WIDTH is no longer a fixed 62dp (FIXED same day, see this file's class doc above
+            for the full reasoning): each of the 5 tiles below is android:layout_width="0dp" +
+            android:layout_weight="1", the row itself is match_parent, and a thin weight="0.1"
+            spacer View sits between consecutive tiles instead of a fixed 6dp
+            android:layout_marginEnd — so 5 tiles always fit inside whatever width the widget
+            instance actually has (they used to keep the same 62dp width regardless, and a host
+            giving the widget less room than that let the 5th tile spill off to the side once the
+            logos' extra height widened the combined-logo images too). widget_sofascore_content's
+            android:weightSum="5.4" (5 tiles x 1 + 4 gaps x 0.1) is what keeps a visible tile from
+            stretching to fill the space of a currently-GONE one when there are fewer than 5
+            matches — see the class doc above.
         -->
         <LinearLayout
             android:id="@+id/widget_sofascore_content"
-            android:layout_width="wrap_content"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:gravity="center_vertical"
+            android:weightSum="5.4"
             android:visibility="gone">
 
             <LinearLayout
                 android:id="@+id/widget_match_1"
-                android:layout_width="62dp"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginEnd="6dp"
+                android:layout_weight="1"
                 android:orientation="vertical"
                 android:gravity="center_horizontal"
                 android:visibility="gone">
 
                 <ImageView
                     android:id="@+id/widget_match_1_image"
-                    android:layout_width="wrap_content"
+                    android:layout_width="match_parent"
                     android:layout_height="30dp"
-                    android:maxWidth="62dp"
                     android:adjustViewBounds="true"
                     android:scaleType="fitCenter"
                     android:contentDescription="@null" />
@@ -283,20 +326,24 @@
 
             </LinearLayout>
 
+            <View
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="0.1" />
+
             <LinearLayout
                 android:id="@+id/widget_match_2"
-                android:layout_width="62dp"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginEnd="6dp"
+                android:layout_weight="1"
                 android:orientation="vertical"
                 android:gravity="center_horizontal"
                 android:visibility="gone">
 
                 <ImageView
                     android:id="@+id/widget_match_2_image"
-                    android:layout_width="wrap_content"
+                    android:layout_width="match_parent"
                     android:layout_height="30dp"
-                    android:maxWidth="62dp"
                     android:adjustViewBounds="true"
                     android:scaleType="fitCenter"
                     android:contentDescription="@null" />
@@ -323,20 +370,24 @@
 
             </LinearLayout>
 
+            <View
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="0.1" />
+
             <LinearLayout
                 android:id="@+id/widget_match_3"
-                android:layout_width="62dp"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginEnd="6dp"
+                android:layout_weight="1"
                 android:orientation="vertical"
                 android:gravity="center_horizontal"
                 android:visibility="gone">
 
                 <ImageView
                     android:id="@+id/widget_match_3_image"
-                    android:layout_width="wrap_content"
+                    android:layout_width="match_parent"
                     android:layout_height="30dp"
-                    android:maxWidth="62dp"
                     android:adjustViewBounds="true"
                     android:scaleType="fitCenter"
                     android:contentDescription="@null" />
@@ -363,20 +414,24 @@
 
             </LinearLayout>
 
+            <View
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="0.1" />
+
             <LinearLayout
                 android:id="@+id/widget_match_4"
-                android:layout_width="62dp"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginEnd="6dp"
+                android:layout_weight="1"
                 android:orientation="vertical"
                 android:gravity="center_horizontal"
                 android:visibility="gone">
 
                 <ImageView
                     android:id="@+id/widget_match_4_image"
-                    android:layout_width="wrap_content"
+                    android:layout_width="match_parent"
                     android:layout_height="30dp"
-                    android:maxWidth="62dp"
                     android:adjustViewBounds="true"
                     android:scaleType="fitCenter"
                     android:contentDescription="@null" />
@@ -403,20 +458,25 @@
 
             </LinearLayout>
 
+            <View
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="0.1" />
+
             <!-- 5th slot, added 17/09/2026 at Yann's request — exact copy of widget_match_1..4 above. -->
             <LinearLayout
                 android:id="@+id/widget_match_5"
-                android:layout_width="62dp"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
+                android:layout_weight="1"
                 android:orientation="vertical"
                 android:gravity="center_horizontal"
                 android:visibility="gone">
 
                 <ImageView
                     android:id="@+id/widget_match_5_image"
-                    android:layout_width="wrap_content"
+                    android:layout_width="match_parent"
                     android:layout_height="30dp"
-                    android:maxWidth="62dp"
                     android:adjustViewBounds="true"
                     android:scaleType="fitCenter"
                     android:contentDescription="@null" />
@@ -455,9 +515,12 @@
         </LinearLayout>
 
         <!--
-            NEW (17/09/2026) — "Toutes notifs" view. Same fixed-slot pattern and same 62dp column
-            width as widget_sofascore_content above ("Toutes notifs : resemble au widget sport"),
-            up to 5 slots (widget_notif_1..5). EACH slot can render in either of two styles,
+            NEW (17/09/2026) — "Toutes notifs" view. Same fixed-slot-COUNT pattern as
+            widget_sofascore_content above ("Toutes notifs : resemble au widget sport"), up to 5
+            slots (widget_notif_1..5), and — since the same-day width fix described in this file's
+            class doc above — the SAME width-responsive tiles/gaps too (0dp+weight="1" tiles, a
+            weight="0.1" spacer View between each, match_parent row, weightSum="5.4"), rather than
+            each tile's old fixed 62dp width. EACH slot can render in either of two styles,
             switched per-entry by NowBarWidgetProvider.applyAllNotifs depending on
             WidgetAllNotificationsStore.Data.kind — both declared statically (same fixed-slot
             philosophy as the rest of this file, see widget_match_N's class doc, rather than
@@ -467,27 +530,25 @@
               UNCHANGED by the logo-size correction below since it isn't a Sofascore logo) with
               widget_notif_N_badge (the source app's icon, small, bottom-end corner — "en petit
               dans l'angle de l'image, l'icône [de l'app]") layered on top via the shared
-              widget_notif_N_image_area FrameLayout. If the notification has NO image,
-              widget_notif_N_photo shows the app's icon directly instead (full size, no badge —
-              "si pas d'image [...] mettre juste icône appli à la place de l'image") and the badge
-              stays hidden. Title below, up to 2 lines, fixed-width (matches the tile) + ellipsize
-              so a long title is truncated rather than ever bleeding into the next tile.
+              widget_notif_N_image_area FrameLayout (now match_parent-wide, following its tile).
+              If the notification has NO image, widget_notif_N_photo shows the app's icon directly
+              instead (full size, no badge — "si pas d'image [...] mettre juste icône appli à la
+              place de l'image") and the badge stays hidden. Title below, up to 2 lines, width now
+              matches the tile (match_parent, was a fixed 62dp) + ellipsize so a long title is
+              truncated rather than ever bleeding into the next tile.
             - SOFASCORE_MATCH: widget_notif_N_match_image/score/period, STRUCTURALLY IDENTICAL to
               widget_match_N_image/score/period above (same ids pattern, and — CORRECTED
-              17/09/2026 — now the SAME 62dp tile / 30dp logo size again too) — "Garder la même
-              présentation qu'aujourd'hui pour les notifs de Sofascore". A separate declaration
-              rather than the literal same views, since widget_match_N's views can't be moved into
-              a shared slot without also being in this FrameLayout at the same time as the Sport
-              view. Briefly kept at the smaller original 52dp/20dp size right after widget_match_N
-              grew (same day) on the assumption that "grossir les logos" only meant the dedicated
-              Sport view — Yann corrected that same-day: any appearance change to a Sofascore
-              match tile in the Sport view should carry over to its Sofascore tiles here too, so
-              the two stay visually aligned (this is now a standing rule for this project, not a
-              one-off — see the project's own working notes). The tile's own outer width grew to
-              62dp along with it (rather than only the inner match_image), since RemoteViews has no
-              clean way to give one shared fixed slot two different widths depending on which
-              entry kind currently occupies it — the GENERIC content above (photo/title) simply
-              gets a little more breathing room at 62dp, no functional change there.
+              17/09/2026 — now the SAME 30dp logo height again too) — "Garder la même présentation
+              qu'aujourd'hui pour les notifs de Sofascore". A separate declaration rather than the
+              literal same views, since widget_match_N's views can't be moved into a shared slot
+              without also being in this FrameLayout at the same time as the Sport view. Briefly
+              kept at the smaller original 20dp size right after widget_match_N grew (same day) on
+              the assumption that "grossir les logos" only meant the dedicated Sport view — Yann
+              corrected that same-day: any appearance change to a Sofascore match tile in the
+              Sport view should carry over to its Sofascore tiles here too, so the two stay
+              visually aligned (this is now a standing rule for this project, not a one-off — see
+              the project's own working notes). The GENERIC content above (photo/title) simply
+              shares whatever width the shared tile ends up with, no functional change there.
             widget_notif_N_image_area is a fixed 32dp-tall box regardless of which style is
             showing (the match image is 30dp tall, vertically centered within it) so every tile's
             text row lines up at the same height whether its neighbour is a photo or a match tile.
@@ -497,24 +558,25 @@
         -->
         <LinearLayout
             android:id="@+id/widget_all_notifs_content"
-            android:layout_width="wrap_content"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:gravity="center_vertical"
+            android:weightSum="5.4"
             android:visibility="gone">
 
             <LinearLayout
                 android:id="@+id/widget_notif_1"
-                android:layout_width="62dp"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginEnd="6dp"
+                android:layout_weight="1"
                 android:orientation="vertical"
                 android:gravity="center_horizontal"
                 android:visibility="gone">
 
                 <FrameLayout
                     android:id="@+id/widget_notif_1_image_area"
-                    android:layout_width="62dp"
+                    android:layout_width="match_parent"
                     android:layout_height="32dp">
 
                     <ImageView
@@ -527,10 +589,9 @@
 
                     <ImageView
                         android:id="@+id/widget_notif_1_match_image"
-                        android:layout_width="wrap_content"
+                        android:layout_width="match_parent"
                         android:layout_height="30dp"
                         android:layout_gravity="center"
-                        android:maxWidth="62dp"
                         android:adjustViewBounds="true"
                         android:scaleType="fitCenter"
                         android:contentDescription="@null"
@@ -551,7 +612,7 @@
 
                 <TextView
                     android:id="@+id/widget_notif_1_title"
-                    android:layout_width="62dp"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="1dp"
                     android:gravity="center_horizontal"
@@ -582,18 +643,23 @@
 
             </LinearLayout>
 
+            <View
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="0.1" />
+
             <LinearLayout
                 android:id="@+id/widget_notif_2"
-                android:layout_width="62dp"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginEnd="6dp"
+                android:layout_weight="1"
                 android:orientation="vertical"
                 android:gravity="center_horizontal"
                 android:visibility="gone">
 
                 <FrameLayout
                     android:id="@+id/widget_notif_2_image_area"
-                    android:layout_width="62dp"
+                    android:layout_width="match_parent"
                     android:layout_height="32dp">
 
                     <ImageView
@@ -606,10 +672,9 @@
 
                     <ImageView
                         android:id="@+id/widget_notif_2_match_image"
-                        android:layout_width="wrap_content"
+                        android:layout_width="match_parent"
                         android:layout_height="30dp"
                         android:layout_gravity="center"
-                        android:maxWidth="62dp"
                         android:adjustViewBounds="true"
                         android:scaleType="fitCenter"
                         android:contentDescription="@null"
@@ -630,7 +695,7 @@
 
                 <TextView
                     android:id="@+id/widget_notif_2_title"
-                    android:layout_width="62dp"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="1dp"
                     android:gravity="center_horizontal"
@@ -661,18 +726,23 @@
 
             </LinearLayout>
 
+            <View
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="0.1" />
+
             <LinearLayout
                 android:id="@+id/widget_notif_3"
-                android:layout_width="62dp"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginEnd="6dp"
+                android:layout_weight="1"
                 android:orientation="vertical"
                 android:gravity="center_horizontal"
                 android:visibility="gone">
 
                 <FrameLayout
                     android:id="@+id/widget_notif_3_image_area"
-                    android:layout_width="62dp"
+                    android:layout_width="match_parent"
                     android:layout_height="32dp">
 
                     <ImageView
@@ -685,10 +755,9 @@
 
                     <ImageView
                         android:id="@+id/widget_notif_3_match_image"
-                        android:layout_width="wrap_content"
+                        android:layout_width="match_parent"
                         android:layout_height="30dp"
                         android:layout_gravity="center"
-                        android:maxWidth="62dp"
                         android:adjustViewBounds="true"
                         android:scaleType="fitCenter"
                         android:contentDescription="@null"
@@ -709,7 +778,7 @@
 
                 <TextView
                     android:id="@+id/widget_notif_3_title"
-                    android:layout_width="62dp"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="1dp"
                     android:gravity="center_horizontal"
@@ -740,18 +809,23 @@
 
             </LinearLayout>
 
+            <View
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="0.1" />
+
             <LinearLayout
                 android:id="@+id/widget_notif_4"
-                android:layout_width="62dp"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginEnd="6dp"
+                android:layout_weight="1"
                 android:orientation="vertical"
                 android:gravity="center_horizontal"
                 android:visibility="gone">
 
                 <FrameLayout
                     android:id="@+id/widget_notif_4_image_area"
-                    android:layout_width="62dp"
+                    android:layout_width="match_parent"
                     android:layout_height="32dp">
 
                     <ImageView
@@ -764,10 +838,9 @@
 
                     <ImageView
                         android:id="@+id/widget_notif_4_match_image"
-                        android:layout_width="wrap_content"
+                        android:layout_width="match_parent"
                         android:layout_height="30dp"
                         android:layout_gravity="center"
-                        android:maxWidth="62dp"
                         android:adjustViewBounds="true"
                         android:scaleType="fitCenter"
                         android:contentDescription="@null"
@@ -788,7 +861,7 @@
 
                 <TextView
                     android:id="@+id/widget_notif_4_title"
-                    android:layout_width="62dp"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="1dp"
                     android:gravity="center_horizontal"
@@ -819,17 +892,23 @@
 
             </LinearLayout>
 
+            <View
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="0.1" />
+
             <LinearLayout
                 android:id="@+id/widget_notif_5"
-                android:layout_width="62dp"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
+                android:layout_weight="1"
                 android:orientation="vertical"
                 android:gravity="center_horizontal"
                 android:visibility="gone">
 
                 <FrameLayout
                     android:id="@+id/widget_notif_5_image_area"
-                    android:layout_width="62dp"
+                    android:layout_width="match_parent"
                     android:layout_height="32dp">
 
                     <ImageView
@@ -842,10 +921,9 @@
 
                     <ImageView
                         android:id="@+id/widget_notif_5_match_image"
-                        android:layout_width="wrap_content"
+                        android:layout_width="match_parent"
                         android:layout_height="30dp"
                         android:layout_gravity="center"
-                        android:maxWidth="62dp"
                         android:adjustViewBounds="true"
                         android:scaleType="fitCenter"
                         android:contentDescription="@null"
@@ -866,7 +944,7 @@
 
                 <TextView
                     android:id="@+id/widget_notif_5_title"
-                    android:layout_width="62dp"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="1dp"
                     android:gravity="center_horizontal"
