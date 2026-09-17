@@ -1,0 +1,11 @@
+<!--
+    Placeholder for a Sofascore match tile in the widget's Sport view, when
+    SofascoreNotificationListenerService couldn't extract an image for that match's notification
+    (see NotificationImageExtractor) — same grey (#5A6478) as wear/ComplicationImageComposer.kt's
+    own placeholder, for visual continuity between the watch complication and this widget. Plain
+    oval with no fixed size (sized by the ImageView that uses it), same pattern as
+    widget_dismiss_background.xml.
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="oval">
+    <solid android:color="#5A6478" />
+</shape>
