@@ -296,6 +296,19 @@ class MirrorNotificationListener : NotificationListenerService() {
             // here take down this service.
         }
 
+        // "Toutes notifs" (17/09/2026, Yann: "Si une notification a été supprimée du centre de
+        // notifs, elle ne doit plus apparaître dans le widget") — unlike the single "latest" slot
+        // above, this history can hold this notification even when it ISN'T the current latest
+        // one, so it's checked/dropped unconditionally rather than only when it matches
+        // widgetData.key. remove() is a no-op if this key was never in there (app not mirrored,
+        // or already pushed out by newer entries).
+        try {
+            WidgetAllNotificationsStore.remove(applicationContext, sbn.key)
+            NowBarWidgetProvider.requestUpdate(applicationContext)
+        } catch (_: Throwable) {
+            // Same reasoning as above: never let this widget nice-to-have take the service down.
+        }
+
         // The original notification itself was removed (by its app, the user, whatever reason).
         if (latestModeActive.remove(sbn.key) != null) {
             // It belonged to the LATEST-mode queue. If it was the one currently shown in the
