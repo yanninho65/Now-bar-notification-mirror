@@ -22,8 +22,10 @@ import com.yann.nowbarmirror.settings.LatestModePrefs
 import com.yann.nowbarmirror.settings.MirrorMode
 import com.yann.nowbarmirror.settings.ServicePrefs
 import com.yann.nowbarmirror.settings.WidgetActionsPrefs
+import com.yann.nowbarmirror.widget.AllNotifEntryPush
 import com.yann.nowbarmirror.widget.NowBarWidgetProvider
 import com.yann.nowbarmirror.widget.WidgetAction
+import com.yann.nowbarmirror.widget.WidgetAllNotificationsStore
 import com.yann.nowbarmirror.widget.WidgetNotificationStore
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -384,6 +386,25 @@ class MirrorNotificationListener : NotificationListenerService() {
                 contentIntent = n.contentIntent,
                 image = image,
                 actions = widgetActions
+            )
+
+            // Feeds the widget's "Toutes notifs" view (added 17/09/2026 at Yann's request) — a
+            // rolling history of the last 5 RECEIVED notifications, kept separate from the single
+            // "latest" slot above (see WidgetAllNotificationsStore's class doc for why). Pushed for
+            // every mirrored notification, ALL or LATEST mode alike, same universe as pushLive
+            // above — one push per received event, whether that's a brand new notification or an
+            // existing one updated in place (same sbn.key).
+            NowBarWidgetProvider.pushToAllNotifications(
+                applicationContext,
+                AllNotifEntryPush(
+                    key = sbn.key,
+                    postTimeMillis = sbn.postTime,
+                    kind = WidgetAllNotificationsStore.Kind.GENERIC,
+                    title = title,
+                    packageName = sbn.packageName,
+                    image = image,
+                    contentIntent = n.contentIntent
+                )
             )
         } catch (t: Throwable) {
             // TEMPORARY diagnostic: surfaces the exact failure on screen since this device
