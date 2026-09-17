@@ -7,6 +7,7 @@ import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
+import com.yann.nowbarmirror.R
 
 /**
  * Adaptateur générique pour une simple liste "nom + clic" — remplace

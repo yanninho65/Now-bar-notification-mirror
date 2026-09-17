@@ -9,6 +9,7 @@ import android.content.Intent
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
+import com.yann.nowbarmirror.R
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
