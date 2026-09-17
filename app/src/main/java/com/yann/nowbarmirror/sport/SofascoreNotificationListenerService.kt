@@ -5,6 +5,8 @@ import android.graphics.Bitmap
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import com.yann.nowbarmirror.NotificationImageExtractor
+import com.yann.nowbarmirror.widget.NowBarWidgetProvider
+import com.yann.nowbarmirror.widget.SofascoreWidgetMatch
 
 /**
  * Une notification Sofascore active = un match. [key] est
@@ -60,6 +62,15 @@ data class SofascoreMatchOption(
  *   appelé depuis MainActivity). Si ce match n'a plus de notif active (fini,
  *   notif supprimée), on retombe automatiquement sur LATEST plutôt que de ne
  *   rien afficher.
+ *
+ * DEPUIS l'ajout de la vue "Sport" au widget lock-screen (voir
+ * [pushWidgetMatches]) : ce service alimente maintenant DEUX surfaces à
+ * chaque [refresh] — la complication montre (un seul match "actif", comme
+ * ci-dessus, override compris) ET le widget (jusqu'à 4 matchs, TOUS ceux
+ * actuellement actifs, SANS override — voir la doc de [pushWidgetMatches]
+ * pour pourquoi). Les deux partagent la même extraction de base
+ * ([toMatchResult]), qui ne fait que du parsing, sans se soucier de la
+ * notion de notif "active".
  *
  * Nécessite que Yann accorde l'accès aux notifications à cette app
  * (permission spéciale, non demandable au runtime contrairement à
@@ -132,7 +143,9 @@ class SofascoreNotificationListenerService : NotificationListenerService() {
      * celle qui est active (voir doc de classe), lui superpose l'override
      * éventuellement configuré (voir [applyOverride]), aligne le sondage
      * en tâche de fond sur cet override (voir [ApiOverrideFollowService.sync])
-     * et pousse le résultat à la montre.
+     * et pousse le résultat à la montre — PUIS pousse aussi le widget (voir
+     * [pushWidgetMatches]), à partir de TOUTES les notifs actives (pas
+     * seulement la cible ci-dessus).
      *
      * CORRIGÉ (demandé par Yann le 15/09/2026) : si plus aucune notif
      * Sofascore n'est active, la complication doit repasser à "Aucun
@@ -142,13 +155,14 @@ class SofascoreNotificationListenerService : NotificationListenerService() {
      * de notifications. Le `null` de [activeSofascoreNotifications] (accès
      * non accordé) reste traité différemment de la liste vide (accès
      * accordé, juste plus rien à afficher) : dans le premier cas on ne peut
-     * rien dire, donc on ne touche à rien.
+     * rien dire, donc on ne touche à rien (ni montre, ni widget).
      */
     fun refresh() {
         val notifications = activeSofascoreNotifications() ?: return
         if (notifications.isEmpty()) {
             WatchSync.sendCleared(this)
             ApiOverrideFollowService.sync(this, null, null)
+            pushWidgetMatches(emptyList())
             return
         }
 
@@ -161,12 +175,7 @@ class SofascoreNotificationListenerService : NotificationListenerService() {
             ?: notifications.maxByOrNull { it.postTime }
             ?: return
 
-        val (homeTeam, awayTeam) = extractTeams(target) ?: return
-        val lines = collectLines(target)
-        if (lines.isEmpty()) return
-
-        val baseMatch = SofascoreNotificationParser.parse(homeTeam, awayTeam, lines)
-            ?: buildRawFallback(homeTeam, awayTeam, lines.first())
+        val baseMatch = toMatchResult(target) ?: return
 
         val override = SofascoreApiOverridePrefs.get(this, target.key)
         ApiOverrideFollowService.sync(this, target.key, override)
@@ -177,8 +186,63 @@ class SofascoreNotificationListenerService : NotificationListenerService() {
         // (homeTeam/awayTeam ci-dessus) et cette image sont TOUJOURS ceux
         // de Sofascore, même quand un override API est actif : seuls
         // score/statut peuvent venir de l'API (voir [applyOverride]).
-        val notifImage = extractNotificationImage(target)?.let { WatchSync.bitmapToAsset(it) }
-        WatchSync.sendMatch(this, match, notifImage = notifImage)
+        val targetImage = extractNotificationImage(target)
+        WatchSync.sendMatch(this, match, notifImage = targetImage?.let { WatchSync.bitmapToAsset(it) })
+
+        pushWidgetMatches(notifications)
+    }
+
+    /**
+     * Combine extractTeams + collectLines + SofascoreNotificationParser.parse + buildRawFallback
+     * — le pipeline que [refresh] utilisait déjà, en ligne, pour sa seule notif "active". Extrait
+     * ici pour que [pushWidgetMatches] puisse le réutiliser sur TOUTES les notifs actives (jusqu'à
+     * 4 affichées côte à côte dans la vue Sport du widget). Pur refactor, aucun changement de
+     * comportement pour la notif active.
+     */
+    private fun toMatchResult(sbn: StatusBarNotification): MatchResult? {
+        val (homeTeam, awayTeam) = extractTeams(sbn) ?: return null
+        val lines = collectLines(sbn)
+        if (lines.isEmpty()) return null
+        return SofascoreNotificationParser.parse(homeTeam, awayTeam, lines)
+            ?: buildRawFallback(homeTeam, awayTeam, lines.first())
+    }
+
+    /**
+     * Pousse jusqu'à 4 matchs au widget — un par notif Sofascore actuellement active, SANS
+     * l'override API éventuellement configuré (contrairement à la montre, voir [applyOverride]) :
+     * le système d'override ne suit qu'UN SEUL match (celui actif pour la montre) et n'est pas
+     * construit pour en suivre plusieurs à la fois, donc le widget affiche toujours le score/la
+     * période tels que la notif Sofascore elle-même les donne — exactement comme le fait déjà
+     * aujourd'hui tout match qui N'EST PAS le match actif de la montre. Le tri/plafonnement à 4
+     * (priorité aux matchs en cours, un match fini depuis plus de 5 minutes passe après) se fait
+     * côté NowBarWidgetProvider (à la fois ici, à l'envoi, et à nouveau au rendu — voir son
+     * sortedForWidget pour pourquoi aux deux endroits) : cette fonction se contente de tout
+     * transmettre. Enveloppée dans un try/catch — le widget est un bonus au-dessus de la
+     * complication montre, une erreur ici ne doit jamais faire planter ce service (même logique
+     * que le try/catch autour de NowBarWidgetProvider.pushLive dans MirrorNotificationListener.mirror()).
+     */
+    private fun pushWidgetMatches(notifications: List<StatusBarNotification>) {
+        try {
+            val matches = notifications.mapNotNull { sbn ->
+                val match = toMatchResult(sbn) ?: return@mapNotNull null
+                SofascoreWidgetMatch(
+                    key = sbn.key,
+                    homeTeam = match.homeTeam,
+                    awayTeam = match.awayTeam,
+                    homeScore = match.homeScore,
+                    awayScore = match.awayScore,
+                    lastScorer = match.lastScorer,
+                    status = match.status,
+                    apiSource = match.source.name,
+                    postTimeMillis = sbn.postTime,
+                    image = extractNotificationImage(sbn),
+                    contentIntent = sbn.notification.contentIntent
+                )
+            }
+            NowBarWidgetProvider.pushSofascoreMatches(applicationContext, matches)
+        } catch (_: Throwable) {
+            // Voir la doc de la fonction : le widget ne doit jamais faire tomber ce service.
+        }
     }
 
     /**
@@ -327,7 +391,9 @@ class SofascoreNotificationListenerService : NotificationListenerService() {
         // Vérifié via la fiche Play Store de Sofascore (play.google.com,
         // id=com.sofascore.results) — à ne pas confondre avec
         // "eu.livesport.*", éditeur différent (Livesport s.r.o., Soccerway).
-        private const val SOFASCORE_PACKAGE = "com.sofascore.results"
+        // Pas privée : référencée aussi par NowBarWidgetProvider (icône Sofascore dans la colonne
+        // de gauche + repli "ouvrir l'appli" côté widget, voir applySofascoreIcon/applySofascoreMatches).
+        const val SOFASCORE_PACKAGE = "com.sofascore.results"
 
         private var instance: SofascoreNotificationListenerService? = null
 
