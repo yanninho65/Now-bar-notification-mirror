@@ -25,8 +25,8 @@ object SofascoreWidgetStore {
     private const val PREFS_NAME = "sofascore_widget_prefs"
     private const val KEY_MATCHES = "matches"
 
-    /** Kept in sync with NowBarWidgetProvider's fixed widget_match_1..4 layout slots. */
-    const val MAX_SLOTS = 4
+    /** Kept in sync with NowBarWidgetProvider's fixed widget_match_1..5 layout slots (5th slot added 17/09/2026 at Yann's request). */
+    const val MAX_SLOTS = 5
 
     /** What [save] needs for one match. Deliberately Android-widget-agnostic (no PendingIntent — see NowBarWidgetProvider.SofascoreWidgetMatch, which carries the live one of those but never persists it, same limitation as WidgetNotificationStore's original PendingIntent). */
     data class PersistableMatch(
