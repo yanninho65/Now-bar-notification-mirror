@@ -326,7 +326,18 @@
 
             </LinearLayout>
 
-            <View
+            <!--
+                Spacer between two tiles — a plain android.view.View here made the widget fail to
+                add at all ("Impossible d'ajouter le widget", 17/09/2026): RemoteViews only
+                inflates a fixed allowlist of view classes in the host process (launcher/LockStar)
+                for security reasons, and plain View isn't on it (FrameLayout/LinearLayout/
+                ImageView/TextView/etc. are, which is why those are safe everywhere else in this
+                file) — an unsupported class throws at apply() time on the host side, which is
+                exactly what surfaces as that generic "couldn't add" toast rather than any crash
+                log this app itself could catch. An empty FrameLayout is the smallest supported
+                stand-in with the exact same job: pure layout-weight space, no visible content.
+            -->
+            <FrameLayout
                 android:layout_width="0dp"
                 android:layout_height="1dp"
                 android:layout_weight="0.1" />
@@ -370,7 +381,18 @@
 
             </LinearLayout>
 
-            <View
+            <!--
+                Spacer between two tiles — a plain android.view.View here made the widget fail to
+                add at all ("Impossible d'ajouter le widget", 17/09/2026): RemoteViews only
+                inflates a fixed allowlist of view classes in the host process (launcher/LockStar)
+                for security reasons, and plain View isn't on it (FrameLayout/LinearLayout/
+                ImageView/TextView/etc. are, which is why those are safe everywhere else in this
+                file) — an unsupported class throws at apply() time on the host side, which is
+                exactly what surfaces as that generic "couldn't add" toast rather than any crash
+                log this app itself could catch. An empty FrameLayout is the smallest supported
+                stand-in with the exact same job: pure layout-weight space, no visible content.
+            -->
+            <FrameLayout
                 android:layout_width="0dp"
                 android:layout_height="1dp"
                 android:layout_weight="0.1" />
@@ -414,7 +436,18 @@
 
             </LinearLayout>
 
-            <View
+            <!--
+                Spacer between two tiles — a plain android.view.View here made the widget fail to
+                add at all ("Impossible d'ajouter le widget", 17/09/2026): RemoteViews only
+                inflates a fixed allowlist of view classes in the host process (launcher/LockStar)
+                for security reasons, and plain View isn't on it (FrameLayout/LinearLayout/
+                ImageView/TextView/etc. are, which is why those are safe everywhere else in this
+                file) — an unsupported class throws at apply() time on the host side, which is
+                exactly what surfaces as that generic "couldn't add" toast rather than any crash
+                log this app itself could catch. An empty FrameLayout is the smallest supported
+                stand-in with the exact same job: pure layout-weight space, no visible content.
+            -->
+            <FrameLayout
                 android:layout_width="0dp"
                 android:layout_height="1dp"
                 android:layout_weight="0.1" />
@@ -458,7 +491,18 @@
 
             </LinearLayout>
 
-            <View
+            <!--
+                Spacer between two tiles — a plain android.view.View here made the widget fail to
+                add at all ("Impossible d'ajouter le widget", 17/09/2026): RemoteViews only
+                inflates a fixed allowlist of view classes in the host process (launcher/LockStar)
+                for security reasons, and plain View isn't on it (FrameLayout/LinearLayout/
+                ImageView/TextView/etc. are, which is why those are safe everywhere else in this
+                file) — an unsupported class throws at apply() time on the host side, which is
+                exactly what surfaces as that generic "couldn't add" toast rather than any crash
+                log this app itself could catch. An empty FrameLayout is the smallest supported
+                stand-in with the exact same job: pure layout-weight space, no visible content.
+            -->
+            <FrameLayout
                 android:layout_width="0dp"
                 android:layout_height="1dp"
                 android:layout_weight="0.1" />
@@ -643,7 +687,18 @@
 
             </LinearLayout>
 
-            <View
+            <!--
+                Spacer between two tiles — a plain android.view.View here made the widget fail to
+                add at all ("Impossible d'ajouter le widget", 17/09/2026): RemoteViews only
+                inflates a fixed allowlist of view classes in the host process (launcher/LockStar)
+                for security reasons, and plain View isn't on it (FrameLayout/LinearLayout/
+                ImageView/TextView/etc. are, which is why those are safe everywhere else in this
+                file) — an unsupported class throws at apply() time on the host side, which is
+                exactly what surfaces as that generic "couldn't add" toast rather than any crash
+                log this app itself could catch. An empty FrameLayout is the smallest supported
+                stand-in with the exact same job: pure layout-weight space, no visible content.
+            -->
+            <FrameLayout
                 android:layout_width="0dp"
                 android:layout_height="1dp"
                 android:layout_weight="0.1" />
@@ -726,7 +781,18 @@
 
             </LinearLayout>
 
-            <View
+            <!--
+                Spacer between two tiles — a plain android.view.View here made the widget fail to
+                add at all ("Impossible d'ajouter le widget", 17/09/2026): RemoteViews only
+                inflates a fixed allowlist of view classes in the host process (launcher/LockStar)
+                for security reasons, and plain View isn't on it (FrameLayout/LinearLayout/
+                ImageView/TextView/etc. are, which is why those are safe everywhere else in this
+                file) — an unsupported class throws at apply() time on the host side, which is
+                exactly what surfaces as that generic "couldn't add" toast rather than any crash
+                log this app itself could catch. An empty FrameLayout is the smallest supported
+                stand-in with the exact same job: pure layout-weight space, no visible content.
+            -->
+            <FrameLayout
                 android:layout_width="0dp"
                 android:layout_height="1dp"
                 android:layout_weight="0.1" />
@@ -809,7 +875,18 @@
 
             </LinearLayout>
 
-            <View
+            <!--
+                Spacer between two tiles — a plain android.view.View here made the widget fail to
+                add at all ("Impossible d'ajouter le widget", 17/09/2026): RemoteViews only
+                inflates a fixed allowlist of view classes in the host process (launcher/LockStar)
+                for security reasons, and plain View isn't on it (FrameLayout/LinearLayout/
+                ImageView/TextView/etc. are, which is why those are safe everywhere else in this
+                file) — an unsupported class throws at apply() time on the host side, which is
+                exactly what surfaces as that generic "couldn't add" toast rather than any crash
+                log this app itself could catch. An empty FrameLayout is the smallest supported
+                stand-in with the exact same job: pure layout-weight space, no visible content.
+            -->
+            <FrameLayout
                 android:layout_width="0dp"
                 android:layout_height="1dp"
                 android:layout_weight="0.1" />
@@ -892,7 +969,18 @@
 
             </LinearLayout>
 
-            <View
+            <!--
+                Spacer between two tiles — a plain android.view.View here made the widget fail to
+                add at all ("Impossible d'ajouter le widget", 17/09/2026): RemoteViews only
+                inflates a fixed allowlist of view classes in the host process (launcher/LockStar)
+                for security reasons, and plain View isn't on it (FrameLayout/LinearLayout/
+                ImageView/TextView/etc. are, which is why those are safe everywhere else in this
+                file) — an unsupported class throws at apply() time on the host side, which is
+                exactly what surfaces as that generic "couldn't add" toast rather than any crash
+                log this app itself could catch. An empty FrameLayout is the smallest supported
+                stand-in with the exact same job: pure layout-weight space, no visible content.
+            -->
+            <FrameLayout
                 android:layout_width="0dp"
                 android:layout_height="1dp"
                 android:layout_weight="0.1" />
