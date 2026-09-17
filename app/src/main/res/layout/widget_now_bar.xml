@@ -13,14 +13,25 @@
       moved from the old whole-widget root onto this block specifically (see
       NowBarWidgetProvider.applyLatestContent). A widget instance with no Sofascore data at all
       still renders pixel-identical to before this change (toggle hidden, only this block shown).
-    - widget_sofascore_content: NEW — up to 4 Sofascore matches side by side (widget_match_1..4,
-      a fixed-slot pattern like widget_action_1..3 above), or widget_sofascore_empty if there's
-      currently nothing to show.
+    - widget_sofascore_content: up to 5 Sofascore matches side by side (widget_match_1..5, a
+      fixed-slot pattern like widget_action_1..3 above), or widget_sofascore_empty if there's
+      currently nothing to show. (5th slot added 17/09/2026 at Yann's request — was 4.)
 
-    widget_view_toggle (the small rotating-arrows button under the icon) switches between the two
-    — see NowBarWidgetProvider.applyViewToggle / onReceive(ACTION_TOGGLE_VIEW). It only shows in
-    the latest-notif view once there's at least one Sofascore match to switch to; it always shows
-    in the Sofascore view so Yann can always get back.
+    widget_view_toggle (the small rotating-arrows button under the icon) switches between LATEST
+    and whichever of the two other views was shown last — see
+    NowBarWidgetProvider.applyLeftToggle / onReceive(ACTION_TOGGLE_VIEW). It only shows in the
+    latest-notif view once there's at least one Sofascore match OR "toutes notifs" entry to switch
+    to; it always shows in the other two views so Yann can always get back.
+
+    EXTENDED 17/09/2026 (Yann: "Sur la droite, ajouter un bouton pour changer vue entre sport et
+    toutes notifs") with a THIRD overlapping block, widget_all_notifs_content — up to 5 recently
+    RECEIVED notifications (not necessarily still active, see WidgetAllNotificationsStore), each
+    tile either the generic image+title style or, for a Sofascore notification, today's exact
+    match-tile style (widget_notif_N_match_image/score/period, structurally identical to
+    widget_match_N above) — see NowBarWidgetProvider.applyAllNotifs. Reached via a NEW second
+    toggle button, widget_view_toggle_right, at the far right edge of the widget (own column,
+    symmetric to the left one but icon-less) — it flips directly between SPORT and ALL_NOTIFS only
+    (see WidgetViewModePrefs), and stays hidden while LATEST is showing.
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/widget_root"
@@ -35,11 +46,12 @@
     android:paddingBottom="4dp">
 
     <!--
-        Left column, shared by both views — widget_app_icon shows the mirrored app's icon in the
-        latest-notif view, or Sofascore's own icon in the Sofascore view (see
-        NowBarWidgetProvider.applyLatestContent / applySofascoreIcon). widget_view_toggle sits
-        right under it, GONE by default (same default-gone convention as widget_actions_container
-        below), so nothing changes visually until there's actually a Sofascore match to switch to.
+        Left column, shared by all three views — widget_app_icon shows the mirrored app's icon in
+        the latest-notif view, Sofascore's own icon in the Sport view, or this app's own icon in
+        the "toutes notifs" view (no single source app to show there — see
+        NowBarWidgetProvider.applyAllNotifsIcon). widget_view_toggle sits right under it, GONE by
+        default (same default-gone convention as widget_actions_container below), so nothing
+        changes visually until there's actually another view to switch to.
     -->
     <LinearLayout
         android:layout_width="wrap_content"
@@ -203,7 +215,7 @@
         </LinearLayout>
 
         <!--
-            NEW — Sofascore "Sport" view. Up to 4 fixed match slots (same fixed-slot pattern as
+            Sofascore "Sport" view. Up to 5 fixed match slots (same fixed-slot pattern as
             widget_action_1..3 above, rather than a RemoteViews collection, since the cap is a
             small fixed number) — see NowBarWidgetProvider.applySofascoreMatches. Each slot is a
             small vertical card: combined team image on top (Sofascore's own notification image —
@@ -346,6 +358,7 @@
                 android:id="@+id/widget_match_4"
                 android:layout_width="52dp"
                 android:layout_height="wrap_content"
+                android:layout_marginEnd="6dp"
                 android:orientation="vertical"
                 android:gravity="center_horizontal"
                 android:visibility="gone">
@@ -381,6 +394,46 @@
 
             </LinearLayout>
 
+            <!-- 5th slot, added 17/09/2026 at Yann's request — exact copy of widget_match_1..4 above. -->
+            <LinearLayout
+                android:id="@+id/widget_match_5"
+                android:layout_width="52dp"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:gravity="center_horizontal"
+                android:visibility="gone">
+
+                <ImageView
+                    android:id="@+id/widget_match_5_image"
+                    android:layout_width="wrap_content"
+                    android:layout_height="20dp"
+                    android:maxWidth="52dp"
+                    android:adjustViewBounds="true"
+                    android:scaleType="fitCenter"
+                    android:contentDescription="@null" />
+
+                <TextView
+                    android:id="@+id/widget_match_5_score"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="1dp"
+                    android:textColor="@android:color/white"
+                    android:textStyle="bold"
+                    android:textSize="11sp"
+                    android:maxLines="1"
+                    android:ellipsize="end" />
+
+                <TextView
+                    android:id="@+id/widget_match_5_period"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="@android:color/white"
+                    android:textSize="8sp"
+                    android:maxLines="1"
+                    android:ellipsize="end" />
+
+            </LinearLayout>
+
             <TextView
                 android:id="@+id/widget_sofascore_empty"
                 android:layout_width="wrap_content"
@@ -392,6 +445,468 @@
 
         </LinearLayout>
 
+        <!--
+            NEW (17/09/2026) — "Toutes notifs" view. Same fixed-slot pattern and same 52dp column
+            width as widget_sofascore_content above ("Toutes notifs : resemble au widget sport"),
+            up to 5 slots (widget_notif_1..5). EACH slot can render in either of two styles,
+            switched per-entry by NowBarWidgetProvider.applyAllNotifs depending on
+            WidgetAllNotificationsStore.Data.kind — both declared statically (same fixed-slot
+            philosophy as the rest of this file, see widget_match_N's class doc, rather than
+            RemoteViews.addView with separate sub-layouts) and toggled with GONE/VISIBLE:
+            - GENERIC (any mirrored app's notification): widget_notif_N_photo (the notification's
+              own image, 32dp centerCrop circular — same treatment/size as widget_image above) with
+              widget_notif_N_badge (the source app's icon, small, bottom-end corner — "en petit
+              dans l'angle de l'image, l'icône [de l'app]") layered on top via the shared
+              widget_notif_N_image_area FrameLayout. If the notification has NO image,
+              widget_notif_N_photo shows the app's icon directly instead (full size, no badge —
+              "si pas d'image [...] mettre juste icône appli à la place de l'image") and the badge
+              stays hidden. Title below, up to 2 lines, fixed 52dp width + ellipsize so a long title
+              is truncated rather than ever bleeding into the next tile.
+            - SOFASCORE_MATCH: widget_notif_N_match_image/score/period, STRUCTURALLY IDENTICAL to
+              widget_match_N_image/score/period above (same ids pattern, same sizes) — "Garder la
+              même présentation qu'aujourd'hui pour les notifs de Sofascore". A separate
+              declaration rather than the literal same views, since widget_match_N's views can't be
+              moved into a shared slot without also being in this FrameLayout at the same time as
+              the Sport view — but pixel-for-pixel the same look.
+            widget_notif_N_image_area is a fixed 32dp-tall box regardless of which style is
+            showing (the match image is only 20dp tall, vertically centered within it) so every
+            tile's text row lines up at the same height whether its neighbour is a photo or a
+            match tile.
+            Tapping a tile only opens the notification (contentIntent) — it is never wired to any
+            dismiss/cancel action, so it never removes the notification (see
+            NowBarWidgetProvider.applyAllNotifs).
+        -->
+        <LinearLayout
+            android:id="@+id/widget_all_notifs_content"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:id="@+id/widget_notif_1"
+                android:layout_width="52dp"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="6dp"
+                android:orientation="vertical"
+                android:gravity="center_horizontal"
+                android:visibility="gone">
+
+                <FrameLayout
+                    android:id="@+id/widget_notif_1_image_area"
+                    android:layout_width="52dp"
+                    android:layout_height="32dp">
+
+                    <ImageView
+                        android:id="@+id/widget_notif_1_photo"
+                        android:layout_width="32dp"
+                        android:layout_height="32dp"
+                        android:layout_gravity="center"
+                        android:scaleType="centerCrop"
+                        android:contentDescription="@null" />
+
+                    <ImageView
+                        android:id="@+id/widget_notif_1_match_image"
+                        android:layout_width="wrap_content"
+                        android:layout_height="20dp"
+                        android:layout_gravity="center"
+                        android:maxWidth="52dp"
+                        android:adjustViewBounds="true"
+                        android:scaleType="fitCenter"
+                        android:contentDescription="@null"
+                        android:visibility="gone" />
+
+                    <ImageView
+                        android:id="@+id/widget_notif_1_badge"
+                        android:layout_width="14dp"
+                        android:layout_height="14dp"
+                        android:layout_gravity="bottom|end"
+                        android:padding="1dp"
+                        android:background="@drawable/widget_dismiss_background"
+                        android:scaleType="centerCrop"
+                        android:contentDescription="@null"
+                        android:visibility="gone" />
+
+                </FrameLayout>
+
+                <TextView
+                    android:id="@+id/widget_notif_1_title"
+                    android:layout_width="52dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="1dp"
+                    android:gravity="center_horizontal"
+                    android:textColor="@android:color/white"
+                    android:textSize="9sp"
+                    android:maxLines="2"
+                    android:ellipsize="end" />
+
+                <TextView
+                    android:id="@+id/widget_notif_1_score"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="1dp"
+                    android:textColor="@android:color/white"
+                    android:textStyle="bold"
+                    android:textSize="11sp"
+                    android:maxLines="1"
+                    android:ellipsize="end" />
+
+                <TextView
+                    android:id="@+id/widget_notif_1_period"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="@android:color/white"
+                    android:textSize="8sp"
+                    android:maxLines="1"
+                    android:ellipsize="end" />
+
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/widget_notif_2"
+                android:layout_width="52dp"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="6dp"
+                android:orientation="vertical"
+                android:gravity="center_horizontal"
+                android:visibility="gone">
+
+                <FrameLayout
+                    android:id="@+id/widget_notif_2_image_area"
+                    android:layout_width="52dp"
+                    android:layout_height="32dp">
+
+                    <ImageView
+                        android:id="@+id/widget_notif_2_photo"
+                        android:layout_width="32dp"
+                        android:layout_height="32dp"
+                        android:layout_gravity="center"
+                        android:scaleType="centerCrop"
+                        android:contentDescription="@null" />
+
+                    <ImageView
+                        android:id="@+id/widget_notif_2_match_image"
+                        android:layout_width="wrap_content"
+                        android:layout_height="20dp"
+                        android:layout_gravity="center"
+                        android:maxWidth="52dp"
+                        android:adjustViewBounds="true"
+                        android:scaleType="fitCenter"
+                        android:contentDescription="@null"
+                        android:visibility="gone" />
+
+                    <ImageView
+                        android:id="@+id/widget_notif_2_badge"
+                        android:layout_width="14dp"
+                        android:layout_height="14dp"
+                        android:layout_gravity="bottom|end"
+                        android:padding="1dp"
+                        android:background="@drawable/widget_dismiss_background"
+                        android:scaleType="centerCrop"
+                        android:contentDescription="@null"
+                        android:visibility="gone" />
+
+                </FrameLayout>
+
+                <TextView
+                    android:id="@+id/widget_notif_2_title"
+                    android:layout_width="52dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="1dp"
+                    android:gravity="center_horizontal"
+                    android:textColor="@android:color/white"
+                    android:textSize="9sp"
+                    android:maxLines="2"
+                    android:ellipsize="end" />
+
+                <TextView
+                    android:id="@+id/widget_notif_2_score"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="1dp"
+                    android:textColor="@android:color/white"
+                    android:textStyle="bold"
+                    android:textSize="11sp"
+                    android:maxLines="1"
+                    android:ellipsize="end" />
+
+                <TextView
+                    android:id="@+id/widget_notif_2_period"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="@android:color/white"
+                    android:textSize="8sp"
+                    android:maxLines="1"
+                    android:ellipsize="end" />
+
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/widget_notif_3"
+                android:layout_width="52dp"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="6dp"
+                android:orientation="vertical"
+                android:gravity="center_horizontal"
+                android:visibility="gone">
+
+                <FrameLayout
+                    android:id="@+id/widget_notif_3_image_area"
+                    android:layout_width="52dp"
+                    android:layout_height="32dp">
+
+                    <ImageView
+                        android:id="@+id/widget_notif_3_photo"
+                        android:layout_width="32dp"
+                        android:layout_height="32dp"
+                        android:layout_gravity="center"
+                        android:scaleType="centerCrop"
+                        android:contentDescription="@null" />
+
+                    <ImageView
+                        android:id="@+id/widget_notif_3_match_image"
+                        android:layout_width="wrap_content"
+                        android:layout_height="20dp"
+                        android:layout_gravity="center"
+                        android:maxWidth="52dp"
+                        android:adjustViewBounds="true"
+                        android:scaleType="fitCenter"
+                        android:contentDescription="@null"
+                        android:visibility="gone" />
+
+                    <ImageView
+                        android:id="@+id/widget_notif_3_badge"
+                        android:layout_width="14dp"
+                        android:layout_height="14dp"
+                        android:layout_gravity="bottom|end"
+                        android:padding="1dp"
+                        android:background="@drawable/widget_dismiss_background"
+                        android:scaleType="centerCrop"
+                        android:contentDescription="@null"
+                        android:visibility="gone" />
+
+                </FrameLayout>
+
+                <TextView
+                    android:id="@+id/widget_notif_3_title"
+                    android:layout_width="52dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="1dp"
+                    android:gravity="center_horizontal"
+                    android:textColor="@android:color/white"
+                    android:textSize="9sp"
+                    android:maxLines="2"
+                    android:ellipsize="end" />
+
+                <TextView
+                    android:id="@+id/widget_notif_3_score"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="1dp"
+                    android:textColor="@android:color/white"
+                    android:textStyle="bold"
+                    android:textSize="11sp"
+                    android:maxLines="1"
+                    android:ellipsize="end" />
+
+                <TextView
+                    android:id="@+id/widget_notif_3_period"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="@android:color/white"
+                    android:textSize="8sp"
+                    android:maxLines="1"
+                    android:ellipsize="end" />
+
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/widget_notif_4"
+                android:layout_width="52dp"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="6dp"
+                android:orientation="vertical"
+                android:gravity="center_horizontal"
+                android:visibility="gone">
+
+                <FrameLayout
+                    android:id="@+id/widget_notif_4_image_area"
+                    android:layout_width="52dp"
+                    android:layout_height="32dp">
+
+                    <ImageView
+                        android:id="@+id/widget_notif_4_photo"
+                        android:layout_width="32dp"
+                        android:layout_height="32dp"
+                        android:layout_gravity="center"
+                        android:scaleType="centerCrop"
+                        android:contentDescription="@null" />
+
+                    <ImageView
+                        android:id="@+id/widget_notif_4_match_image"
+                        android:layout_width="wrap_content"
+                        android:layout_height="20dp"
+                        android:layout_gravity="center"
+                        android:maxWidth="52dp"
+                        android:adjustViewBounds="true"
+                        android:scaleType="fitCenter"
+                        android:contentDescription="@null"
+                        android:visibility="gone" />
+
+                    <ImageView
+                        android:id="@+id/widget_notif_4_badge"
+                        android:layout_width="14dp"
+                        android:layout_height="14dp"
+                        android:layout_gravity="bottom|end"
+                        android:padding="1dp"
+                        android:background="@drawable/widget_dismiss_background"
+                        android:scaleType="centerCrop"
+                        android:contentDescription="@null"
+                        android:visibility="gone" />
+
+                </FrameLayout>
+
+                <TextView
+                    android:id="@+id/widget_notif_4_title"
+                    android:layout_width="52dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="1dp"
+                    android:gravity="center_horizontal"
+                    android:textColor="@android:color/white"
+                    android:textSize="9sp"
+                    android:maxLines="2"
+                    android:ellipsize="end" />
+
+                <TextView
+                    android:id="@+id/widget_notif_4_score"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="1dp"
+                    android:textColor="@android:color/white"
+                    android:textStyle="bold"
+                    android:textSize="11sp"
+                    android:maxLines="1"
+                    android:ellipsize="end" />
+
+                <TextView
+                    android:id="@+id/widget_notif_4_period"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="@android:color/white"
+                    android:textSize="8sp"
+                    android:maxLines="1"
+                    android:ellipsize="end" />
+
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/widget_notif_5"
+                android:layout_width="52dp"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:gravity="center_horizontal"
+                android:visibility="gone">
+
+                <FrameLayout
+                    android:id="@+id/widget_notif_5_image_area"
+                    android:layout_width="52dp"
+                    android:layout_height="32dp">
+
+                    <ImageView
+                        android:id="@+id/widget_notif_5_photo"
+                        android:layout_width="32dp"
+                        android:layout_height="32dp"
+                        android:layout_gravity="center"
+                        android:scaleType="centerCrop"
+                        android:contentDescription="@null" />
+
+                    <ImageView
+                        android:id="@+id/widget_notif_5_match_image"
+                        android:layout_width="wrap_content"
+                        android:layout_height="20dp"
+                        android:layout_gravity="center"
+                        android:maxWidth="52dp"
+                        android:adjustViewBounds="true"
+                        android:scaleType="fitCenter"
+                        android:contentDescription="@null"
+                        android:visibility="gone" />
+
+                    <ImageView
+                        android:id="@+id/widget_notif_5_badge"
+                        android:layout_width="14dp"
+                        android:layout_height="14dp"
+                        android:layout_gravity="bottom|end"
+                        android:padding="1dp"
+                        android:background="@drawable/widget_dismiss_background"
+                        android:scaleType="centerCrop"
+                        android:contentDescription="@null"
+                        android:visibility="gone" />
+
+                </FrameLayout>
+
+                <TextView
+                    android:id="@+id/widget_notif_5_title"
+                    android:layout_width="52dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="1dp"
+                    android:gravity="center_horizontal"
+                    android:textColor="@android:color/white"
+                    android:textSize="9sp"
+                    android:maxLines="2"
+                    android:ellipsize="end" />
+
+                <TextView
+                    android:id="@+id/widget_notif_5_score"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="1dp"
+                    android:textColor="@android:color/white"
+                    android:textStyle="bold"
+                    android:textSize="11sp"
+                    android:maxLines="1"
+                    android:ellipsize="end" />
+
+                <TextView
+                    android:id="@+id/widget_notif_5_period"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="@android:color/white"
+                    android:textSize="8sp"
+                    android:maxLines="1"
+                    android:ellipsize="end" />
+
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/widget_all_notifs_empty"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/widget_empty_title"
+                android:textColor="@android:color/white"
+                android:textSize="12sp"
+                android:visibility="gone" />
+
+        </LinearLayout>
+
     </FrameLayout>
+
+    <!--
+        NEW (17/09/2026) — right-edge column, symmetric to the left one but icon-less: just the
+        second toggle button, flipping directly between SPORT and ALL_NOTIFS (see
+        WidgetViewModePrefs.toggleSportAllNotifs / NowBarWidgetProvider.applyRightToggle). GONE
+        by default, same convention as widget_view_toggle — only shown while SPORT or ALL_NOTIFS
+        is the current view.
+    -->
+    <ImageView
+        android:id="@+id/widget_view_toggle_right"
+        android:layout_width="20dp"
+        android:layout_height="20dp"
+        android:layout_marginStart="8dp"
+        android:padding="3dp"
+        android:background="@drawable/widget_dismiss_background"
+        android:src="@drawable/ic_widget_switch_view"
+        android:contentDescription="@null"
+        android:visibility="gone" />
 
 </LinearLayout>
