@@ -390,6 +390,7 @@ class MirrorNotificationListener : NotificationListenerService() {
                     kind = WidgetAllNotificationsStore.Kind.GENERIC,
                     title = title,
                     packageName = sbn.packageName,
+                    isConversation = isConversationNotification(sbn),
                     image = image,
                     contentIntent = sbn.notification.contentIntent
                 )
@@ -398,6 +399,30 @@ class MirrorNotificationListener : NotificationListenerService() {
             // Same reasoning as mirror()'s own push block: never let this widget nice-to-have
             // crash the listener during catch-up.
         }
+    }
+
+    /**
+     * Détecte si [sbn] est une notification de "conversation" (messagerie — WhatsApp, Signal…)
+     * plutôt qu'un contenu qui REMPLACE simplement le précédent en réutilisant le même id (ex. Le
+     * Monde — voir WidgetAllNotificationsStore's IDENTITY section pour pourquoi la distinction
+     * compte). Ajouté le 17/09/2026 : Yann s'est envoyé 5 messages de test dans la même
+     * conversation WhatsApp et a vu 5 cases distinctes dans "Toutes notifs" au lieu d'une seule
+     * mise à jour — alors que la conversation elle-même reste UNE SEULE notification Android
+     * (MessagingStyle) mise à jour en place à chaque message, exactement comme Sofascore avec un
+     * match (voir SofascoreNotificationParser, même mécanisme confirmé sur appareil).
+     *
+     * Trois signaux, au cas où l'app source n'en fournit qu'un ou deux :
+     * - `shortcutId` renseigné : l'app a déclaré cette conversation comme "Conversation Shortcut"
+     *   (WhatsApp, Signal, Messages… depuis Android 11).
+     * - `category == CATEGORY_MESSAGE` : catégorie standard des notifs de messagerie.
+     * - présence de `EXTRA_MESSAGING_PERSON` dans les extras : marqueur du template
+     *   `NotificationCompat.MessagingStyle`, que ces apps utilisent pour accumuler les messages.
+     */
+    private fun isConversationNotification(sbn: StatusBarNotification): Boolean {
+        val n = sbn.notification
+        if (n.shortcutId != null) return true
+        if (n.category == Notification.CATEGORY_MESSAGE) return true
+        return n.extras.containsKey(Notification.EXTRA_MESSAGING_PERSON)
     }
 
     private fun mirror(sbn: StatusBarNotification, mirrorId: Int) {
@@ -474,6 +499,7 @@ class MirrorNotificationListener : NotificationListenerService() {
                     kind = WidgetAllNotificationsStore.Kind.GENERIC,
                     title = title,
                     packageName = sbn.packageName,
+                    isConversation = isConversationNotification(sbn),
                     image = image,
                     contentIntent = n.contentIntent
                 )

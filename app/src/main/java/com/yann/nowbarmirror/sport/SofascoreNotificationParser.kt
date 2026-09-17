@@ -147,6 +147,24 @@ package com.yann.nowbarmirror.sport
  * Les noms de joueurs sont déjà au format "Initiale. Nom" dans la notif
  * elle-même (titre ET lignes d'événement, tennis ET tennis de table) —
  * rien à transformer côté app.
+ *
+ * Exemple réel observé pour le rugby (capture d'écran fournie par Yann le
+ * 17/09/2026, Aurillac - Brive), du plus ancien au plus récent :
+ *   "Match commencé"
+ *   "Score : 0 - [5] Brive"
+ *   "Score : 0 - [7] Brive"
+ *   "Score : [5] - 7 Aurillac"
+ *   "Score : [7] - 7 Aurillac"
+ * Même gabarit que [goalNoMinute] au foot (pas de minute, un nom en fin de
+ * ligne jamais exploité), juste avec le libellé "Score" plutôt que "But" —
+ * voir [scoreEvent]. Les deux nombres sont déjà le score total à jour, et
+ * le crochet entoure le côté qui vient de marquer, exactement comme au
+ * foot : ici Brive marque un essai (5), le transforme (+2 -> 7), puis
+ * Aurillac fait de même (5, puis 7) — le score affiché passe donc par
+ * 0-5, 0-7, 5-7, 7-7. "Mi-temps"/"Match terminé" au rugby suivent le même
+ * libellé qu'au foot (non confirmé sur cet exemple, mais aucune raison de
+ * différer) — [parseFootball] les gère déjà, [scoreEvent] est la seule
+ * ligne d'événement propre au rugby.
  */
 object SofascoreNotificationParser {
 
@@ -206,6 +224,16 @@ object SofascoreNotificationParser {
     // score plutôt que d'afficher un statut vide ou trompeur.
     private val goalNoMinute = Regex(
         """But\s*:\s*(?:\[(\d+)\]|(\d+))\s*-\s*(?:\[(\d+)\]|(\d+))""",
+        RegexOption.IGNORE_CASE
+    )
+
+    // CONFIRMÉ par un exemple réel (17/09/2026, Aurillac - Brive, capture fournie par Yann) :
+    // rugby — même gabarit que [goalNoMinute] (pas de minute, score déjà à jour, crochet sur le
+    // côté qui vient de marquer), juste avec le libellé "Score" plutôt que "But" — voir la doc de
+    // classe pour l'exemple détaillé. Distinct de [matchFinished] ("Match terminé : ..."), qui ne
+    // matche pas ce gabarit grâce au mot "terminé" entre "Match" et ":".
+    private val scoreEvent = Regex(
+        """Score\s*:\s*(?:\[(\d+)\]|(\d+))\s*-\s*(?:\[(\d+)\]|(\d+))""",
         RegexOption.IGNORE_CASE
     )
 
@@ -382,6 +410,11 @@ object SofascoreNotificationParser {
                 return build(homeTeam, awayTeam, home, away, "", lastScorer = bracketedSide(m.groupValues, 1, 3))
             }
             goalNoMinute.find(line)?.let { m ->
+                val home = m.groupValues[1].ifBlank { m.groupValues[2] }
+                val away = m.groupValues[3].ifBlank { m.groupValues[4] }
+                return build(homeTeam, awayTeam, home, away, "", lastScorer = bracketedSide(m.groupValues, 1, 3))
+            }
+            scoreEvent.find(line)?.let { m ->
                 val home = m.groupValues[1].ifBlank { m.groupValues[2] }
                 val away = m.groupValues[3].ifBlank { m.groupValues[4] }
                 return build(homeTeam, awayTeam, home, away, "", lastScorer = bracketedSide(m.groupValues, 1, 3))

@@ -66,6 +66,10 @@ data class AllNotifEntryPush(
     val kind: WidgetAllNotificationsStore.Kind,
     val title: String? = null,
     val packageName: String? = null,
+    // See WidgetAllNotificationsStore.PersistableEntry.isConversation's doc — set by
+    // MirrorNotificationListener for GENERIC entries, always false (irrelevant) for
+    // SOFASCORE_MATCH ones, which collapse by key alone unconditionally regardless of this flag.
+    val isConversation: Boolean = false,
     val homeTeam: String? = null,
     val awayTeam: String? = null,
     val homeScore: String? = null,
@@ -235,9 +239,11 @@ class NowBarWidgetProvider : AppWidgetProvider() {
          * SofascoreNotificationListenerService.onNotificationPosted (plus its own listener-connect
          * catch-up) for every Sofascore notification event — see WidgetAllNotificationsStore's
          * class doc for why both funnel into this ONE shared history rather than each having their
-         * own. Merges [entry] into the persisted history (same (key, postTimeMillis) PAIR = update
-         * in place, bumped to the front; same key with a DIFFERENT postTimeMillis = a new tile —
-         * see WidgetAllNotificationsStore's IDENTITY section, fixed 17/09/2026), then trims
+         * own. Merges [entry] into the persisted history — a Sofascore match or a conversation
+         * (see [AllNotifEntryPush.isConversation]) always updates its ONE tile in place, by key
+         * alone; anything else only updates in place for the exact same (key, postTimeMillis) pair
+         * re-pushed, and gets a new tile for the same key with a DIFFERENT postTimeMillis — see
+         * WidgetAllNotificationsStore's IDENTITY section, fixed 17/09/2026, then trims
          * [liveAllNotifIntents] down to exactly the entries still kept — see that field's doc —
          * before rebuilding whichever view is currently showing.
          */
@@ -250,6 +256,7 @@ class NowBarWidgetProvider : AppWidgetProvider() {
                     postTimeMillis = entry.postTimeMillis,
                     title = entry.title,
                     packageName = entry.packageName,
+                    isConversation = entry.isConversation,
                     homeTeam = entry.homeTeam,
                     awayTeam = entry.awayTeam,
                     homeScore = entry.homeScore,

@@ -39,22 +39,38 @@ import java.io.FileOutputStream
  * IDENTITY (fixed 17/09/2026 — Yann: "si plusieurs notifications ont été envoyées parmi les
  * applications marquées comme dernière notif, seule la dernière notif apparaît [...] ce
  * comportement ne doit être utilisé que pour la Now Bar, je veux que toutes les notifs puissent
- * apparaître dans cette barre"): an entry's identity here is the PAIR ([PersistableEntry.key],
- * [PersistableEntry.postTimeMillis]), NOT [PersistableEntry.key] alone. A "Dernière notif"-mode
- * app is typically set to that mode BECAUSE it keeps a single rolling Android notification (same
- * notification id/tag — i.e. the same [StatusBarNotification.getKey]) and just replaces its
- * content for each new item — that's the correct, intentional behavior for the actual Now Bar
- * mirror's shared LATEST slot (see MirrorNotificationListener), but collapsing every one of those
- * distinct notifications into a single "Toutes notifs" tile just because they share that reused
- * key was wrong: from Yann's point of view five different Le Monde articles are five different
- * received notifications, and should occupy up to five of this history's slots, exactly like an
- * "ALL"-mode app's five notifications would (those already got their own tiles, since apps in
- * ALL mode typically use a distinct key per item). [StatusBarNotification.postTime] changes on
- * every `notify()` call — including in-place updates to the same id — so pairing it with [key]
- * distinguishes "a genuinely new/updated posting" (new tile) from "the exact same posting being
- * re-pushed" (e.g. MirrorNotificationListener.rebuildStateFromActiveNotifications() re-mirroring
- * an already-active notification on listener reconnect — same key AND same postTime, so [push]
- * still updates that one tile in place rather than duplicating it).
+ * apparaître dans cette barre"; REVU LE MÊME JOUR — Yann, en s'envoyant 5 messages WhatsApp de
+ * test : "ça prend les 5 cases alors que ça ne devrait en prendre qu'une", même problème "pour
+ * chaque but" d'un match Sofascore): un entry's identity here is [PersistableEntry.key] ALONE for
+ * two kinds of source that Yann confirmed should always UPDATE the same tile in place, never
+ * spawn a new one, no matter how many times they repost:
+ * - [Kind.SOFASCORE_MATCH] entries, unconditionally — CONFIRMÉ SUR APPAREIL (voir
+ *   SofascoreNotificationListenerService) : Sofascore poste UNE notification par match, mise à
+ *   jour en place à chaque événement (même id/tag, donc même [key], seul
+ *   [StatusBarNotification.postTime] change) — exactement ce que montre la capture d'écran native
+ *   fournie par Yann le 17/09/2026 (Aurillac - Brive : une seule carte de notification, plusieurs
+ *   lignes de score accumulées dedans). Un tile par MATCH, jamais un tile par but.
+ * - [PersistableEntry.isConversation] entries (see [PersistableEntry.isConversation]'s doc) — a
+ *   messaging-app conversation (WhatsApp, Signal…) is, structurally, the exact same pattern: ONE
+ *   Android notification reused per conversation (MessagingStyle), that just accumulates more
+ *   lines as messages arrive. 5 self-sent WhatsApp messages in the same conversation are 5
+ *   `notify()` calls on that SAME notification, not 5 distinct conversations.
+ *
+ * For every OTHER [Kind.GENERIC] entry, identity stays the PAIR ([PersistableEntry.key],
+ * [PersistableEntry.postTimeMillis]) — this is what keeps the original 17/09/2026 fix intact for
+ * an app like Le Monde: it also reuses the same notification id/tag for its "Dernière notif" slot,
+ * but each new posting REPLACES the previous one with wholly unrelated content (a different
+ * article), rather than accumulating it — from Yann's point of view five different Le Monde
+ * articles are five different received notifications, and should still occupy up to five of this
+ * history's slots, exactly like an "ALL"-mode app's five notifications would. [key] alone can't
+ * tell these two cases apart (both reuse the same Android notification), so
+ * [PersistableEntry.isConversation] is the signal MirrorNotificationListener attaches per
+ * notification (see its `isConversationNotification()`) to say which behavior applies. Pairing
+ * [key] with [postTimeMillis] for the non-collapsed case still separately distinguishes "a
+ * genuinely new/updated posting" (new tile) from "the exact same posting being re-pushed" (e.g.
+ * MirrorNotificationListener.rebuildStateFromActiveNotifications() re-mirroring an already-active
+ * notification on listener reconnect — same key AND same postTime, so [push] still updates that
+ * one tile in place rather than duplicating it).
  *
  * Storage mirrors SofascoreWidgetStore (JSON in SharedPreferences for the fields, one PNG file per
  * SLOT INDEX for images) but, being a history rather than a full-replace-every-time set, [push]
@@ -81,6 +97,14 @@ object WidgetAllNotificationsStore {
         // GENERIC fields
         val title: String? = null,
         val packageName: String? = null,
+        // GENERIC only — see the class doc's IDENTITY section. Whether the source notification is
+        // a messaging-app conversation (MessagingStyle/shortcutId/CATEGORY_MESSAGE — see
+        // MirrorNotificationListener.isConversationNotification()) rather than plain reused-id
+        // content: true collapses every posting sharing [key] into one tile, updated in place,
+        // exactly like a [Kind.SOFASCORE_MATCH] entry always does. Always false for
+        // SOFASCORE_MATCH entries (irrelevant there — that kind already collapses by key alone
+        // unconditionally, see the class doc).
+        val isConversation: Boolean = false,
         // SOFASCORE_MATCH fields — same shape as SofascoreWidgetStore.PersistableMatch
         val homeTeam: String? = null,
         val awayTeam: String? = null,
@@ -98,6 +122,7 @@ object WidgetAllNotificationsStore {
         val postTimeMillis: Long,
         val title: String?,
         val packageName: String?,
+        val isConversation: Boolean,
         val homeTeam: String?,
         val awayTeam: String?,
         val homeScore: String?,
@@ -107,6 +132,10 @@ object WidgetAllNotificationsStore {
         val apiSource: String?,
         val imageFile: File?
     )
+
+    /** True when an entry with this identity must UPDATE its existing tile in place rather than ever spawning a new one — see the class doc's IDENTITY section. */
+    private fun collapsesByKeyAlone(kind: Kind, isConversation: Boolean) =
+        kind == Kind.SOFASCORE_MATCH || isConversation
 
     private fun prefs(context: Context) =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -127,11 +156,19 @@ object WidgetAllNotificationsStore {
      */
     fun push(context: Context, entry: PersistableEntry): List<Data> {
         val existing = get(context)
+        // See the class doc's IDENTITY section: a Sofascore match or a conversation always
+        // updates its ONE existing tile (by key alone), no matter how many times it reposts;
+        // anything else only updates in place when it's the exact same posting re-pushed
+        // (same key AND same postTimeMillis) — a new posting with a different postTimeMillis is a
+        // genuinely new tile.
+        val collapse = collapsesByKeyAlone(entry.kind, entry.isConversation)
 
         val merged = buildList {
             add(entry)
             existing.forEach { data ->
-                if (!(data.key == entry.key && data.postTimeMillis == entry.postTimeMillis)) {
+                val isSameTile = data.key == entry.key &&
+                    (collapse || data.postTimeMillis == entry.postTimeMillis)
+                if (!isSameTile) {
                     add(
                         PersistableEntry(
                             key = data.key,
@@ -139,6 +176,7 @@ object WidgetAllNotificationsStore {
                             postTimeMillis = data.postTimeMillis,
                             title = data.title,
                             packageName = data.packageName,
+                            isConversation = data.isConversation,
                             homeTeam = data.homeTeam,
                             awayTeam = data.awayTeam,
                             homeScore = data.homeScore,
@@ -169,6 +207,7 @@ object WidgetAllNotificationsStore {
                     put("postTimeMillis", entry.postTimeMillis)
                     put("title", entry.title ?: JSONObject.NULL)
                     put("packageName", entry.packageName ?: JSONObject.NULL)
+                    put("isConversation", entry.isConversation)
                     put("homeTeam", entry.homeTeam ?: JSONObject.NULL)
                     put("awayTeam", entry.awayTeam ?: JSONObject.NULL)
                     put("homeScore", entry.homeScore ?: JSONObject.NULL)
@@ -211,15 +250,24 @@ object WidgetAllNotificationsStore {
      */
     fun remove(context: Context, key: String, postTimeMillis: Long) {
         val existing = get(context)
-        if (existing.none { it.key == key && it.postTimeMillis == postTimeMillis }) return
+        // For a collapsed tile (Sofascore match, or a conversation) there is only ever ONE entry
+        // per key, so the removal of ANY one of its postings must drop that single tile — matching
+        // strictly on postTimeMillis too would leave a stale tile behind whenever the notification
+        // that gets dismissed isn't the exact posting last recorded here (see the class doc's
+        // IDENTITY section). For anything else, only the exact (key, postTimeMillis) posting goes.
+        fun matches(data: Data) = data.key == key &&
+            (collapsesByKeyAlone(data.kind, data.isConversation) || data.postTimeMillis == postTimeMillis)
 
-        val kept = existing.filter { !(it.key == key && it.postTimeMillis == postTimeMillis) }.map { data ->
+        if (existing.none(::matches)) return
+
+        val kept = existing.filterNot(::matches).map { data ->
             PersistableEntry(
                 key = data.key,
                 kind = data.kind,
                 postTimeMillis = data.postTimeMillis,
                 title = data.title,
                 packageName = data.packageName,
+                isConversation = data.isConversation,
                 homeTeam = data.homeTeam,
                 awayTeam = data.awayTeam,
                 homeScore = data.homeScore,
@@ -251,6 +299,7 @@ object WidgetAllNotificationsStore {
                 postTimeMillis = obj.optLong("postTimeMillis", 0L),
                 title = obj.optNullableString("title"),
                 packageName = obj.optNullableString("packageName"),
+                isConversation = obj.optBoolean("isConversation", false),
                 homeTeam = obj.optNullableString("homeTeam"),
                 awayTeam = obj.optNullableString("awayTeam"),
                 homeScore = obj.optNullableString("homeScore"),
