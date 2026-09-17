@@ -13,15 +13,18 @@ import java.io.FileOutputStream
  * applyAllNotifs, added 17/09/2026 at Yann's request: "Sur la droite, ajouter un bouton pour
  * changer vue entre sport et toutes notifs. [...] prends les cinq dernieres notifs reçues.").
  *
- * UNLIKE WidgetNotificationStore (the single "last notification", cleared as soon as its original
- * is dismissed) and SofascoreWidgetStore (the set of matches CURRENTLY active), this is a plain
- * rolling HISTORY of the last [MAX_SLOTS] notifications RECEIVED, most-recent-first — "les cinq
- * dernières notifs reçues" is a receipt log, not a live/active set, so an entry is deliberately
- * NEVER removed just because its original notification was later dismissed elsewhere (nothing in
- * Yann's request asks for that, and it would defeat "reçues" — the whole point is to still see
- * what came in even after it's gone from the shade). An entry with the same [key] as one already
- * present is treated as an UPDATE of that same notification (e.g. a Sofascore score change posted
- * in place) and is bumped back to the front rather than creating a duplicate.
+ * A rolling HISTORY of up to [MAX_SLOTS] notifications RECEIVED, most-recent-first — LIKE
+ * WidgetNotificationStore/SofascoreWidgetStore (and UNLIKE an initial version of this store), an
+ * entry is removed as soon as its original notification is dismissed from the shade, by the user,
+ * the source app, or "effacer tout" (Yann, 17/09/2026: "Si une notification a été supprimée du
+ * centre de notifs, elle ne doit plus apparaître dans le widget") — see [remove], called from
+ * MirrorNotificationListener/SofascoreNotificationListenerService's onNotificationRemoved. "History"
+ * here just means it can hold MORE than one entry per source and isn't limited to whichever
+ * notification is single most recent (unlike WidgetNotificationStore) or currently active for a
+ * SPECIFIC match the watch complication follows (unlike SofascoreWidgetStore's override system) —
+ * it does NOT mean entries survive their own dismissal. An entry with the same [key] as one
+ * already present is treated as an UPDATE of that same notification (e.g. a Sofascore score change
+ * posted in place) and is bumped back to the front rather than creating a duplicate.
  *
  * Two kinds of entry, both fed into this SAME shared store so they interleave by recency:
  * - [Kind.GENERIC]: any notification mirrored by MirrorNotificationListener (any app configured
@@ -170,6 +173,36 @@ object WidgetAllNotificationsStore {
     fun clear(context: Context) {
         for (slot in 0 until MAX_SLOTS) imageFile(context, slot).delete()
         prefs(context).edit().remove(KEY_ENTRIES).apply()
+    }
+
+    /**
+     * Drops the entry with [key], if present — see the class doc for why (a notification
+     * dismissed from the shade must also disappear from "Toutes notifs"). No-op if [key] isn't
+     * currently kept (never mirrored, or already pushed out by newer entries), so callers can
+     * call this unconditionally on every onNotificationRemoved without checking first.
+     */
+    fun remove(context: Context, key: String) {
+        val existing = get(context)
+        if (existing.none { it.key == key }) return
+
+        val kept = existing.filter { it.key != key }.map { data ->
+            PersistableEntry(
+                key = data.key,
+                kind = data.kind,
+                postTimeMillis = data.postTimeMillis,
+                title = data.title,
+                packageName = data.packageName,
+                homeTeam = data.homeTeam,
+                awayTeam = data.awayTeam,
+                homeScore = data.homeScore,
+                awayScore = data.awayScore,
+                lastScorer = data.lastScorer,
+                status = data.status,
+                apiSource = data.apiSource,
+                image = data.imageFile?.let { BitmapFactory.decodeFile(it.path) }
+            )
+        }
+        save(context, kept)
     }
 
     fun get(context: Context): List<Data> {
