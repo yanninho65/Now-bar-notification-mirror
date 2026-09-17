@@ -19,6 +19,18 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # Sans ce `packages:`, l'action essaie par défaut d'installer le
+          # paquet legacy "tools" (Android SDK Tools) en plus de
+          # platform-tools — Google a retiré "tools" du dépôt SDK, donc
+          # sdkmanager échoue systématiquement avec "Failed to find package
+          # 'tools'" (cassé pour tout le monde depuis ce retrait, pas lié à
+          # ce dépôt). platform-tools seul suffit : les autres composants
+          # requis (platforms;android-36, build-tools, cmdline-tools) sont
+          # déjà fournis par l'image du runner ou téléchargés automatiquement
+          # par Gradle/AGP pendant le build, les licences étant déjà
+          # acceptées par cette même action.
+          packages: 'platform-tools'
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
