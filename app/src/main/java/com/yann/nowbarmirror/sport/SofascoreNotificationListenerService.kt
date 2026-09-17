@@ -111,6 +111,26 @@ class SofascoreNotificationListenerService : NotificationListenerService() {
         super.onListenerConnected()
         instance = this
         refresh()
+        bootstrapAllNotificationsHistory()
+    }
+
+    /**
+     * Catch-up (17/09/2026, Yann: "le comportement doit bien être de lire toutes les notifs dans
+     * le centre de notif et non plus uniquement celles reçues après installation de l'appli ou
+     * mise à jour"): pushes every Sofascore notification ALREADY active at connect time (first
+     * install, notification access just granted, or a process restart) into the shared "Toutes
+     * notifs" history — before this, [pushToAllNotificationsHistory] only ran from
+     * [onNotificationPosted], i.e. for notifications posted AFTER this listener (re)connected, so
+     * a match notification already sitting in the shade at that moment was silently skipped until
+     * its next score update. Mirrors the same fix already applied on the Accueil-tab side (see
+     * MirrorNotificationListener.rebuildStateFromActiveNotifications). Safe to call on every
+     * reconnect: [pushToAllNotificationsHistory] keys each entry by (sbn.key, sbn.postTime) — see
+     * WidgetAllNotificationsStore's IDENTITY section — so re-pushing an already-known notification
+     * just updates that tile in place rather than duplicating it.
+     */
+    private fun bootstrapAllNotificationsHistory() {
+        val notifications = activeSofascoreNotifications() ?: return
+        notifications.forEach { sbn -> pushToAllNotificationsHistory(sbn) }
     }
 
     override fun onListenerDisconnected() {
@@ -179,7 +199,7 @@ class SofascoreNotificationListenerService : NotificationListenerService() {
         if (sbn.packageName == SOFASCORE_PACKAGE) {
             SofascoreApiOverridePrefs.remove(applicationContext, sbn.key)
             refresh()
-            removeFromAllNotificationsHistory(sbn.key)
+            removeFromAllNotificationsHistory(sbn.key, sbn.postTime)
         }
     }
 
@@ -188,13 +208,15 @@ class SofascoreNotificationListenerService : NotificationListenerService() {
      * notifs, elle ne doit plus apparaître dans le widget") — [refresh] above already drops this
      * match from the dedicated Sport view (it recomputes from activeSofascoreNotifications()),
      * but the "Toutes notifs" history is a SEPARATE store (see WidgetAllNotificationsStore) that
-     * needs its own explicit removal. No-op if this key was never pushed there. Wrapped in
-     * try/catch for the same reason as [pushWidgetMatches]/[pushToAllNotificationsHistory]: never
-     * let a widget nice-to-have take this service down.
+     * needs its own explicit removal, matched on (key, postTimeMillis) together rather than key
+     * alone (see that store's IDENTITY section) so only the exact posting that was dismissed goes.
+     * No-op if that exact pair was never pushed there. Wrapped in try/catch for the same reason as
+     * [pushWidgetMatches]/[pushToAllNotificationsHistory]: never let a widget nice-to-have take
+     * this service down.
      */
-    private fun removeFromAllNotificationsHistory(key: String) {
+    private fun removeFromAllNotificationsHistory(key: String, postTimeMillis: Long) {
         try {
-            WidgetAllNotificationsStore.remove(applicationContext, key)
+            WidgetAllNotificationsStore.remove(applicationContext, key, postTimeMillis)
             NowBarWidgetProvider.requestUpdate(applicationContext)
         } catch (_: Throwable) {
         }
