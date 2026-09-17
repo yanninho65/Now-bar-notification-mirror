@@ -187,6 +187,19 @@ class MirrorNotificationListener : NotificationListenerService() {
         // Skipped while the service is paused (ServicePrefs), same as onNotificationPosted().
         if (!ServicePrefs.isEnabled(applicationContext)) return
 
+        // Catch up "Toutes notifs" with EVERY currently-active LATEST-mode notification, not just
+        // the single most recent one that gets promoted into the shared system-mirror slot below
+        // (17/09/2026, Yann: "le comportement doit bien être de lire toutes les notifs dans le
+        // centre de notif et non plus uniquement celles reçues après installation de l'appli ou
+        // mise à jour" — this is the LATEST-mode half of that fix for the widget; the ALL-mode
+        // half is already covered below, since every ALL-mode bootstrap notification gets its own
+        // mirror() call, which already pushes to this same history). Safe to call for all of them,
+        // including the one that's about to be promoted: pushAllNotifsHistoryOnly()/mirror() key
+        // their push by (key, postTime) — see WidgetAllNotificationsStore's IDENTITY section — so
+        // pushing the same sbn twice just updates that one tile in place rather than duplicating
+        // it.
+        latestModeActive.values.forEach { sbn -> pushAllNotifsHistoryOnly(sbn) }
+
         all.asSequence()
             .filter { it.packageName != packageName }
             .filter { !it.isOngoing }
@@ -300,10 +313,15 @@ class MirrorNotificationListener : NotificationListenerService() {
         // notifs, elle ne doit plus apparaître dans le widget") — unlike the single "latest" slot
         // above, this history can hold this notification even when it ISN'T the current latest
         // one, so it's checked/dropped unconditionally rather than only when it matches
-        // widgetData.key. remove() is a no-op if this key was never in there (app not mirrored,
-        // or already pushed out by newer entries).
+        // widgetData.key. Matched on (key, postTime) together, not key alone (see
+        // WidgetAllNotificationsStore's IDENTITY section) — a "Dernière notif"-mode app reusing
+        // its notification id across items can have several OTHER tiles sharing this same key,
+        // and only the one that was actually just dismissed (this exact posting) should go; the
+        // rest stay until they age out of the capped history. remove() is a no-op if this exact
+        // (key, postTime) pair was never in there (app not mirrored, or already pushed out by
+        // newer entries).
         try {
-            WidgetAllNotificationsStore.remove(applicationContext, sbn.key)
+            WidgetAllNotificationsStore.remove(applicationContext, sbn.key, sbn.postTime)
             NowBarWidgetProvider.requestUpdate(applicationContext)
         } catch (_: Throwable) {
             // Same reasoning as above: never let this widget nice-to-have take the service down.
@@ -338,6 +356,47 @@ class MirrorNotificationListener : NotificationListenerService() {
             // Option disabled, or nothing left to fall back to: clear the slot, same as the
             // original behavior before this option existed.
             cancelMirror(MIRROR_ID)
+        }
+    }
+
+    /**
+     * Pushes [sbn] into the shared "Toutes notifs" widget history ONLY — no system-notification
+     * mirror, no "Dernière notif" widget slot (mirror() below already covers both of those for
+     * the ALL-mode bootstrap and for the single LATEST-mode notification promoted into the shared
+     * slot). Used by rebuildStateFromActiveNotifications() to catch up every OTHER currently-active
+     * LATEST-mode notification too, so "Toutes notifs" isn't stuck showing just one entry per
+     * LATEST-mode app after a listener reconnect (see that call site's comment, 17/09/2026). Same
+     * title/image extraction as mirror(), duplicated rather than shared since mirror() also builds
+     * the actual system notification, which this deliberately skips. Wrapped in try/catch, same
+     * reasoning as mirror()'s own push block: a widget nice-to-have must never break the catch-up.
+     */
+    private fun pushAllNotifsHistoryOnly(sbn: StatusBarNotification) {
+        try {
+            val extras = sbn.notification.extras
+            val rawTitle = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.takeIf { it.isNotBlank() }
+                ?: getAppName(sbn.packageName)
+            val rawText = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()
+                ?: extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()
+                ?: ""
+            val invert = AppMirrorPrefs.getInvertTitleText(applicationContext, sbn.packageName)
+            val title = if (invert) rawText.ifBlank { rawTitle } else rawTitle
+            val image = NotificationImageExtractor.extract(applicationContext, sbn)
+
+            NowBarWidgetProvider.pushToAllNotifications(
+                applicationContext,
+                AllNotifEntryPush(
+                    key = sbn.key,
+                    postTimeMillis = sbn.postTime,
+                    kind = WidgetAllNotificationsStore.Kind.GENERIC,
+                    title = title,
+                    packageName = sbn.packageName,
+                    image = image,
+                    contentIntent = sbn.notification.contentIntent
+                )
+            )
+        } catch (_: Throwable) {
+            // Same reasoning as mirror()'s own push block: never let this widget nice-to-have
+            // crash the listener during catch-up.
         }
     }
 
