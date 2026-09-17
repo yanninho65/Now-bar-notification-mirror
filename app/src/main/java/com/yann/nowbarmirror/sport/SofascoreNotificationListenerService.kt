@@ -179,6 +179,24 @@ class SofascoreNotificationListenerService : NotificationListenerService() {
         if (sbn.packageName == SOFASCORE_PACKAGE) {
             SofascoreApiOverridePrefs.remove(applicationContext, sbn.key)
             refresh()
+            removeFromAllNotificationsHistory(sbn.key)
+        }
+    }
+
+    /**
+     * "Toutes notifs" (17/09/2026, Yann: "Si une notification a été supprimée du centre de
+     * notifs, elle ne doit plus apparaître dans le widget") — [refresh] above already drops this
+     * match from the dedicated Sport view (it recomputes from activeSofascoreNotifications()),
+     * but the "Toutes notifs" history is a SEPARATE store (see WidgetAllNotificationsStore) that
+     * needs its own explicit removal. No-op if this key was never pushed there. Wrapped in
+     * try/catch for the same reason as [pushWidgetMatches]/[pushToAllNotificationsHistory]: never
+     * let a widget nice-to-have take this service down.
+     */
+    private fun removeFromAllNotificationsHistory(key: String) {
+        try {
+            WidgetAllNotificationsStore.remove(applicationContext, key)
+            NowBarWidgetProvider.requestUpdate(applicationContext)
+        } catch (_: Throwable) {
         }
     }
 
