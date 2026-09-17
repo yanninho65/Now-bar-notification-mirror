@@ -225,6 +225,15 @@
             period/status at the bottom. Same top-to-bottom order as the watch's SMALL_IMAGE
             complication (wear/ComplicationImageComposer.kt), reworked to compact phone
             proportions rather than copying its pixel sizes (tuned for a 320px circular bitmap).
+
+            Tile 62dp wide, logo 30dp tall (grown from 52dp/20dp on 17/09/2026 at Yann's request:
+            "Pour la vue sport, grossir les logos"). The Sofascore-match tiles inside "Toutes
+            notifs" below (widget_notif_N_match_image) grew to this same 62dp/30dp size the same
+            day, once Yann clarified that an appearance change to a Sofascore tile here should
+            always carry over there too — see that view's own doc comment below for the corrected
+            reasoning. 5 tiles at this width make the row noticeably wider than before — widen
+            further on your lock-widget host if needed, same note as the original 4->5 slot change
+            below.
         -->
         <LinearLayout
             android:id="@+id/widget_sofascore_content"
@@ -236,7 +245,7 @@
 
             <LinearLayout
                 android:id="@+id/widget_match_1"
-                android:layout_width="52dp"
+                android:layout_width="62dp"
                 android:layout_height="wrap_content"
                 android:layout_marginEnd="6dp"
                 android:orientation="vertical"
@@ -246,8 +255,8 @@
                 <ImageView
                     android:id="@+id/widget_match_1_image"
                     android:layout_width="wrap_content"
-                    android:layout_height="20dp"
-                    android:maxWidth="52dp"
+                    android:layout_height="30dp"
+                    android:maxWidth="62dp"
                     android:adjustViewBounds="true"
                     android:scaleType="fitCenter"
                     android:contentDescription="@null" />
@@ -276,7 +285,7 @@
 
             <LinearLayout
                 android:id="@+id/widget_match_2"
-                android:layout_width="52dp"
+                android:layout_width="62dp"
                 android:layout_height="wrap_content"
                 android:layout_marginEnd="6dp"
                 android:orientation="vertical"
@@ -286,8 +295,8 @@
                 <ImageView
                     android:id="@+id/widget_match_2_image"
                     android:layout_width="wrap_content"
-                    android:layout_height="20dp"
-                    android:maxWidth="52dp"
+                    android:layout_height="30dp"
+                    android:maxWidth="62dp"
                     android:adjustViewBounds="true"
                     android:scaleType="fitCenter"
                     android:contentDescription="@null" />
@@ -316,7 +325,7 @@
 
             <LinearLayout
                 android:id="@+id/widget_match_3"
-                android:layout_width="52dp"
+                android:layout_width="62dp"
                 android:layout_height="wrap_content"
                 android:layout_marginEnd="6dp"
                 android:orientation="vertical"
@@ -326,8 +335,8 @@
                 <ImageView
                     android:id="@+id/widget_match_3_image"
                     android:layout_width="wrap_content"
-                    android:layout_height="20dp"
-                    android:maxWidth="52dp"
+                    android:layout_height="30dp"
+                    android:maxWidth="62dp"
                     android:adjustViewBounds="true"
                     android:scaleType="fitCenter"
                     android:contentDescription="@null" />
@@ -356,7 +365,7 @@
 
             <LinearLayout
                 android:id="@+id/widget_match_4"
-                android:layout_width="52dp"
+                android:layout_width="62dp"
                 android:layout_height="wrap_content"
                 android:layout_marginEnd="6dp"
                 android:orientation="vertical"
@@ -366,8 +375,8 @@
                 <ImageView
                     android:id="@+id/widget_match_4_image"
                     android:layout_width="wrap_content"
-                    android:layout_height="20dp"
-                    android:maxWidth="52dp"
+                    android:layout_height="30dp"
+                    android:maxWidth="62dp"
                     android:adjustViewBounds="true"
                     android:scaleType="fitCenter"
                     android:contentDescription="@null" />
@@ -397,7 +406,7 @@
             <!-- 5th slot, added 17/09/2026 at Yann's request — exact copy of widget_match_1..4 above. -->
             <LinearLayout
                 android:id="@+id/widget_match_5"
-                android:layout_width="52dp"
+                android:layout_width="62dp"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
                 android:gravity="center_horizontal"
@@ -406,8 +415,8 @@
                 <ImageView
                     android:id="@+id/widget_match_5_image"
                     android:layout_width="wrap_content"
-                    android:layout_height="20dp"
-                    android:maxWidth="52dp"
+                    android:layout_height="30dp"
+                    android:maxWidth="62dp"
                     android:adjustViewBounds="true"
                     android:scaleType="fitCenter"
                     android:contentDescription="@null" />
@@ -446,7 +455,7 @@
         </LinearLayout>
 
         <!--
-            NEW (17/09/2026) — "Toutes notifs" view. Same fixed-slot pattern and same 52dp column
+            NEW (17/09/2026) — "Toutes notifs" view. Same fixed-slot pattern and same 62dp column
             width as widget_sofascore_content above ("Toutes notifs : resemble au widget sport"),
             up to 5 slots (widget_notif_1..5). EACH slot can render in either of two styles,
             switched per-entry by NowBarWidgetProvider.applyAllNotifs depending on
@@ -454,24 +463,34 @@
             philosophy as the rest of this file, see widget_match_N's class doc, rather than
             RemoteViews.addView with separate sub-layouts) and toggled with GONE/VISIBLE:
             - GENERIC (any mirrored app's notification): widget_notif_N_photo (the notification's
-              own image, 32dp centerCrop circular — same treatment/size as widget_image above) with
+              own image, 32dp centerCrop circular — same treatment/size as widget_image above,
+              UNCHANGED by the logo-size correction below since it isn't a Sofascore logo) with
               widget_notif_N_badge (the source app's icon, small, bottom-end corner — "en petit
               dans l'angle de l'image, l'icône [de l'app]") layered on top via the shared
               widget_notif_N_image_area FrameLayout. If the notification has NO image,
               widget_notif_N_photo shows the app's icon directly instead (full size, no badge —
               "si pas d'image [...] mettre juste icône appli à la place de l'image") and the badge
-              stays hidden. Title below, up to 2 lines, fixed 52dp width + ellipsize so a long title
-              is truncated rather than ever bleeding into the next tile.
+              stays hidden. Title below, up to 2 lines, fixed-width (matches the tile) + ellipsize
+              so a long title is truncated rather than ever bleeding into the next tile.
             - SOFASCORE_MATCH: widget_notif_N_match_image/score/period, STRUCTURALLY IDENTICAL to
-              widget_match_N_image/score/period above (same ids pattern, same sizes) — "Garder la
-              même présentation qu'aujourd'hui pour les notifs de Sofascore". A separate
-              declaration rather than the literal same views, since widget_match_N's views can't be
-              moved into a shared slot without also being in this FrameLayout at the same time as
-              the Sport view — but pixel-for-pixel the same look.
+              widget_match_N_image/score/period above (same ids pattern, and — CORRECTED
+              17/09/2026 — now the SAME 62dp tile / 30dp logo size again too) — "Garder la même
+              présentation qu'aujourd'hui pour les notifs de Sofascore". A separate declaration
+              rather than the literal same views, since widget_match_N's views can't be moved into
+              a shared slot without also being in this FrameLayout at the same time as the Sport
+              view. Briefly kept at the smaller original 52dp/20dp size right after widget_match_N
+              grew (same day) on the assumption that "grossir les logos" only meant the dedicated
+              Sport view — Yann corrected that same-day: any appearance change to a Sofascore
+              match tile in the Sport view should carry over to its Sofascore tiles here too, so
+              the two stay visually aligned (this is now a standing rule for this project, not a
+              one-off — see the project's own working notes). The tile's own outer width grew to
+              62dp along with it (rather than only the inner match_image), since RemoteViews has no
+              clean way to give one shared fixed slot two different widths depending on which
+              entry kind currently occupies it — the GENERIC content above (photo/title) simply
+              gets a little more breathing room at 62dp, no functional change there.
             widget_notif_N_image_area is a fixed 32dp-tall box regardless of which style is
-            showing (the match image is only 20dp tall, vertically centered within it) so every
-            tile's text row lines up at the same height whether its neighbour is a photo or a
-            match tile.
+            showing (the match image is 30dp tall, vertically centered within it) so every tile's
+            text row lines up at the same height whether its neighbour is a photo or a match tile.
             Tapping a tile only opens the notification (contentIntent) — it is never wired to any
             dismiss/cancel action, so it never removes the notification (see
             NowBarWidgetProvider.applyAllNotifs).
@@ -486,7 +505,7 @@
 
             <LinearLayout
                 android:id="@+id/widget_notif_1"
-                android:layout_width="52dp"
+                android:layout_width="62dp"
                 android:layout_height="wrap_content"
                 android:layout_marginEnd="6dp"
                 android:orientation="vertical"
@@ -495,7 +514,7 @@
 
                 <FrameLayout
                     android:id="@+id/widget_notif_1_image_area"
-                    android:layout_width="52dp"
+                    android:layout_width="62dp"
                     android:layout_height="32dp">
 
                     <ImageView
@@ -509,9 +528,9 @@
                     <ImageView
                         android:id="@+id/widget_notif_1_match_image"
                         android:layout_width="wrap_content"
-                        android:layout_height="20dp"
+                        android:layout_height="30dp"
                         android:layout_gravity="center"
-                        android:maxWidth="52dp"
+                        android:maxWidth="62dp"
                         android:adjustViewBounds="true"
                         android:scaleType="fitCenter"
                         android:contentDescription="@null"
@@ -532,7 +551,7 @@
 
                 <TextView
                     android:id="@+id/widget_notif_1_title"
-                    android:layout_width="52dp"
+                    android:layout_width="62dp"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="1dp"
                     android:gravity="center_horizontal"
@@ -565,7 +584,7 @@
 
             <LinearLayout
                 android:id="@+id/widget_notif_2"
-                android:layout_width="52dp"
+                android:layout_width="62dp"
                 android:layout_height="wrap_content"
                 android:layout_marginEnd="6dp"
                 android:orientation="vertical"
@@ -574,7 +593,7 @@
 
                 <FrameLayout
                     android:id="@+id/widget_notif_2_image_area"
-                    android:layout_width="52dp"
+                    android:layout_width="62dp"
                     android:layout_height="32dp">
 
                     <ImageView
@@ -588,9 +607,9 @@
                     <ImageView
                         android:id="@+id/widget_notif_2_match_image"
                         android:layout_width="wrap_content"
-                        android:layout_height="20dp"
+                        android:layout_height="30dp"
                         android:layout_gravity="center"
-                        android:maxWidth="52dp"
+                        android:maxWidth="62dp"
                         android:adjustViewBounds="true"
                         android:scaleType="fitCenter"
                         android:contentDescription="@null"
@@ -611,7 +630,7 @@
 
                 <TextView
                     android:id="@+id/widget_notif_2_title"
-                    android:layout_width="52dp"
+                    android:layout_width="62dp"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="1dp"
                     android:gravity="center_horizontal"
@@ -644,7 +663,7 @@
 
             <LinearLayout
                 android:id="@+id/widget_notif_3"
-                android:layout_width="52dp"
+                android:layout_width="62dp"
                 android:layout_height="wrap_content"
                 android:layout_marginEnd="6dp"
                 android:orientation="vertical"
@@ -653,7 +672,7 @@
 
                 <FrameLayout
                     android:id="@+id/widget_notif_3_image_area"
-                    android:layout_width="52dp"
+                    android:layout_width="62dp"
                     android:layout_height="32dp">
 
                     <ImageView
@@ -667,9 +686,9 @@
                     <ImageView
                         android:id="@+id/widget_notif_3_match_image"
                         android:layout_width="wrap_content"
-                        android:layout_height="20dp"
+                        android:layout_height="30dp"
                         android:layout_gravity="center"
-                        android:maxWidth="52dp"
+                        android:maxWidth="62dp"
                         android:adjustViewBounds="true"
                         android:scaleType="fitCenter"
                         android:contentDescription="@null"
@@ -690,7 +709,7 @@
 
                 <TextView
                     android:id="@+id/widget_notif_3_title"
-                    android:layout_width="52dp"
+                    android:layout_width="62dp"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="1dp"
                     android:gravity="center_horizontal"
@@ -723,7 +742,7 @@
 
             <LinearLayout
                 android:id="@+id/widget_notif_4"
-                android:layout_width="52dp"
+                android:layout_width="62dp"
                 android:layout_height="wrap_content"
                 android:layout_marginEnd="6dp"
                 android:orientation="vertical"
@@ -732,7 +751,7 @@
 
                 <FrameLayout
                     android:id="@+id/widget_notif_4_image_area"
-                    android:layout_width="52dp"
+                    android:layout_width="62dp"
                     android:layout_height="32dp">
 
                     <ImageView
@@ -746,9 +765,9 @@
                     <ImageView
                         android:id="@+id/widget_notif_4_match_image"
                         android:layout_width="wrap_content"
-                        android:layout_height="20dp"
+                        android:layout_height="30dp"
                         android:layout_gravity="center"
-                        android:maxWidth="52dp"
+                        android:maxWidth="62dp"
                         android:adjustViewBounds="true"
                         android:scaleType="fitCenter"
                         android:contentDescription="@null"
@@ -769,7 +788,7 @@
 
                 <TextView
                     android:id="@+id/widget_notif_4_title"
-                    android:layout_width="52dp"
+                    android:layout_width="62dp"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="1dp"
                     android:gravity="center_horizontal"
@@ -802,7 +821,7 @@
 
             <LinearLayout
                 android:id="@+id/widget_notif_5"
-                android:layout_width="52dp"
+                android:layout_width="62dp"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
                 android:gravity="center_horizontal"
@@ -810,7 +829,7 @@
 
                 <FrameLayout
                     android:id="@+id/widget_notif_5_image_area"
-                    android:layout_width="52dp"
+                    android:layout_width="62dp"
                     android:layout_height="32dp">
 
                     <ImageView
@@ -824,9 +843,9 @@
                     <ImageView
                         android:id="@+id/widget_notif_5_match_image"
                         android:layout_width="wrap_content"
-                        android:layout_height="20dp"
+                        android:layout_height="30dp"
                         android:layout_gravity="center"
-                        android:maxWidth="52dp"
+                        android:maxWidth="62dp"
                         android:adjustViewBounds="true"
                         android:scaleType="fitCenter"
                         android:contentDescription="@null"
@@ -847,7 +866,7 @@
 
                 <TextView
                     android:id="@+id/widget_notif_5_title"
-                    android:layout_width="52dp"
+                    android:layout_width="62dp"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="1dp"
                     android:gravity="center_horizontal"
