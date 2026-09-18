@@ -126,17 +126,9 @@ class MirrorNotificationListener : NotificationListenerService() {
         // Rebuild the LATEST-mode fallback queue from every currently posted notification
         // belonging to an app set to "Dernière notif" (same eligibility filters as
         // onNotificationPosted), oldest -> newest, so a swipe right after a process restart
-        // still has the right candidate to promote. Sofascore is excluded here (and everywhere
-        // else in this class, see onNotificationPosted's guard) — it's fully owned by
-        // SofascoreNotificationListenerService, which already feeds both the dedicated Sport
-        // view and its own match-tile entries in "Toutes notifs"; mirroring it AGAIN here as a
-        // plain app used to race that dedicated listener for the same "Toutes notifs" tile
-        // (whichever push landed last decided whether it rendered as a match card or a generic
-        // one, and sometimes left both side by side) — see MirrorNotificationListener's own
-        // README section on this, 18/09/2026.
+        // still has the right candidate to promote.
         all.asSequence()
             .filter { it.packageName != packageName }
-            .filter { it.packageName != SofascoreNotificationListenerService.SOFASCORE_PACKAGE }
             .filter { !it.isOngoing }
             .filter { it.notification.flags and Notification.FLAG_GROUP_SUMMARY == 0 }
             .filter { !isMediaPlaybackNotification(it) }
@@ -225,7 +217,6 @@ class MirrorNotificationListener : NotificationListenerService() {
 
         all.asSequence()
             .filter { it.packageName != packageName }
-            .filter { it.packageName != SofascoreNotificationListenerService.SOFASCORE_PACKAGE }
             .filter { !it.isOngoing }
             .filter { it.notification.flags and Notification.FLAG_GROUP_SUMMARY == 0 }
             .filter { !isMediaPlaybackNotification(it) }
@@ -260,10 +251,11 @@ class MirrorNotificationListener : NotificationListenerService() {
      * Tops the shared "Toutes notifs" history back up to WidgetAllNotificationsStore.MAX_SLOTS
      * using notifications that are ALREADY active in the shade right now but that history hasn't
      * (or no longer has) captured — every currently active, eligible (mirror mode != NONE, not
-     * ongoing, not a group summary, not media playback, not this app's own mirrors, not
-     * Sofascore's — see onNotificationPosted's own filters, duplicated here since this runs from
-     * a fresh activeNotifications() snapshot rather than from a single posted event) notification
-     * gets pushed again.
+     * ongoing, not a group summary, not media playback, not this app's own mirrors — see
+     * onNotificationPosted's own filters, duplicated here since this runs from a fresh
+     * activeNotifications() snapshot rather than from a single posted event) notification gets
+     * pushed again through [pushAllNotifsHistoryOnly], which is also where Sofascore's package is
+     * excluded (see that function's doc) — no need to repeat that filter here.
      *
      * Added 18/09/2026 — Yann: "le widget doit afficher toutes les notifications dans le centre de
      * notification [...] aujourd'hui je dois forcer l'arrêt pour que l'application enregistre les 5
@@ -285,7 +277,6 @@ class MirrorNotificationListener : NotificationListenerService() {
 
         all.asSequence()
             .filter { it.packageName != packageName }
-            .filter { it.packageName != SofascoreNotificationListenerService.SOFASCORE_PACKAGE }
             .filter { !it.isOngoing }
             .filter { it.notification.flags and Notification.FLAG_GROUP_SUMMARY == 0 }
             .filter { !isMediaPlaybackNotification(it) }
@@ -298,17 +289,6 @@ class MirrorNotificationListener : NotificationListenerService() {
         if (!ready.get()) return
         if (!ServicePrefs.isEnabled(applicationContext)) return
         if (sbn.packageName == packageName) return
-        // Sofascore is fully owned by SofascoreNotificationListenerService, which already feeds
-        // both the dedicated Sport view and its own match-tile entries in "Toutes notifs" — if
-        // its package was ALSO selected here (as a plain "Dernière notif"/"Toutes" app), this
-        // listener and that dedicated one raced to push the SAME "Toutes notifs" tile with
-        // different presentations (generic image+title vs. match score/period), so whichever
-        // push landed last decided how it rendered, and sometimes both ended up coexisting as two
-        // separate tiles for the same match (18/09/2026, Yann: "j'ai encore des applis Sofascore
-        // qui s'affichent bien en vue sport mais s'affichent comme les autres notifs en vue toutes
-        // notifs. C'est aléatoire et parfois j'ai même deux icônes pour un même match.") — ignore
-        // it here unconditionally, regardless of what AppMirrorPrefs says for it.
-        if (sbn.packageName == SofascoreNotificationListenerService.SOFASCORE_PACKAGE) return
         if (sbn.isOngoing) return
         // Group-summary notifications (e.g. WhatsApp's "X new messages" bundle) carry no
         // per-conversation photo or actions — skip them so they don't overwrite the real one.
@@ -459,8 +439,21 @@ class MirrorNotificationListener : NotificationListenerService() {
      * title/image extraction as mirror(), duplicated rather than shared since mirror() also builds
      * the actual system notification, which this deliberately skips. Wrapped in try/catch, same
      * reasoning as mirror()'s own push block: a widget nice-to-have must never break the catch-up.
+     *
+     * Skips Sofascore's package unconditionally (18/09/2026): SofascoreNotificationListenerService
+     * already pushes its OWN entry for the same notification into this same shared history, in its
+     * proper match-tile shape (see WidgetAllNotificationsStore.Kind.SOFASCORE_MATCH) — pushing a
+     * second, generic (image+title) entry for it here raced that dedicated push (whichever landed
+     * last decided the tile's presentation, and sometimes both ended up coexisting as two tiles for
+     * one match — Yann: "j'ai encore des applis Sofascore qui s'affichent bien en vue sport mais
+     * s'affichent comme les autres notifs en vue toutes notifs [...] parfois j'ai même deux icônes
+     * pour un même match"). This does NOT stop Sofascore from being mirrored elsewhere when
+     * configured ALL/LATEST in the app-selection screen — mirror() still builds the real Now Bar
+     * notification and the widget's Dernière notif slot for it as normal; only ITS OWN push into
+     * "Toutes notifs" is skipped here (and in mirror() itself, see its own such guard).
      */
     private fun pushAllNotifsHistoryOnly(sbn: StatusBarNotification) {
+        if (sbn.packageName == SofascoreNotificationListenerService.SOFASCORE_PACKAGE) return
         try {
             val extras = sbn.notification.extras
             val rawTitle = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.takeIf { it.isNotBlank() }
@@ -589,20 +582,27 @@ class MirrorNotificationListener : NotificationListenerService() {
             // "latest" slot above (see WidgetAllNotificationsStore's class doc for why). Pushed for
             // every mirrored notification, ALL or LATEST mode alike, same universe as pushLive
             // above — one push per received event, whether that's a brand new notification or an
-            // existing one updated in place (same sbn.key).
-            NowBarWidgetProvider.pushToAllNotifications(
-                applicationContext,
-                AllNotifEntryPush(
-                    key = sbn.key,
-                    postTimeMillis = sbn.postTime,
-                    kind = WidgetAllNotificationsStore.Kind.GENERIC,
-                    title = rawTitle,
-                    packageName = sbn.packageName,
-                    isConversation = isConversationNotification(sbn),
-                    image = image,
-                    contentIntent = n.contentIntent
+            // existing one updated in place (same sbn.key). EXCEPT Sofascore (18/09/2026, see
+            // pushAllNotifsHistoryOnly's doc for the full reasoning) — Sofascore still gets a
+            // proper Now Bar notification and Dernière notif widget slot from this function when
+            // configured ALL/LATEST, same as any other app; only this one push, into the shared
+            // "Toutes notifs" history, is skipped for it, since SofascoreNotificationListenerService
+            // already feeds that same history with the correct match-tile presentation.
+            if (sbn.packageName != SofascoreNotificationListenerService.SOFASCORE_PACKAGE) {
+                NowBarWidgetProvider.pushToAllNotifications(
+                    applicationContext,
+                    AllNotifEntryPush(
+                        key = sbn.key,
+                        postTimeMillis = sbn.postTime,
+                        kind = WidgetAllNotificationsStore.Kind.GENERIC,
+                        title = rawTitle,
+                        packageName = sbn.packageName,
+                        isConversation = isConversationNotification(sbn),
+                        image = image,
+                        contentIntent = n.contentIntent
+                    )
                 )
-            )
+            }
         } catch (t: Throwable) {
             // TEMPORARY diagnostic: surfaces the exact failure on screen since this device
             // can't be hooked up to Android Studio for logcat. Safe to remove once the widget

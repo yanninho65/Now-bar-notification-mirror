@@ -16,7 +16,6 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.switchmaterial.SwitchMaterial
 import com.yann.nowbarmirror.R
-import com.yann.nowbarmirror.sport.SofascoreNotificationListenerService
 
 class AppSelectionActivity : AppCompatActivity() {
 
@@ -103,24 +102,12 @@ class AppSelectionActivity : AppCompatActivity() {
         recyclerView.adapter = AppSelectionAdapter(this, loadSelectableApps())
     }
 
-    /**
-     * User-facing apps only (i.e. apps with a launcher icon), excluding this app itself and
-     * Sofascore. Sofascore is deliberately left out here (18/09/2026): it's fully owned by
-     * SofascoreNotificationListenerService, which already feeds both the dedicated Sport view and
-     * its own match-tile entries in "Toutes notifs" — selecting it here too as a plain
-     * "Dernière notif"/"Toutes" app used to make MirrorNotificationListener race that dedicated
-     * listener for the same "Toutes notifs" tile (see MirrorNotificationListener.onNotificationPosted's
-     * guard), sometimes rendering it as a generic tile instead of a match card, sometimes leaving
-     * two tiles for the same match. MirrorNotificationListener now ignores Sofascore unconditionally
-     * regardless of what's stored here, but hiding the row too avoids the false impression that
-     * toggling it does anything.
-     */
+    /** User-facing apps only (i.e. apps with a launcher icon), excluding this app itself. */
     private fun loadSelectableApps(): List<SelectableApp> {
         val pm = packageManager
         return installedApplications(pm)
             .asSequence()
             .filter { it.packageName != packageName }
-            .filter { it.packageName != SofascoreNotificationListenerService.SOFASCORE_PACKAGE }
             .filter { pm.getLaunchIntentForPackage(it.packageName) != null }
             .map {
                 SelectableApp(
