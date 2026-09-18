@@ -22,6 +22,7 @@ import com.yann.nowbarmirror.settings.LatestModePrefs
 import com.yann.nowbarmirror.settings.MirrorMode
 import com.yann.nowbarmirror.settings.ServicePrefs
 import com.yann.nowbarmirror.settings.WidgetActionsPrefs
+import com.yann.nowbarmirror.sport.SofascoreNotificationListenerService
 import com.yann.nowbarmirror.widget.AllNotifEntryPush
 import com.yann.nowbarmirror.widget.NowBarWidgetProvider
 import com.yann.nowbarmirror.widget.WidgetAction
@@ -125,15 +126,37 @@ class MirrorNotificationListener : NotificationListenerService() {
         // Rebuild the LATEST-mode fallback queue from every currently posted notification
         // belonging to an app set to "Dernière notif" (same eligibility filters as
         // onNotificationPosted), oldest -> newest, so a swipe right after a process restart
-        // still has the right candidate to promote.
+        // still has the right candidate to promote. Sofascore is excluded here (and everywhere
+        // else in this class, see onNotificationPosted's guard) — it's fully owned by
+        // SofascoreNotificationListenerService, which already feeds both the dedicated Sport
+        // view and its own match-tile entries in "Toutes notifs"; mirroring it AGAIN here as a
+        // plain app used to race that dedicated listener for the same "Toutes notifs" tile
+        // (whichever push landed last decided whether it rendered as a match card or a generic
+        // one, and sometimes left both side by side) — see MirrorNotificationListener's own
+        // README section on this, 18/09/2026.
         all.asSequence()
             .filter { it.packageName != packageName }
+            .filter { it.packageName != SofascoreNotificationListenerService.SOFASCORE_PACKAGE }
             .filter { !it.isOngoing }
             .filter { it.notification.flags and Notification.FLAG_GROUP_SUMMARY == 0 }
             .filter { !isMediaPlaybackNotification(it) }
             .filter { AppMirrorPrefs.getMode(applicationContext, it.packageName) == MirrorMode.LATEST }
             .sortedBy { it.postTime }
             .forEach { latestModeActive[it.key] = it }
+
+        // Drops any "Toutes notifs" entry whose notification is no longer actually posted — a
+        // removal missed while this process was dead (Gmail marked read/deleted/opened from
+        // within Gmail itself, a calendar event deleted, or just this app being force-stopped)
+        // otherwise leaves that tile behind forever, since nothing else ever re-checks it against
+        // reality (18/09/2026, Yann, after a phone reboot: "il y avait 2 notifs dont une gmail
+        // alors que j'en avais aucune [...] il faut vraiment que l'appli lise l'existant"). See
+        // WidgetAllNotificationsStore.pruneAgainstActive's doc.
+        try {
+            WidgetAllNotificationsStore.pruneAgainstActive(applicationContext, all.toList())
+        } catch (_: Throwable) {
+            // The widget is a nice-to-have on top of the core mirror — never let a failure
+            // here take down this service.
+        }
 
         // Same staleness concern as the mirrors below: if the widget was pointing at a
         // notification that's no longer posted (removed while this process was dead), there
@@ -202,6 +225,7 @@ class MirrorNotificationListener : NotificationListenerService() {
 
         all.asSequence()
             .filter { it.packageName != packageName }
+            .filter { it.packageName != SofascoreNotificationListenerService.SOFASCORE_PACKAGE }
             .filter { !it.isOngoing }
             .filter { it.notification.flags and Notification.FLAG_GROUP_SUMMARY == 0 }
             .filter { !isMediaPlaybackNotification(it) }
@@ -222,12 +246,69 @@ class MirrorNotificationListener : NotificationListenerService() {
                 mirror(sbn, MIRROR_ID)
             }
         }
+
+        // Belt-and-braces top-up: everything eligible that's ALREADY active gets one more pass
+        // through "Toutes notifs" here, in case any of it was missed above (e.g. an ALL-mode
+        // notification that was already in allModeMirrors from before this reconnect, and so
+        // skipped the ALL-mode loop's `it.key !in allModeMirrors` filter, but had never actually
+        // reached "Toutes notifs" — same class of bug as the one fixed in onNotificationRemoved,
+        // see refillAllNotifsHistory's doc).
+        refillAllNotifsHistory(all.toList())
+    }
+
+    /**
+     * Tops the shared "Toutes notifs" history back up to WidgetAllNotificationsStore.MAX_SLOTS
+     * using notifications that are ALREADY active in the shade right now but that history hasn't
+     * (or no longer has) captured — every currently active, eligible (mirror mode != NONE, not
+     * ongoing, not a group summary, not media playback, not this app's own mirrors, not
+     * Sofascore's — see onNotificationPosted's own filters, duplicated here since this runs from
+     * a fresh activeNotifications() snapshot rather than from a single posted event) notification
+     * gets pushed again.
+     *
+     * Added 18/09/2026 — Yann: "le widget doit afficher toutes les notifications dans le centre de
+     * notification [...] aujourd'hui je dois forcer l'arrêt pour que l'application enregistre les 5
+     * derniers puis le nombre se réduit alors que j'ai généralement plus de 5 notifs donc ça
+     * devrait toujours être plein." Root cause: WidgetAllNotificationsStore.push() only ever runs
+     * from onNotificationPosted/the bootstrap above — dismissing one of the 5 tracked entries just
+     * shrinks the list, even when OTHER eligible notifications are still sitting in the shade,
+     * because nothing ever re-derives the history from what's actually still posted. Calling this
+     * with a fresh snapshot after ANY removal (see onNotificationRemoved) — not just at listener
+     * reconnect — is what keeps the widget "always a reflection of the notification center" rather
+     * than only catching up when the app gets force-stopped. Safe to call repeatedly and with
+     * already-tracked notifications included: push() keys each entry by (key, postTimeMillis) (or
+     * by key alone for a collapsing kind — see WidgetAllNotificationsStore's IDENTITY section), so
+     * re-pushing one already tracked just updates that tile in place, and the merge+cap-to-5 in
+     * push() naturally promotes whichever candidates are actually the most recent.
+     */
+    private fun refillAllNotifsHistory(all: List<StatusBarNotification>) {
+        if (!ServicePrefs.isEnabled(applicationContext)) return
+
+        all.asSequence()
+            .filter { it.packageName != packageName }
+            .filter { it.packageName != SofascoreNotificationListenerService.SOFASCORE_PACKAGE }
+            .filter { !it.isOngoing }
+            .filter { it.notification.flags and Notification.FLAG_GROUP_SUMMARY == 0 }
+            .filter { !isMediaPlaybackNotification(it) }
+            .filter { AppMirrorPrefs.getMode(applicationContext, it.packageName) != MirrorMode.NONE }
+            .sortedBy { it.postTime }
+            .forEach { sbn -> pushAllNotifsHistoryOnly(sbn) }
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         if (!ready.get()) return
         if (!ServicePrefs.isEnabled(applicationContext)) return
         if (sbn.packageName == packageName) return
+        // Sofascore is fully owned by SofascoreNotificationListenerService, which already feeds
+        // both the dedicated Sport view and its own match-tile entries in "Toutes notifs" — if
+        // its package was ALSO selected here (as a plain "Dernière notif"/"Toutes" app), this
+        // listener and that dedicated one raced to push the SAME "Toutes notifs" tile with
+        // different presentations (generic image+title vs. match score/period), so whichever
+        // push landed last decided how it rendered, and sometimes both ended up coexisting as two
+        // separate tiles for the same match (18/09/2026, Yann: "j'ai encore des applis Sofascore
+        // qui s'affichent bien en vue sport mais s'affichent comme les autres notifs en vue toutes
+        // notifs. C'est aléatoire et parfois j'ai même deux icônes pour un même match.") — ignore
+        // it here unconditionally, regardless of what AppMirrorPrefs says for it.
+        if (sbn.packageName == SofascoreNotificationListenerService.SOFASCORE_PACKAGE) return
         if (sbn.isOngoing) return
         // Group-summary notifications (e.g. WhatsApp's "X new messages" bundle) carry no
         // per-conversation photo or actions — skip them so they don't overwrite the real one.
@@ -322,6 +403,15 @@ class MirrorNotificationListener : NotificationListenerService() {
         // newer entries).
         try {
             WidgetAllNotificationsStore.remove(applicationContext, sbn.key, sbn.postTime)
+            // Removing a tracked entry just shrinks the widget's "Toutes notifs" list unless
+            // something re-derives it from what's actually still posted — refill the freed slot
+            // (if any) from the notification center right now, instead of only catching up the
+            // next time this listener reconnects. See refillAllNotifsHistory's doc, 18/09/2026.
+            activeNotifications?.let { all ->
+                val allList = all.toList()
+                WidgetAllNotificationsStore.pruneAgainstActive(applicationContext, allList)
+                refillAllNotifsHistory(allList)
+            }
             NowBarWidgetProvider.requestUpdate(applicationContext)
         } catch (_: Throwable) {
             // Same reasoning as above: never let this widget nice-to-have take the service down.
@@ -375,20 +465,21 @@ class MirrorNotificationListener : NotificationListenerService() {
             val extras = sbn.notification.extras
             val rawTitle = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.takeIf { it.isNotBlank() }
                 ?: getAppName(sbn.packageName)
-            val rawText = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()
-                ?: extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()
-                ?: ""
-            val invert = AppMirrorPrefs.getInvertTitleText(applicationContext, sbn.packageName)
-            val title = if (invert) rawText.ifBlank { rawTitle } else rawTitle
             val image = NotificationImageExtractor.extract(applicationContext, sbn)
 
+            // Deliberately NOT applying the per-app "Titre ↔ texte" invert flag here — that
+            // setting is a Now Bar-only concern (see mirror()'s own note on this), and this
+            // function never touches the Now Bar's own system notification, only "Toutes
+            // notifs" history. Always the ORIGINAL title (18/09/2026, Yann: "ne pas tenir
+            // compte des applis où j'ai indiqué qu'il faut inverser titre et texte [...]
+            // l'inversion ne doit servir que pour la now bar").
             NowBarWidgetProvider.pushToAllNotifications(
                 applicationContext,
                 AllNotifEntryPush(
                     key = sbn.key,
                     postTimeMillis = sbn.postTime,
                     kind = WidgetAllNotificationsStore.Kind.GENERIC,
-                    title = title,
+                    title = rawTitle,
                     packageName = sbn.packageName,
                     isConversation = isConversationNotification(sbn),
                     image = image,
@@ -438,9 +529,17 @@ class MirrorNotificationListener : NotificationListenerService() {
         // price alert app: title = "AAPL +5%", text = generic body copy). shortChipText()
         // below prefers `text` for the collapsed pill, so swapping here is what actually
         // puts the title in the pill for those apps.
+        //
+        // Now-Bar-ONLY (18/09/2026, Yann: "pour la vue notification texte et toutes notifs, ne
+        // pas tenir compte des applis où j'ai indiqué qu'il faut inverser titre et texte [...]
+        // l'inversion ne doit servir que pour la now bar") — nowBarTitle/nowBarText below feed
+        // ONLY the actual system notification built further down (the real Samsung Now Bar
+        // surface). Both widget surfaces this function also feeds — pushLive (the widget's
+        // single-notification/"texte" view) and pushToAllNotifications ("Toutes notifs") —
+        // deliberately keep using the ORIGINAL rawTitle/rawText below instead, never these.
         val invert = AppMirrorPrefs.getInvertTitleText(applicationContext, sbn.packageName)
-        val title = if (invert) rawText.ifBlank { rawTitle } else rawTitle
-        val text = if (invert) rawTitle else rawText
+        val nowBarTitle = if (invert) rawText.ifBlank { rawTitle } else rawTitle
+        val nowBarText = if (invert) rawTitle else rawText
 
         // Extraction fusionnée avec le traitement Sofascore lors du rapprochement avec
         // Sport Watch Complication — voir NotificationImageExtractor.
@@ -477,8 +576,8 @@ class MirrorNotificationListener : NotificationListenerService() {
             NowBarWidgetProvider.pushLive(
                 context = applicationContext,
                 key = sbn.key,
-                title = title,
-                text = text,
+                title = rawTitle,
+                text = rawText,
                 packageName = sbn.packageName,
                 contentIntent = n.contentIntent,
                 image = image,
@@ -497,7 +596,7 @@ class MirrorNotificationListener : NotificationListenerService() {
                     key = sbn.key,
                     postTimeMillis = sbn.postTime,
                     kind = WidgetAllNotificationsStore.Kind.GENERIC,
-                    title = title,
+                    title = rawTitle,
                     packageName = sbn.packageName,
                     isConversation = isConversationNotification(sbn),
                     image = image,
@@ -518,12 +617,12 @@ class MirrorNotificationListener : NotificationListenerService() {
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setContentTitle(title)
-            .setContentText(text)
+            .setContentTitle(nowBarTitle)
+            .setContentText(nowBarText)
             // Collapsed pill content. Chip is max 96dp wide: text only renders if it fits,
             // otherwise the system falls back to icon-only — keep this short.
-            .setShortCriticalText(shortChipText(text, title))
-            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setShortCriticalText(shortChipText(nowBarText, nowBarTitle))
+            .setStyle(NotificationCompat.BigTextStyle().bigText(nowBarText))
             .setOngoing(true)
             .setAutoCancel(false)
             .setOnlyAlertOnce(true)

@@ -3,6 +3,7 @@ package com.yann.nowbarmirror.widget
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.service.notification.StatusBarNotification
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -279,6 +280,69 @@ object WidgetAllNotificationsStore {
             )
         }
         save(context, kept)
+    }
+
+    /**
+     * Drops every entry whose underlying notification is no longer present among [active] — a
+     * fresh getActiveNotifications() snapshot from EITHER listener service (MirrorNotificationListener
+     * or SofascoreNotificationListenerService both see the whole notification shade, not just their
+     * own package, so either one can supply it). Uses the SAME identity rules as [remove] (see the
+     * class doc's IDENTITY section): a collapsing entry (Sofascore match, conversation) stays valid
+     * as long as ANY active notification still carries its [Data.key]; anything else needs the
+     * exact (key, postTimeMillis) pair to still be posted.
+     *
+     * Added 18/09/2026 — Yann, after force-stopping the app to get "Toutes notifs" to catch up, then
+     * seeing entries (a Gmail notification marked read/deleted/opened from within Gmail itself, a
+     * deleted calendar event) that never disappeared even though they were long gone from the
+     * notification center, then after a phone reboot finding 2 stale entries (one Gmail) despite
+     * having none active: "il faut vraiment que l'appli lise l'existant, elle s'apercevrait que la
+     * notif gmail n'y est plus [...] comme si l'appli gardait en mémoire alors qu'elle doit lire."
+     * Root cause: this store is only ever updated by push()/remove() reacting to
+     * onNotificationPosted/onNotificationRemoved events — a removal event MISSED because this
+     * process was dead at the time (killed in the background, force-stopped, or the phone rebooted)
+     * left the entry behind forever, since nothing ever re-checked it against reality. This function
+     * is that missing re-check: call it whenever a fresh [active] snapshot is available (listener
+     * (re)connect above all — see MirrorNotificationListener.rebuildStateFromActiveNotifications and
+     * SofascoreNotificationListenerService.bootstrapAllNotificationsHistory) so those stale entries
+     * get dropped instead of surviving indefinitely. No-op if nothing is actually stale, so callers
+     * can call this unconditionally on every reconnect.
+     */
+    fun pruneAgainstActive(context: Context, active: List<StatusBarNotification>) {
+        val existing = get(context)
+        if (existing.isEmpty()) return
+
+        fun isStillActive(data: Data): Boolean {
+            return if (collapsesByKeyAlone(data.kind, data.isConversation)) {
+                active.any { it.key == data.key }
+            } else {
+                active.any { it.key == data.key && it.postTime == data.postTimeMillis }
+            }
+        }
+
+        val kept = existing.filter(::isStillActive)
+        if (kept.size == existing.size) return
+
+        save(
+            context,
+            kept.map { data ->
+                PersistableEntry(
+                    key = data.key,
+                    kind = data.kind,
+                    postTimeMillis = data.postTimeMillis,
+                    title = data.title,
+                    packageName = data.packageName,
+                    isConversation = data.isConversation,
+                    homeTeam = data.homeTeam,
+                    awayTeam = data.awayTeam,
+                    homeScore = data.homeScore,
+                    awayScore = data.awayScore,
+                    lastScorer = data.lastScorer,
+                    status = data.status,
+                    apiSource = data.apiSource,
+                    image = data.imageFile?.let { BitmapFactory.decodeFile(it.path) }
+                )
+            }
+        )
     }
 
     fun get(context: Context): List<Data> {

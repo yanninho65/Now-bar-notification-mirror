@@ -127,8 +127,22 @@ class SofascoreNotificationListenerService : NotificationListenerService() {
      * reconnect: [pushToAllNotificationsHistory] keys each entry by (sbn.key, sbn.postTime) — see
      * WidgetAllNotificationsStore's IDENTITY section — so re-pushing an already-known notification
      * just updates that tile in place rather than duplicating it.
+     *
+     * ALSO prunes the shared history against the FULL notification shade first (18/09/2026, same
+     * fix as MirrorNotificationListener.rebuildStateFromActiveNotifications — see
+     * WidgetAllNotificationsStore.pruneAgainstActive's doc): a Sofascore match-tile entry whose
+     * onNotificationRemoved was missed while this process was dead (killed in the background, or
+     * the phone rebooted) would otherwise sit there forever, exactly like the generic-entry bug
+     * Yann reported for Gmail/Calendar. `activeNotifications` here (not
+     * [activeSofascoreNotifications]) since pruning has to validate GENERIC entries from other
+     * apps too, not just Sofascore's own.
      */
     private fun bootstrapAllNotificationsHistory() {
+        try {
+            activeNotifications?.let { all -> WidgetAllNotificationsStore.pruneAgainstActive(applicationContext, all.toList()) }
+        } catch (_: Throwable) {
+            // Voir la doc de la fonction : le widget ne doit jamais faire tomber ce service.
+        }
         val notifications = activeSofascoreNotifications() ?: return
         notifications.forEach { sbn -> pushToAllNotificationsHistory(sbn) }
     }
@@ -217,6 +231,11 @@ class SofascoreNotificationListenerService : NotificationListenerService() {
     private fun removeFromAllNotificationsHistory(key: String, postTimeMillis: Long) {
         try {
             WidgetAllNotificationsStore.remove(applicationContext, key, postTimeMillis)
+            // Same top-up as MirrorNotificationListener.refillAllNotifsHistory: dropping this
+            // entry just shrinks "Toutes notifs" unless something re-pushes whatever else is
+            // still actually active — re-push every currently active Sofascore match so a
+            // freed slot gets refilled immediately instead of only at the next reconnect.
+            activeSofascoreNotifications()?.forEach { sbn -> pushToAllNotificationsHistory(sbn) }
             NowBarWidgetProvider.requestUpdate(applicationContext)
         } catch (_: Throwable) {
         }
