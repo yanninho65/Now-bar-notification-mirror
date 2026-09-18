@@ -1,0 +1,22 @@
+<!--
+    Generic notification-bell glyph (NEW 18/09/2026) — the standard Material "notifications"
+    pictogram, same style/weight as this app's other hand-drawn white silhouette icons
+    (ic_widget_dismiss.xml, ic_widget_switch_view.xml). Used as:
+    - widget_app_icon's fallback in the "Toutes notifs" view (see
+      NowBarWidgetProvider.applyAllNotifsIcon) and whenever the LATEST view has nothing to show
+      (see applyLatestContent's empty branch / emptyViews) — Yann: "Remplacer l'icône sur la
+      gauche en vue toutes notifs par une cloche représentant notification. Idem quand il n'y a
+      pas de notifs en vue texte."
+    - the small badge layered over the rotating-arrows glyph for the SPORT view's right toggle
+      (see ic_widget_switch_to_notifs.xml) — "En vue sport, sur la droite, remplacer les flèches
+      par un bouton cloche et flèches qui tourne."
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="@android:color/white"
+        android:pathData="M12,22c1.1,0 2,-0.9 2,-2h-4C10,21.1 10.9,22 12,22zM18,16v-5c0,-3.07 -1.64,-5.64 -4.5,-6.32V4c0,-0.83 -0.67,-1.5 -1.5,-1.5s-1.5,0.67 -1.5,1.5v0.68C7.63,5.36 6,7.92 6,11v5l-2,2v1h16v-1l-2,-2z" />
+</vector>

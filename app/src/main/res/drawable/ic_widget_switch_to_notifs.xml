@@ -1,0 +1,33 @@
+<!--
+    Right-toggle icon while the widget's SPORT view is showing (NEW 18/09/2026, Yann: "En vue
+    sport, sur la droite, remplacer les flèches par un bouton cloche et flèches qui tourne. Même
+    comportement.") — the existing rotating-arrows glyph (ic_widget_switch_view) with a small
+    notification-bell badge in the bottom-end corner, same badge-over-glyph composition already
+    used for the app-icon badge on a generic "Toutes notifs" tile (widget_notif_N_badge, 14dp over
+    a 32dp image) — a dark circular backdrop first so the white bell reads clearly against the
+    white arrows underneath it. Purely static (no runtime bitmap needed, unlike the Sofascore
+    variant below), so it's just assigned via RemoteViews.setImageViewResource — see
+    NowBarWidgetProvider.applyRightToggleIcon.
+
+    The behavior stays exactly what the plain arrows icon already did (toggleSportAllNotifs) —
+    only the SPORT-view icon changes, to indicate where tapping it leads (the "Toutes notifs"
+    view). See NowBarWidgetProvider.sofascoreToggleIconBitmap for the symmetric ALL_NOTIFS-view
+    icon (a real, runtime-derived white silhouette of Sofascore's own icon — never a hand-drawn
+    recreation of it, since that's a real app's own logo).
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@drawable/ic_widget_switch_view" />
+    <item
+        android:width="13dp"
+        android:height="13dp"
+        android:gravity="bottom|end">
+        <shape android:shape="oval">
+            <solid android:color="#CC1A2230" />
+        </shape>
+    </item>
+    <item
+        android:width="10dp"
+        android:height="10dp"
+        android:gravity="bottom|end"
+        android:drawable="@drawable/ic_notification_bell" />
+</layer-list>

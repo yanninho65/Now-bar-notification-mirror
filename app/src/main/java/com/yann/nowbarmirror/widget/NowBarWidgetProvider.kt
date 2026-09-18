@@ -9,6 +9,7 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.PorterDuff
 import android.graphics.PorterDuffXfermode
@@ -35,10 +36,18 @@ data class WidgetAction(
  * its doc. [image] is Sofascore's own combined notification image (may be null, see
  * NotificationImageExtractor) and [contentIntent] is that SPECIFIC notification's own live
  * PendingIntent — tapping a match tile must open Sofascore on that exact match (same as tapping
- * the notification itself) WITHOUT cancelling the source notification, see
- * applySofascoreMatches. Neither [image] nor [contentIntent] is persisted (see
- * SofascoreWidgetStore) — only held in memory for the current process, same limitation as
- * [WidgetAction] above and the mirror's own liveContentIntent.
+ * the notification itself) WITHOUT cancelling the source notification, see applySofascoreMatches.
+ * Neither [image] nor [contentIntent]/[actions] is persisted (see SofascoreWidgetStore) — only
+ * held in memory for the current process, same limitation as [WidgetAction] above and the mirror's
+ * own liveContentIntent.
+ *
+ * [title]/[text] (NEW 18/09/2026, "peek" feature) are the raw Android notification title/text for
+ * this match ("$homeTeam - $awayTeam" / the latest score line — see
+ * SofascoreNotificationListenerService.rawTitleAndText) — see WidgetPeekPrefs' class doc for what
+ * they're used for. [actions] mirrors [WidgetAction] handling on the mirror side (n.actions, gated
+ * by WidgetActionsPrefs) — almost always empty in practice (Sofascore's own notifications rarely
+ * carry action buttons), included for parity with the "avec bouton d'action si active" part of
+ * Yann's request.
  */
 data class SofascoreWidgetMatch(
     val key: String,
@@ -50,21 +59,28 @@ data class SofascoreWidgetMatch(
     val status: String,
     val apiSource: String,
     val postTimeMillis: Long,
+    val title: String,
+    val text: String,
     val image: Bitmap?,
-    val contentIntent: PendingIntent?
+    val contentIntent: PendingIntent?,
+    val actions: List<WidgetAction> = emptyList()
 )
 
 /**
  * One entry pushed into the widget's "Toutes notifs" history — see
  * [NowBarWidgetProvider.pushToAllNotifications] and WidgetAllNotificationsStore's class doc for
- * why this is a rolling log rather than a live/active set. [image]/[contentIntent] follow the same
- * in-memory-only rule as [SofascoreWidgetMatch] above.
+ * why this is a rolling log rather than a live/active set. [image]/[contentIntent]/[actions] follow
+ * the same in-memory-only rule as [SofascoreWidgetMatch] above. [text]/[actions] (NEW 18/09/2026,
+ * "peek" feature — see WidgetPeekPrefs' class doc) are what let a tile here be shown full-format
+ * when tapped, in the exact same shape as the LATEST view, instead of only ever opening the source
+ * app directly.
  */
 data class AllNotifEntryPush(
     val key: String,
     val postTimeMillis: Long,
     val kind: WidgetAllNotificationsStore.Kind,
     val title: String? = null,
+    val text: String? = null,
     val packageName: String? = null,
     // See WidgetAllNotificationsStore.PersistableEntry.isConversation's doc — set by
     // MirrorNotificationListener for GENERIC entries, always false (irrelevant) for
@@ -78,7 +94,8 @@ data class AllNotifEntryPush(
     val status: String? = null,
     val apiSource: String? = null,
     val image: Bitmap?,
-    val contentIntent: PendingIntent?
+    val contentIntent: PendingIntent?,
+    val actions: List<WidgetAction> = emptyList()
 )
 
 /**
@@ -119,6 +136,20 @@ private fun <T> List<T>.sortedForWidget(
  * - ALL_NOTIFS ("Toutes notifs"): up to 5 recently received notifications from
  *   WidgetAllNotificationsStore, fed by both MirrorNotificationListener (generic) and
  *   SofascoreNotificationListenerService (Sofascore, kept in its match-tile presentation).
+ *
+ * PLUS a fourth, cross-cutting "peek" state (NEW 18/09/2026, see WidgetPeekPrefs' class doc — Yann:
+ * "En vue toutes notifs ou sport, cliquer sur une icône doit ouvrir le texte de la notification en
+ * question sous le même format que la dernière notif affichée"): tapping a tile in SPORT or
+ * ALL_NOTIFS no longer opens the source app directly — it shows that ONE notification full-format,
+ * reusing the exact same widget_latest_content block the LATEST view renders with (title, text,
+ * image, dismiss button, action buttons), WITHOUT touching WidgetViewModePrefs.currentView — "je
+ * précise bien que ça ne change rien à la vue dernière notif [...] elle doit toujours bien montrer
+ * la dernière notif". While peeking, the left column (normally the current view's own icon) shows
+ * the rotating-arrows glyph instead, doubling as a "back to the tile grid" button (Yann: "Mettre
+ * les flèches tournantes pour le symboliser"); dismissing the peeked notification, or its
+ * disappearing for any other reason (an action button that marked it read/archived it, say),
+ * closes the peek automatically (Yann: "revenir automatiquement aux icônes") — see
+ * closePeekIfShowing, called from both listener services.
  */
 class NowBarWidgetProvider : AppWidgetProvider() {
 
@@ -126,6 +157,19 @@ class NowBarWidgetProvider : AppWidgetProvider() {
 
         private const val ACTION_TOGGLE_VIEW = "com.yann.nowbarmirror.widget.ACTION_TOGGLE_VIEW"
         private const val ACTION_TOGGLE_SPORT_NOTIFS = "com.yann.nowbarmirror.widget.ACTION_TOGGLE_SPORT_NOTIFS"
+        private const val ACTION_OPEN_PEEK = "com.yann.nowbarmirror.widget.ACTION_OPEN_PEEK"
+        private const val ACTION_CLOSE_PEEK = "com.yann.nowbarmirror.widget.ACTION_CLOSE_PEEK"
+        private const val EXTRA_PEEK_SOURCE = "mirror.widget.peek_source"
+        private const val EXTRA_PEEK_ENTRY_ID = "mirror.widget.peek_entry_id"
+
+        // Base request codes for the per-tile "open peek" PendingIntents (5 fixed slots per view,
+        // see SOFASCORE_SLOT_IDS / ALL_NOTIF_SLOT_IDS below) — distinct ranges so a SPORT tile and
+        // an ALL_NOTIFS tile at the same slot index never share a PendingIntent identity. Kept well
+        // away from the toggle buttons' own request codes (0/1, see toggleViewPendingIntent/
+        // toggleSportNotifsPendingIntent) and the dismiss buttons' (0, different target components
+        // so no actual clash, but distinct ranges make this easier to reason about).
+        private const val PEEK_REQUEST_CODE_SPORT_BASE = 4000
+        private const val PEEK_REQUEST_CODE_ALL_NOTIFS_BASE = 4100
 
         // Actions are deliberately NOT persisted to WidgetNotificationStore/SharedPreferences,
         // for the same reason the content PendingIntent isn't (see the class doc on
@@ -141,20 +185,23 @@ class NowBarWidgetProvider : AppWidgetProvider() {
         private var liveActionsKey: String? = null
 
         // Same in-memory-only trick as liveActions above, for the Sofascore view: one live
-        // PendingIntent per match key, refreshed on every pushSofascoreMatches call. A match
-        // whose key isn't in this map (stale after a process restart, or never had a usable
-        // contentIntent) falls back to launchAppPendingIntent(SOFASCORE_PACKAGE) — see
-        // applySofascoreMatches.
+        // PendingIntent/action-list per match key, refreshed on every pushSofascoreMatches call. A
+        // match whose key isn't in liveSofascoreIntents (stale after a process restart, or never
+        // had a usable contentIntent) falls back to launchAppPendingIntent(SOFASCORE_PACKAGE) — see
+        // resolvePeek. liveSofascoreActions has no such fallback: a match with nothing recorded
+        // there just shows no action row, same as liveActions' own reset-on-restart limitation.
         private var liveSofascoreIntents: Map<String, PendingIntent> = emptyMap()
+        private var liveSofascoreActions: Map<String, List<WidgetAction>> = emptyMap()
 
         // Same idea again for the "Toutes notifs" view, EXCEPT this one is additive rather than
-        // fully replaced on every push (see pushToAllNotifications): unlike the Sofascore map
+        // fully replaced on every push (see pushToAllNotifications): unlike the Sofascore maps
         // above, entries here persist across many push events (it's a history, not a
         // recomputed-from-scratch active set), so a push only ADDS/refreshes its own entry and
         // then trims down to exactly the entries WidgetAllNotificationsStore is still keeping —
-        // an older entry's live PendingIntent survives in memory for as long as it stays in the
-        // capped history AND this process stays alive; once either drops it, the tile falls back
-        // to launchAppPendingIntent (or Sofascore's package for a SOFASCORE_MATCH entry).
+        // an older entry's live PendingIntent/actions survive in memory for as long as it stays in
+        // the capped history AND this process stays alive; once either drops it, a tile/peek falls
+        // back to launchAppPendingIntent (or Sofascore's package for a SOFASCORE_MATCH entry) for
+        // the open intent, and simply shows no actions row for liveAllNotifActions.
         //
         // Keyed by [allNotifEntryId] (key + postTimeMillis), NOT by key alone (fixed 17/09/2026,
         // same identity fix as WidgetAllNotificationsStore — see its class doc): several tiles
@@ -162,8 +209,9 @@ class NowBarWidgetProvider : AppWidgetProvider() {
         // its notification id across distinct items), and each one must open ITS OWN article/
         // conversation when tapped, not whichever of them happened to push most recently.
         private var liveAllNotifIntents: Map<String, PendingIntent> = emptyMap()
+        private var liveAllNotifActions: Map<String, List<WidgetAction>> = emptyMap()
 
-        /** Composite identity for [liveAllNotifIntents] — see that field's doc. */
+        /** Composite identity for [liveAllNotifIntents]/[liveAllNotifActions] — see those fields' doc. */
         private fun allNotifEntryId(key: String, postTimeMillis: Long) = "$key::$postTimeMillis"
 
         /**
@@ -197,8 +245,9 @@ class NowBarWidgetProvider : AppWidgetProvider() {
          * turned into a match (not just the one the watch complication follows — see that
          * function's doc for why the API-override system doesn't apply here). Sorts + caps to
          * SofascoreWidgetStore.MAX_SLOTS (see sortedForWidget above), keeps the live
-         * PendingIntents in memory for the KEPT matches only, persists the rest, then rebuilds
-         * whichever view is currently showing (a Sport-view rebuild picks the new matches up
+         * PendingIntents/actions in memory for the KEPT matches only, persists the rest (including
+         * the raw title/text now used for "peek" — see SofascoreWidgetMatch's doc), then rebuilds
+         * whichever view/peek is currently showing (a Sport-view rebuild picks the new matches up
          * immediately; any other view's rebuild only needs this to recompute whether the left
          * toggle button should now be visible — see applyLeftToggle).
          */
@@ -211,6 +260,7 @@ class NowBarWidgetProvider : AppWidgetProvider() {
             ).take(SofascoreWidgetStore.MAX_SLOTS)
 
             liveSofascoreIntents = kept.mapNotNull { m -> m.contentIntent?.let { m.key to it } }.toMap()
+            liveSofascoreActions = kept.associate { m -> m.key to m.actions }
 
             SofascoreWidgetStore.save(
                 context,
@@ -225,6 +275,8 @@ class NowBarWidgetProvider : AppWidgetProvider() {
                         status = m.status,
                         apiSource = m.apiSource,
                         postTimeMillis = m.postTimeMillis,
+                        title = m.title,
+                        text = m.text,
                         image = m.image
                     )
                 }
@@ -244,8 +296,8 @@ class NowBarWidgetProvider : AppWidgetProvider() {
          * alone; anything else only updates in place for the exact same (key, postTimeMillis) pair
          * re-pushed, and gets a new tile for the same key with a DIFFERENT postTimeMillis — see
          * WidgetAllNotificationsStore's IDENTITY section, fixed 17/09/2026, then trims
-         * [liveAllNotifIntents] down to exactly the entries still kept — see that field's doc —
-         * before rebuilding whichever view is currently showing.
+         * [liveAllNotifIntents]/[liveAllNotifActions] down to exactly the entries still kept — see
+         * those fields' doc — before rebuilding whichever view/peek is currently showing.
          */
         fun pushToAllNotifications(context: Context, entry: AllNotifEntryPush) {
             val kept = WidgetAllNotificationsStore.push(
@@ -255,6 +307,7 @@ class NowBarWidgetProvider : AppWidgetProvider() {
                     kind = entry.kind,
                     postTimeMillis = entry.postTimeMillis,
                     title = entry.title,
+                    text = entry.text,
                     packageName = entry.packageName,
                     isConversation = entry.isConversation,
                     homeTeam = entry.homeTeam,
@@ -276,8 +329,49 @@ class NowBarWidgetProvider : AppWidgetProvider() {
                     if (id != entryId) liveAllNotifIntents[id]?.let { put(id, it) }
                 }
             }
+            liveAllNotifActions = buildMap {
+                if (entry.actions.isNotEmpty()) put(entryId, entry.actions)
+                keptIds.forEach { id ->
+                    if (id != entryId) liveAllNotifActions[id]?.let { put(id, it) }
+                }
+            }
 
             pushToAllWidgets(context, buildViews(context))
+        }
+
+        /**
+         * Closes an active "peek" (see WidgetPeekPrefs' class doc) if it's currently showing the
+         * notification identified by [key] — called from both listener services'
+         * onNotificationRemoved AND from both dismiss handlers (MirrorNotificationListener /
+         * SofascoreNotificationListenerService), so a peek never keeps showing full-format detail
+         * for a notification that's actually gone (Yann: "Si je supprime la notification ou la
+         * fais disparaitre en marquant lu ou supprimer avec les boutons d'actions, revenir
+         * automatiquement aux icônes"). A SPORT peek matches by [key] alone (a match's peek entryId
+         * IS its key); an ALL_NOTIFS peek matches by the composite (key, postTimeMillis) id —
+         * except when [postTimeMillis] is unknown (pass -1L), in which case it falls back to a
+         * key-prefix match (used by the true-LATEST dismiss button, which never tracked postTime
+         * for WidgetNotificationStore — see MirrorNotificationListener.EXTRA_DISMISS_POST_TIME's
+         * doc; harmless there in practice since a peek is never active while LATEST is showing, but
+         * kept correct rather than assumed). No-op, safe to call unconditionally, if no peek is
+         * active or it points elsewhere. Pushes a fresh render itself when it does close something,
+         * independent of whatever rebuild the caller's own surrounding code triggers.
+         */
+        fun closePeekIfShowing(context: Context, key: String, postTimeMillis: Long) {
+            val peek = WidgetPeekPrefs.current(context) ?: return
+            val matches = when (peek.source) {
+                WidgetPeekPrefs.Source.SPORT -> peek.entryId == key
+                WidgetPeekPrefs.Source.ALL_NOTIFS -> {
+                    if (postTimeMillis >= 0) {
+                        peek.entryId == allNotifEntryId(key, postTimeMillis)
+                    } else {
+                        peek.entryId.startsWith("$key::")
+                    }
+                }
+            }
+            if (matches) {
+                WidgetPeekPrefs.close(context)
+                pushToAllWidgets(context, buildViews(context))
+            }
         }
 
         /**
@@ -286,8 +380,8 @@ class NowBarWidgetProvider : AppWidgetProvider() {
          * staleness check, or when the system calls onUpdate() independently of any specific
          * notification event). In the latest-notif view the tap falls back to opening the
          * source app, and the actions row — which has no such fallback — simply stays hidden;
-         * in the other two views, a tile falls back the same way (see applySofascoreMatches /
-         * applyAllNotifs).
+         * in the other two views/the peek state, a tile/the open target falls back the same way
+         * (see resolvePeek / applySofascoreMatches / applyAllNotifs).
          */
         fun requestUpdate(context: Context) {
             pushToAllWidgets(context, buildViews(context))
@@ -325,7 +419,7 @@ class NowBarWidgetProvider : AppWidgetProvider() {
             views.setViewVisibility(R.id.widget_latest_content, View.VISIBLE)
             views.setTextViewText(R.id.widget_title, context.getString(R.string.widget_empty_title))
             views.setTextViewText(R.id.widget_text, "")
-            views.setImageViewResource(R.id.widget_app_icon, R.drawable.ic_stat_mirror)
+            views.setImageViewResource(R.id.widget_app_icon, R.drawable.ic_notification_bell)
             views.setViewVisibility(R.id.widget_image, View.GONE)
             views.setViewVisibility(R.id.widget_dismiss, View.GONE)
             views.setViewVisibility(R.id.widget_actions_container, View.GONE)
@@ -336,6 +430,34 @@ class NowBarWidgetProvider : AppWidgetProvider() {
 
         private fun buildViewsUnsafe(context: Context, liveContentIntent: PendingIntent?): RemoteViews {
             val views = RemoteViews(context.packageName, R.layout.widget_now_bar)
+
+            // "Peek" takes priority over the three normal views when active — see the class doc
+            // and WidgetPeekPrefs. Self-heals if the peeked entry has vanished (aged out of its
+            // store's top-5, or removed elsewhere) instead of ever getting stuck.
+            val peek = WidgetPeekPrefs.current(context)
+            val resolvedPeek = peek?.let { resolvePeek(context, it) }
+            if (peek != null && resolvedPeek == null) {
+                WidgetPeekPrefs.close(context)
+            }
+
+            if (resolvedPeek != null) {
+                views.setViewVisibility(R.id.widget_sofascore_content, View.GONE)
+                views.setViewVisibility(R.id.widget_all_notifs_content, View.GONE)
+                views.setViewVisibility(R.id.widget_latest_content, View.VISIBLE)
+
+                renderLatestFormat(
+                    views,
+                    title = resolvedPeek.title,
+                    text = resolvedPeek.text,
+                    image = resolvedPeek.image,
+                    dismissIntent = resolvedPeek.dismissIntent,
+                    openIntent = resolvedPeek.openIntent,
+                    actions = resolvedPeek.actions
+                )
+                applyPeekLeftColumn(context, views)
+                views.setViewVisibility(R.id.widget_view_toggle_right, View.GONE)
+                return views
+            }
 
             val sofascoreMatches = SofascoreWidgetStore.get(context).sortedForWidget(
                 nowMillis = System.currentTimeMillis(),
@@ -371,45 +493,54 @@ class NowBarWidgetProvider : AppWidgetProvider() {
 
         private fun applyLatestContent(context: Context, views: RemoteViews, liveContentIntent: PendingIntent?) {
             val data = WidgetNotificationStore.get(context)
+            applyLatestIcon(context, views, data)
+
             if (data == null) {
-                views.setTextViewText(R.id.widget_title, context.getString(R.string.widget_empty_title))
-                views.setTextViewText(R.id.widget_text, "")
-                views.setImageViewResource(R.id.widget_app_icon, R.drawable.ic_stat_mirror)
-                views.setViewVisibility(R.id.widget_image, View.GONE)
-                views.setViewVisibility(R.id.widget_dismiss, View.GONE)
-                views.setViewVisibility(R.id.widget_actions_container, View.GONE)
+                renderLatestFormat(
+                    views,
+                    title = context.getString(R.string.widget_empty_title),
+                    text = "",
+                    image = null,
+                    dismissIntent = null,
+                    openIntent = null,
+                    actions = emptyList()
+                )
                 return
             }
 
-            views.setTextViewText(R.id.widget_title, data.title)
-            views.setTextViewText(R.id.widget_text, data.text)
+            val imageBitmap = data.imageFile?.let { BitmapFactory.decodeFile(it.path) }
+            val actions = if (WidgetActionsPrefs.isEnabled(context) && liveActionsKey == data.key) {
+                liveActions
+            } else {
+                emptyList()
+            }
+            // Bound to widget_latest_content specifically (not the whole widget_root any more —
+            // widget_root also contains the left/right columns, shared with the other views,
+            // which must NOT open this notification when tapped) inside renderLatestFormat.
+            val openIntent = liveContentIntent ?: launchAppPendingIntent(context, data.packageName)
 
+            renderLatestFormat(
+                views,
+                title = data.title,
+                text = data.text,
+                image = imageBitmap,
+                dismissIntent = dismissPendingIntent(context, data.key),
+                openIntent = openIntent,
+                actions = actions
+            )
+        }
+
+        /** widget_app_icon for the TRUE LATEST view — "Idem quand il n'y a pas de notifs en vue texte" (18/09/2026): the bell replaces this app's own icon specifically for the "nothing to show" case; a real notification whose app-icon lookup itself fails keeps the pre-existing this-app-icon fallback, unrelated to that request. */
+        private fun applyLatestIcon(context: Context, views: RemoteViews, data: WidgetNotificationStore.Data?) {
+            if (data == null) {
+                views.setImageViewResource(R.id.widget_app_icon, R.drawable.ic_notification_bell)
+                return
+            }
             val appIcon = appIconBitmap(context, data.packageName)
             if (appIcon != null) {
                 views.setImageViewBitmap(R.id.widget_app_icon, circularBitmap(appIcon))
             } else {
                 views.setImageViewResource(R.id.widget_app_icon, R.drawable.ic_stat_mirror)
-            }
-
-            val imageBitmap = data.imageFile?.let { BitmapFactory.decodeFile(it.path) }
-            if (imageBitmap != null) {
-                views.setImageViewBitmap(R.id.widget_image, circularBitmap(imageBitmap))
-                views.setViewVisibility(R.id.widget_image, View.VISIBLE)
-            } else {
-                views.setViewVisibility(R.id.widget_image, View.GONE)
-            }
-
-            views.setViewVisibility(R.id.widget_dismiss, View.VISIBLE)
-            views.setOnClickPendingIntent(R.id.widget_dismiss, dismissPendingIntent(context, data.key))
-
-            applyActions(context, views, data.key)
-
-            // Bound to widget_latest_content specifically (not the whole widget_root any more —
-            // widget_root also contains the left/right columns, shared with the other views,
-            // which must NOT open this notification when tapped).
-            val openIntent = liveContentIntent ?: launchAppPendingIntent(context, data.packageName)
-            if (openIntent != null) {
-                views.setOnClickPendingIntent(R.id.widget_latest_content, openIntent)
             }
         }
 
@@ -422,9 +553,13 @@ class NowBarWidgetProvider : AppWidgetProvider() {
             }
         }
 
-        /** No single source app for a merged "Toutes notifs" feed — falls back to this app's own icon, same as the empty-latest-view fallback. */
+        /**
+         * No single source app for a merged "Toutes notifs" feed — replaced 18/09/2026 (Yann:
+         * "Remplacer l'icône sur la gauche en vue toutes notifs par une cloche représentant
+         * notification") with a generic notification-bell glyph instead of this app's own icon.
+         */
         private fun applyAllNotifsIcon(context: Context, views: RemoteViews) {
-            views.setImageViewResource(R.id.widget_app_icon, R.drawable.ic_stat_mirror)
+            views.setImageViewResource(R.id.widget_app_icon, R.drawable.ic_notification_bell)
         }
 
         private val SOFASCORE_SLOT_IDS = listOf(R.id.widget_match_1, R.id.widget_match_2, R.id.widget_match_3, R.id.widget_match_4, R.id.widget_match_5)
@@ -437,6 +572,10 @@ class NowBarWidgetProvider : AppWidgetProvider() {
          * slots rather than a RemoteViews collection — 5th slot added 17/09/2026, was 4). [matches]
          * is already sorted by sortedForWidget by the caller (buildViewsUnsafe) and already capped
          * to SofascoreWidgetStore.MAX_SLOTS at push time, so this just walks the slots in order.
+         *
+         * CHANGED 18/09/2026: a tap no longer opens Sofascore directly — it opens a "peek" (see
+         * WidgetPeekPrefs' class doc) showing that match full-format inside the widget itself; the
+         * actual "open Sofascore" action now lives on the peek's own content tap (see resolvePeek).
          */
         private fun applySofascoreMatches(context: Context, views: RemoteViews, matches: List<SofascoreWidgetStore.Data>) {
             views.setViewVisibility(R.id.widget_sofascore_empty, if (matches.isEmpty()) View.VISIBLE else View.GONE)
@@ -466,17 +605,10 @@ class NowBarWidgetProvider : AppWidgetProvider() {
                     SofascoreMatchPresentation.periodLabel(match.status, match.apiSource, kickoffEpochMillis = null)
                 )
 
-                // Same live-PendingIntent-first, launch-the-app-as-fallback pattern as the
-                // latest-notif view (applyLatestContent) — see liveSofascoreIntents' doc above.
-                // Crucially, this is Sofascore's OWN contentIntent, the exact same one Sofascore
-                // itself uses — opening it does NOT cancel the source notification (that only
-                // happens via the dedicated dismiss button in the latest-notif view, which this
-                // view deliberately has none of, see widget_now_bar.xml).
-                val openIntent = liveSofascoreIntents[match.key]
-                    ?: launchAppPendingIntent(context, SofascoreNotificationListenerService.SOFASCORE_PACKAGE)
-                if (openIntent != null) {
-                    views.setOnClickPendingIntent(slotId, openIntent)
-                }
+                views.setOnClickPendingIntent(
+                    slotId,
+                    openPeekPendingIntent(context, WidgetPeekPrefs.Source.SPORT, match.key, PEEK_REQUEST_CODE_SPORT_BASE + i)
+                )
             }
         }
 
@@ -505,6 +637,9 @@ class NowBarWidgetProvider : AppWidgetProvider() {
          * views OR the Sofascore match-tile views are shown, per WidgetAllNotificationsStore.Kind
          * — never both — see widget_now_bar.xml's class doc for the exact rules ("icône notif en
          * petit dans l'angle SAUF si pas d'image, auquel cas icône appli à la place de l'image").
+         *
+         * CHANGED 18/09/2026: same as applySofascoreMatches above — a tap now opens a "peek"
+         * instead of the notification directly (see WidgetPeekPrefs' class doc / resolvePeek).
          */
         private fun applyAllNotifs(context: Context, views: RemoteViews, entries: List<WidgetAllNotificationsStore.Data>) {
             views.setViewVisibility(R.id.widget_all_notifs_empty, if (entries.isEmpty()) View.VISIBLE else View.GONE)
@@ -523,20 +658,11 @@ class NowBarWidgetProvider : AppWidgetProvider() {
                     WidgetAllNotificationsStore.Kind.GENERIC -> applyAllNotifSlotAsGeneric(context, views, ids, entry)
                 }
 
-                // Tap only ever opens the notification — never wired to any dismiss/cancel action,
-                // so it never removes it ("Cliquer dessus ouvre notification mais ne supprime pas
-                // notif"). Same live-PendingIntent-first, launch-the-app-as-fallback pattern as the
-                // other two views.
-                val fallbackPackage = if (entry.kind == WidgetAllNotificationsStore.Kind.SOFASCORE_MATCH) {
-                    SofascoreNotificationListenerService.SOFASCORE_PACKAGE
-                } else {
-                    entry.packageName
-                }
-                val openIntent = liveAllNotifIntents[allNotifEntryId(entry.key, entry.postTimeMillis)]
-                    ?: fallbackPackage?.let { launchAppPendingIntent(context, it) }
-                if (openIntent != null) {
-                    views.setOnClickPendingIntent(ids.container, openIntent)
-                }
+                val entryId = allNotifEntryId(entry.key, entry.postTimeMillis)
+                views.setOnClickPendingIntent(
+                    ids.container,
+                    openPeekPendingIntent(context, WidgetPeekPrefs.Source.ALL_NOTIFS, entryId, PEEK_REQUEST_CODE_ALL_NOTIFS_BASE + i)
+                )
             }
         }
 
@@ -606,29 +732,89 @@ class NowBarWidgetProvider : AppWidgetProvider() {
          * LEFT button (pre-existing widget_view_toggle) — see WidgetViewModePrefs' class doc.
          * Only offered once there's actually a Sport match or "toutes notifs" entry worth
          * switching to when leaving LATEST (mirrors how widget_actions_container stays hidden
-         * with nothing to show, see applyActions); always stays visible on SPORT/ALL_NOTIFS so
+         * with nothing to show, see applyActionButtons); always stays visible on SPORT/ALL_NOTIFS so
          * Yann can always get back to LATEST — even if the matches/notifs shown just dropped to
          * zero while he was looking at one of them.
+         *
+         * CHANGED 18/09/2026 (Yann: "l'icône sur la gauche sert à changer la vue, laisser flèches
+         * en dessous mais élargir la zone à l'icône pour que ce soit plus facile à cliquer"): the
+         * same toggle PendingIntent is now ALSO bound to widget_app_icon whenever this button is
+         * visible — the tiny 20dp arrows glyph alone was a fiddly target on a lock screen; the
+         * 32dp icon right above it now shares the same action, so the pair reads as one
+         * effectively bigger tap zone without any visual change.
          */
         private fun applyLeftToggle(context: Context, views: RemoteViews, currentView: WidgetViewModePrefs.WidgetView, hasAnythingElse: Boolean) {
             val visible = currentView != WidgetViewModePrefs.WidgetView.LATEST || hasAnythingElse
             views.setViewVisibility(R.id.widget_view_toggle, if (visible) View.VISIBLE else View.GONE)
             if (visible) {
-                views.setOnClickPendingIntent(R.id.widget_view_toggle, toggleViewPendingIntent(context))
+                val toggleIntent = toggleViewPendingIntent(context)
+                views.setOnClickPendingIntent(R.id.widget_view_toggle, toggleIntent)
+                views.setOnClickPendingIntent(R.id.widget_app_icon, toggleIntent)
             }
         }
 
         /**
-         * RIGHT button (NEW, widget_view_toggle_right) — flips directly between SPORT and
-         * ALL_NOTIFS. Hidden on LATEST (nothing for it to do there — the left button already
-         * covers getting to/from LATEST, see WidgetViewModePrefs' class doc).
+         * RIGHT button (widget_view_toggle_right) — flips directly between SPORT and ALL_NOTIFS.
+         * Hidden on LATEST (nothing for it to do there — the left button already covers getting
+         * to/from LATEST, see WidgetViewModePrefs' class doc).
+         *
+         * CHANGED 18/09/2026: the icon itself is now context-dependent instead of always the plain
+         * arrows glyph — see applyRightToggleIcon (Yann: "En vue sport, sur la droite, remplacer
+         * les flèches par un bouton cloche et flèches qui tourne [...] En vue toutes notifs, mettre
+         * l'icone blanche de Sofascore avec flèches aussi").
          */
         private fun applyRightToggle(context: Context, views: RemoteViews, currentView: WidgetViewModePrefs.WidgetView) {
             val visible = currentView != WidgetViewModePrefs.WidgetView.LATEST
             views.setViewVisibility(R.id.widget_view_toggle_right, if (visible) View.VISIBLE else View.GONE)
             if (visible) {
+                applyRightToggleIcon(context, views, currentView)
                 views.setOnClickPendingIntent(R.id.widget_view_toggle_right, toggleSportNotifsPendingIntent(context))
             }
+        }
+
+        /**
+         * Picks the right toggle's icon based on which view is currently showing (see
+         * applyRightToggle's doc for the request behind this):
+         * - SPORT -> a static bell-badged arrows glyph (ic_widget_switch_to_notifs) — a plain
+         *   drawable resource, since both parts (arrows + generic bell) are this app's own icons.
+         * - ALL_NOTIFS -> the SAME arrows glyph, but badged with a white silhouette DERIVED FROM
+         *   Sofascore's own currently-installed app icon at render time (sofascoreToggleIconBitmap)
+         *   rather than a hand-drawn recreation of their logo — falls back to the plain arrows
+         *   glyph if Sofascore isn't installed or anything here throws.
+         */
+        private fun applyRightToggleIcon(context: Context, views: RemoteViews, currentView: WidgetViewModePrefs.WidgetView) {
+            when (currentView) {
+                WidgetViewModePrefs.WidgetView.SPORT ->
+                    views.setImageViewResource(R.id.widget_view_toggle_right, R.drawable.ic_widget_switch_to_notifs)
+                WidgetViewModePrefs.WidgetView.ALL_NOTIFS -> {
+                    val sofascoreIcon = appIconBitmap(context, SofascoreNotificationListenerService.SOFASCORE_PACKAGE)
+                    if (sofascoreIcon != null) {
+                        try {
+                            views.setImageViewBitmap(R.id.widget_view_toggle_right, sofascoreToggleIconBitmap(context, sofascoreIcon))
+                        } catch (_: Throwable) {
+                            views.setImageViewResource(R.id.widget_view_toggle_right, R.drawable.ic_widget_switch_view)
+                        }
+                    } else {
+                        views.setImageViewResource(R.id.widget_view_toggle_right, R.drawable.ic_widget_switch_view)
+                    }
+                }
+                WidgetViewModePrefs.WidgetView.LATEST -> Unit // hidden in this view, see applyRightToggle
+            }
+        }
+
+        /**
+         * Left column while a "peek" is showing (see WidgetPeekPrefs' class doc) — replaces
+         * whichever icon that view would normally show with the rotating-arrows glyph on BOTH the
+         * main icon slot and the small toggle button beneath it (Yann: "Mettre les flèches
+         * tournantes pour le symboliser"), both bound to the SAME "close the peek, back to the
+         * tile grid" action — same "one enlarged tap zone" reasoning as applyLeftToggle above.
+         */
+        private fun applyPeekLeftColumn(context: Context, views: RemoteViews) {
+            views.setImageViewResource(R.id.widget_app_icon, R.drawable.ic_widget_switch_view)
+            views.setViewVisibility(R.id.widget_view_toggle, View.VISIBLE)
+            val backIntent = closePeekPendingIntent(context)
+            views.setOnClickPendingIntent(R.id.widget_app_icon, backIntent)
+            views.setOnClickPendingIntent(R.id.widget_view_toggle, backIntent)
         }
 
         private fun toggleViewPendingIntent(context: Context): PendingIntent {
@@ -655,21 +841,82 @@ class NowBarWidgetProvider : AppWidgetProvider() {
             )
         }
 
+        /** Opens a "peek" for one tile — see WidgetPeekPrefs' class doc. [requestCode] must be distinct per rendered tile (see PEEK_REQUEST_CODE_SPORT_BASE/PEEK_REQUEST_CODE_ALL_NOTIFS_BASE's doc) so up to 5 simultaneously-visible tiles each keep their own correctly-bound click. */
+        private fun openPeekPendingIntent(context: Context, source: WidgetPeekPrefs.Source, entryId: String, requestCode: Int): PendingIntent {
+            val intent = Intent(context, NowBarWidgetProvider::class.java).apply {
+                action = ACTION_OPEN_PEEK
+                putExtra(EXTRA_PEEK_SOURCE, source.name)
+                putExtra(EXTRA_PEEK_ENTRY_ID, entryId)
+            }
+            return PendingIntent.getBroadcast(
+                context,
+                requestCode,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+        }
+
+        private fun closePeekPendingIntent(context: Context): PendingIntent {
+            val intent = Intent(context, NowBarWidgetProvider::class.java).apply {
+                action = ACTION_CLOSE_PEEK
+            }
+            return PendingIntent.getBroadcast(
+                context,
+                2,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+        }
+
         /**
-         * Populates up to three text action buttons when the option is enabled in Settings AND
-         * we still hold live PendingIntents for THIS exact notification (see the liveActions
-         * doc above) — otherwise hides the whole row rather than showing dead buttons. Text
-         * (the action's own label, e.g. "Répondre") rather than an icon: most notification
-         * action icons are meant to be tinted/rendered by the system itself, so a raw icon
-         * dropped into the widget was often unreadable — the label reads reliably regardless.
+         * Shared renderer for widget_latest_content — used both by the TRUE LATEST view
+         * (applyLatestContent) and by a "peek" (resolvePeek) showing a SPORT/ALL_NOTIFS tile
+         * full-format instead of its grid. Populates title/text/image/dismiss/actions and the "tap
+         * anywhere else to open" click target — exactly the shape Yann asked to unify ("le format
+         * qui est uniformisé"). Never touches widget_app_icon, which callers set separately per
+         * state (applyLatestIcon / applySofascoreIcon / applyAllNotifsIcon / applyPeekLeftColumn).
          */
-        private fun applyActions(context: Context, views: RemoteViews, dataKey: String) {
-            val actions = if (WidgetActionsPrefs.isEnabled(context) && liveActionsKey == dataKey) {
-                liveActions
+        private fun renderLatestFormat(
+            views: RemoteViews,
+            title: String,
+            text: String,
+            image: Bitmap?,
+            dismissIntent: PendingIntent?,
+            openIntent: PendingIntent?,
+            actions: List<WidgetAction>
+        ) {
+            views.setTextViewText(R.id.widget_title, title)
+            views.setTextViewText(R.id.widget_text, text)
+
+            if (image != null) {
+                views.setImageViewBitmap(R.id.widget_image, circularBitmap(image))
+                views.setViewVisibility(R.id.widget_image, View.VISIBLE)
             } else {
-                emptyList()
+                views.setViewVisibility(R.id.widget_image, View.GONE)
             }
 
+            if (dismissIntent != null) {
+                views.setViewVisibility(R.id.widget_dismiss, View.VISIBLE)
+                views.setOnClickPendingIntent(R.id.widget_dismiss, dismissIntent)
+            } else {
+                views.setViewVisibility(R.id.widget_dismiss, View.GONE)
+            }
+
+            applyActionButtons(views, actions)
+
+            if (openIntent != null) {
+                views.setOnClickPendingIntent(R.id.widget_latest_content, openIntent)
+            }
+        }
+
+        /**
+         * Populates up to three text action buttons (the action's own label, e.g. "Répondre") —
+         * text rather than an icon, same reasoning as before: most notification action icons are
+         * meant to be tinted/rendered by the system itself, so a raw icon dropped into the widget
+         * was often unreadable. Shared by the TRUE LATEST view and any "peek" — see
+         * renderLatestFormat.
+         */
+        private fun applyActionButtons(views: RemoteViews, actions: List<WidgetAction>) {
             val slots = listOf(
                 R.id.widget_action_1 to actions.getOrNull(0),
                 R.id.widget_action_2 to actions.getOrNull(1),
@@ -691,10 +938,95 @@ class NowBarWidgetProvider : AppWidgetProvider() {
             )
         }
 
-        private fun dismissPendingIntent(context: Context, key: String): PendingIntent {
+        private data class ResolvedPeek(
+            val title: String,
+            val text: String,
+            val image: Bitmap?,
+            val dismissIntent: PendingIntent?,
+            val openIntent: PendingIntent?,
+            val actions: List<WidgetAction>
+        )
+
+        /**
+         * Resolves a [WidgetPeekPrefs.Peek] pointer into everything [renderLatestFormat] needs, by
+         * looking the entry up in whichever store still holds it — see WidgetPeekPrefs' class doc
+         * for why the peek pointer itself carries no content. Returns null if the entry is no
+         * longer there (aged out of the capped top-5, or removed elsewhere) — buildViewsUnsafe
+         * treats that as "close the peek and fall back to that view's tile grid".
+         */
+        private fun resolvePeek(context: Context, peek: WidgetPeekPrefs.Peek): ResolvedPeek? {
+            return when (peek.source) {
+                WidgetPeekPrefs.Source.SPORT -> {
+                    val match = SofascoreWidgetStore.get(context).firstOrNull { it.key == peek.entryId } ?: return null
+                    ResolvedPeek(
+                        title = match.title,
+                        text = match.text,
+                        image = match.imageFile?.let { BitmapFactory.decodeFile(it.path) },
+                        dismissIntent = sofascoreDismissPendingIntent(context, match.key, match.postTimeMillis),
+                        openIntent = liveSofascoreIntents[match.key]
+                            ?: launchAppPendingIntent(context, SofascoreNotificationListenerService.SOFASCORE_PACKAGE),
+                        actions = liveSofascoreActions[match.key] ?: emptyList()
+                    )
+                }
+                WidgetPeekPrefs.Source.ALL_NOTIFS -> {
+                    val entry = WidgetAllNotificationsStore.get(context)
+                        .firstOrNull { allNotifEntryId(it.key, it.postTimeMillis) == peek.entryId } ?: return null
+                    val entryId = allNotifEntryId(entry.key, entry.postTimeMillis)
+                    val isMatch = entry.kind == WidgetAllNotificationsStore.Kind.SOFASCORE_MATCH
+
+                    val dismissIntent = if (isMatch) {
+                        sofascoreDismissPendingIntent(context, entry.key, entry.postTimeMillis)
+                    } else {
+                        dismissPendingIntent(context, entry.key, entry.postTimeMillis)
+                    }
+                    val fallbackPackage = if (isMatch) SofascoreNotificationListenerService.SOFASCORE_PACKAGE else entry.packageName
+                    val title = entry.title ?: (if (isMatch) "${entry.homeTeam} - ${entry.awayTeam}" else "")
+
+                    ResolvedPeek(
+                        title = title,
+                        text = entry.text.orEmpty(),
+                        image = entry.imageFile?.let { BitmapFactory.decodeFile(it.path) },
+                        dismissIntent = dismissIntent,
+                        openIntent = liveAllNotifIntents[entryId] ?: fallbackPackage?.let { launchAppPendingIntent(context, it) },
+                        actions = liveAllNotifActions[entryId] ?: emptyList()
+                    )
+                }
+            }
+        }
+
+        /**
+         * Dismiss target for a GENERIC notification (the true LATEST view's own dismiss button, or
+         * a GENERIC "peek" — see resolvePeek), routed through MirrorNotificationListener exactly as
+         * before. [postTimeMillis] (NEW 18/09/2026, defaults to -1L/"unknown" for the true-LATEST
+         * call site, which never tracked it) lets MirrorNotificationListener.closePeekIfShowing
+         * match an ALL_NOTIFS peek precisely — see EXTRA_DISMISS_POST_TIME's doc there.
+         */
+        private fun dismissPendingIntent(context: Context, key: String, postTimeMillis: Long = -1L): PendingIntent {
             val intent = Intent(context, MirrorNotificationListener::class.java).apply {
                 action = MirrorNotificationListener.ACTION_DISMISS_WIDGET
                 putExtra(MirrorNotificationListener.EXTRA_DISMISS_KEY, key)
+                putExtra(MirrorNotificationListener.EXTRA_DISMISS_POST_TIME, postTimeMillis)
+            }
+            return PendingIntent.getService(
+                context,
+                0,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+        }
+
+        /**
+         * Dismiss target for a Sofascore-sourced notification (a SPORT match peek, or a
+         * SOFASCORE_MATCH "Toutes notifs" peek — see resolvePeek) — NEW 18/09/2026, symmetric to
+         * [dismissPendingIntent] above but routed through SofascoreNotificationListenerService,
+         * since that's the listener with the notification-access grant covering Sofascore (see
+         * README's "Two separate notification-access toggles").
+         */
+        private fun sofascoreDismissPendingIntent(context: Context, key: String, postTimeMillis: Long): PendingIntent {
+            val intent = Intent(context, SofascoreNotificationListenerService::class.java).apply {
+                action = SofascoreNotificationListenerService.ACTION_DISMISS_WIDGET
+                putExtra(SofascoreNotificationListenerService.EXTRA_DISMISS_KEY, key)
+                putExtra(SofascoreNotificationListenerService.EXTRA_DISMISS_POST_TIME, postTimeMillis)
             }
             return PendingIntent.getService(
                 context,
@@ -707,9 +1039,9 @@ class NowBarWidgetProvider : AppWidgetProvider() {
         /**
          * Fallback used whenever there's no live PendingIntent to attach (i.e. every render
          * that isn't happening right at the moment a notification was posted): opens the
-         * source app itself rather than leaving the tap dead. Shared by all three views —
-         * applyLatestContent (the mirrored app), applySofascoreMatches (Sofascore itself), and
-         * applyAllNotifs (either the entry's own app, or Sofascore for a match-tile entry).
+         * source app itself rather than leaving the tap dead. Shared by all views/the peek state —
+         * applyLatestContent (the mirrored app) and resolvePeek (Sofascore itself for a SPORT
+         * match, or either the entry's own app or Sofascore for an ALL_NOTIFS peek).
          */
         private fun launchAppPendingIntent(context: Context, packageName: String): PendingIntent? {
             val launchIntent = context.packageManager.getLaunchIntentForPackage(packageName) ?: return null
@@ -753,6 +1085,66 @@ class NowBarWidgetProvider : AppWidgetProvider() {
             canvas.drawBitmap(source, -left, -top, paint)
             return output
         }
+
+        /**
+         * Turns [source] into a WHITE silhouette (alpha kept, every opaque pixel painted white) —
+         * the same general technique Android itself uses to derive a themed/monochrome status-bar
+         * icon from an app's adaptive-icon foreground layer. Used for the ALL_NOTIFS-view right
+         * toggle's badge (see sofascoreToggleIconBitmap): [source] there is Sofascore's OWN,
+         * currently-installed app icon (via appIconBitmap), so this is always the real icon,
+         * recolored — never a hand-drawn recreation of their logo.
+         */
+        private fun whiteSilhouette(source: Bitmap): Bitmap {
+            val output = Bitmap.createBitmap(source.width, source.height, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(output)
+            canvas.drawBitmap(source, 0f, 0f, Paint(Paint.ANTI_ALIAS_FLAG))
+            val maskPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.WHITE
+                xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_IN)
+            }
+            canvas.drawRect(0f, 0f, source.width.toFloat(), source.height.toFloat(), maskPaint)
+            return output
+        }
+
+        /**
+         * Composites the rotating-arrows glyph with a small circular badge in the bottom-end
+         * corner made from [sofascoreIcon]'s white silhouette (see [whiteSilhouette]) — same
+         * badge-over-glyph proportions as the "Toutes notifs" generic tiles' own app-icon badge
+         * (widget_notif_N_badge, roughly 44% of its 32dp photo; here roughly 50% of the 24dp
+         * arrows glyph, since the whole icon is much smaller). A dark backdrop circle goes down
+         * first so the white silhouette stays legible against the white arrows underneath it, same
+         * convention as widget_dismiss_background's own translucent-dark-circle background. See
+         * applyRightToggleIcon for the ALL_NOTIFS-view call site (the SPORT-view equivalent,
+         * ic_widget_switch_to_notifs, is a plain static drawable instead, since both its parts —
+         * arrows and a generic bell — are this app's own icons).
+         */
+        private fun sofascoreToggleIconBitmap(context: Context, sofascoreIcon: Bitmap): Bitmap {
+            val density = context.resources.displayMetrics.density
+            val size = (24 * density).toInt().coerceAtLeast(1)
+            val output = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(output)
+
+            context.getDrawable(R.drawable.ic_widget_switch_view)?.apply {
+                setBounds(0, 0, size, size)
+                draw(canvas)
+            }
+
+            val badgeSize = (size * 0.5f).toInt().coerceAtLeast(1)
+            val badgeRadius = badgeSize / 2f
+            val cx = size - badgeRadius
+            val cy = size - badgeRadius
+
+            val backdropPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#CC1A2230") }
+            canvas.drawCircle(cx, cy, badgeRadius, backdropPaint)
+
+            val silhouette = circularBitmap(whiteSilhouette(sofascoreIcon))
+            val inset = badgeRadius * 0.24f
+            val half = (badgeRadius - inset).coerceAtLeast(1f)
+            val dst = RectF(cx - half, cy - half, cx + half, cy + half)
+            canvas.drawBitmap(silhouette, null, dst, Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
+
+            return output
+        }
     }
 
     override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
@@ -761,22 +1153,48 @@ class NowBarWidgetProvider : AppWidgetProvider() {
     }
 
     /**
-     * Catches the two view-toggle broadcasts (left: ACTION_TOGGLE_VIEW, right:
-     * ACTION_TOGGLE_SPORT_NOTIFS — see toggleViewPendingIntent/toggleSportNotifsPendingIntent)
-     * before falling through to AppWidgetProvider's own onReceive, which is what normally
-     * dispatches to onUpdate/onDeleted/etc. — same "handle our own action, then let the
-     * superclass handle everything else" shape as MirrorNotificationListener.onStartCommand's
-     * ACTION_DISMISS_WIDGET handling.
+     * Catches this widget's own broadcasts (left toggle, right toggle, open peek, close peek —
+     * see the class doc and the various *PendingIntent builders above) before falling through to
+     * AppWidgetProvider's own onReceive, which is what normally dispatches to
+     * onUpdate/onDeleted/etc. — same "handle our own action, then let the superclass handle
+     * everything else" shape as MirrorNotificationListener.onStartCommand's ACTION_DISMISS_WIDGET
+     * handling.
      */
     override fun onReceive(context: Context, intent: Intent) {
         when (intent.action) {
             ACTION_TOGGLE_VIEW -> {
+                // Defensive: the toggle buttons aren't bound to this action while a peek is
+                // showing (see applyPeekLeftColumn), so this should never actually fire mid-peek —
+                // closed here anyway as cheap insurance against any stale binding.
+                WidgetPeekPrefs.close(context)
                 WidgetViewModePrefs.toggleLatest(context)
                 pushToAllWidgets(context, buildViews(context))
                 return
             }
             ACTION_TOGGLE_SPORT_NOTIFS -> {
+                WidgetPeekPrefs.close(context)
                 WidgetViewModePrefs.toggleSportAllNotifs(context)
+                pushToAllWidgets(context, buildViews(context))
+                return
+            }
+            ACTION_OPEN_PEEK -> {
+                val sourceName = intent.getStringExtra(EXTRA_PEEK_SOURCE)
+                val entryId = intent.getStringExtra(EXTRA_PEEK_ENTRY_ID)
+                val source = sourceName?.let { name ->
+                    try {
+                        WidgetPeekPrefs.Source.valueOf(name)
+                    } catch (_: Throwable) {
+                        null
+                    }
+                }
+                if (source != null && entryId != null) {
+                    WidgetPeekPrefs.open(context, source, entryId)
+                    pushToAllWidgets(context, buildViews(context))
+                }
+                return
+            }
+            ACTION_CLOSE_PEEK -> {
+                WidgetPeekPrefs.close(context)
                 pushToAllWidgets(context, buildViews(context))
                 return
             }

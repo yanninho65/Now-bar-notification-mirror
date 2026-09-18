@@ -19,6 +19,14 @@ import java.io.FileOutputStream
  * Images are saved by SLOT INDEX (0 until [MAX_SLOTS]), not by notification key: the whole list
  * is rewritten on every [save] (see SofascoreNotificationListenerService.pushWidgetMatches), so
  * there's nothing to reconcile — old slot files are simply deleted first.
+ *
+ * [title]/[text] (NEW 18/09/2026, "peek" feature — see WidgetPeekPrefs' class doc) are the raw
+ * Android notification title/text for this match (title is literally "$homeTeam - $awayTeam",
+ * text is the most recent score/event line — see
+ * SofascoreNotificationListenerService.rawTitleAndText), kept alongside the already-parsed
+ * team/score/status fields above so a tap on this match's tile can show it full-format, in the
+ * EXACT SAME shape as any other notification's "peek" — see NowBarWidgetProvider.resolvePeek.
+ * PersistableMatch/Data mirror each other 1:1 the same way they already did before this addition.
  */
 object SofascoreWidgetStore {
 
@@ -39,6 +47,8 @@ object SofascoreWidgetStore {
         val status: String,
         val apiSource: String,
         val postTimeMillis: Long,
+        val title: String,
+        val text: String,
         val image: Bitmap?
     )
 
@@ -52,6 +62,8 @@ object SofascoreWidgetStore {
         val status: String,
         val apiSource: String,
         val postTimeMillis: Long,
+        val title: String,
+        val text: String,
         val imageFile: File?
     )
 
@@ -78,6 +90,8 @@ object SofascoreWidgetStore {
                     put("status", match.status)
                     put("apiSource", match.apiSource)
                     put("postTimeMillis", match.postTimeMillis)
+                    put("title", match.title)
+                    put("text", match.text)
                 }
             )
 
@@ -107,16 +121,22 @@ object SofascoreWidgetStore {
         return (0 until array.length()).mapNotNull { slot ->
             val obj = array.optJSONObject(slot) ?: return@mapNotNull null
             val key = obj.optString("key", "").takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            val homeTeam = obj.optString("homeTeam", "")
+            val awayTeam = obj.optString("awayTeam", "")
             Data(
                 key = key,
-                homeTeam = obj.optString("homeTeam", ""),
-                awayTeam = obj.optString("awayTeam", ""),
+                homeTeam = homeTeam,
+                awayTeam = awayTeam,
                 homeScore = obj.optNullableString("homeScore"),
                 awayScore = obj.optNullableString("awayScore"),
                 lastScorer = obj.optNullableString("lastScorer"),
                 status = obj.optString("status", ""),
                 apiSource = obj.optString("apiSource", "SPORTS_DB"),
                 postTimeMillis = obj.optLong("postTimeMillis", 0L),
+                // Fallback rebuilds the raw title exactly like the notification's own EXTRA_TITLE
+                // ("$homeTeam - $awayTeam") for anything persisted before this field existed.
+                title = obj.optNullableString("title") ?: "$homeTeam - $awayTeam",
+                text = obj.optNullableString("text") ?: "",
                 imageFile = imageFile(context, slot).takeIf { it.exists() }
             )
         }

@@ -40,6 +40,13 @@ class MirrorNotificationListener : NotificationListenerService() {
         const val EXTRA_MIRROR = "mirror.is_mirror"
         const val ACTION_DISMISS_WIDGET = "com.yann.nowbarmirror.widget.ACTION_DISMISS"
         const val EXTRA_DISMISS_KEY = "mirror.widget.dismiss_key"
+        // NEW 18/09/2026, "peek" feature (see WidgetPeekPrefs' class doc) — the true-LATEST
+        // dismiss button doesn't track postTime for WidgetNotificationStore, so it's sent as -1L
+        // ("unknown") there; a peek's own dismiss button (see NowBarWidgetProvider.
+        // dismissPendingIntent) always sends the real value, letting closePeekIfShowing below
+        // match an ALL_NOTIFS peek's exact (key, postTime) identity precisely instead of falling
+        // back to a key-prefix match.
+        const val EXTRA_DISMISS_POST_TIME = "mirror.widget.dismiss_post_time"
     }
 
     private val ready = AtomicBoolean(false)
@@ -91,6 +98,7 @@ class MirrorNotificationListener : NotificationListenerService() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_DISMISS_WIDGET) {
             val key = intent.getStringExtra(EXTRA_DISMISS_KEY)
+            val postTimeMillis = intent.getLongExtra(EXTRA_DISMISS_POST_TIME, -1L)
             if (key != null) {
                 if (ready.get()) cancelOriginal(key) else pendingDismissKey = key
             }
@@ -105,6 +113,17 @@ class MirrorNotificationListener : NotificationListenerService() {
             } catch (_: Throwable) {
                 // The widget is a nice-to-have on top of the core mirror — never let a failure
                 // here take down this service.
+            }
+            // Same instant feedback for a "peek" (see WidgetPeekPrefs' class doc): this dismiss
+            // button might be a peek's own rather than the true-LATEST one, in which case the
+            // WidgetNotificationStore check above is a no-op — closePeekIfShowing covers that case
+            // independently (Yann: "Si je supprime la notification [...] revenir automatiquement
+            // aux icônes").
+            try {
+                if (key != null) {
+                    NowBarWidgetProvider.closePeekIfShowing(applicationContext, key, postTimeMillis)
+                }
+            } catch (_: Throwable) {
             }
             stopSelf(startId)
             return START_NOT_STICKY
@@ -392,6 +411,13 @@ class MirrorNotificationListener : NotificationListenerService() {
                 WidgetAllNotificationsStore.pruneAgainstActive(applicationContext, allList)
                 refillAllNotifsHistory(allList)
             }
+            // "Peek" (NEW 18/09/2026, see WidgetPeekPrefs' class doc): this notification might be
+            // the one currently peeked from ALL_NOTIFS, removed by something other than the
+            // widget's own dismiss button (the source app's own action, "clear all", the user
+            // swiping it from the shade directly) — Yann: "Si je supprime la notification ou la
+            // fais disparaitre en marquant lu ou supprimer avec les boutons d'actions, revenir
+            // automatiquement aux icônes."
+            NowBarWidgetProvider.closePeekIfShowing(applicationContext, sbn.key, sbn.postTime)
             NowBarWidgetProvider.requestUpdate(applicationContext)
         } catch (_: Throwable) {
             // Same reasoning as above: never let this widget nice-to-have take the service down.
@@ -458,7 +484,15 @@ class MirrorNotificationListener : NotificationListenerService() {
             val extras = sbn.notification.extras
             val rawTitle = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.takeIf { it.isNotBlank() }
                 ?: getAppName(sbn.packageName)
+            // Same raw-text extraction as mirror() below — see AllNotifEntryPush.text's doc
+            // ("peek" feature, NEW 18/09/2026): needed here too so an entry bootstrapped straight
+            // from an already-active notification (listener reconnect) can also be peeked, not
+            // just one that arrived through onNotificationPosted.
+            val rawText = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()
+                ?: extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()
+                ?: ""
             val image = NotificationImageExtractor.extract(applicationContext, sbn)
+            val actions = widgetActionsFor(sbn.notification)
 
             // Deliberately NOT applying the per-app "Titre ↔ texte" invert flag here — that
             // setting is a Now Bar-only concern (see mirror()'s own note on this), and this
@@ -473,16 +507,38 @@ class MirrorNotificationListener : NotificationListenerService() {
                     postTimeMillis = sbn.postTime,
                     kind = WidgetAllNotificationsStore.Kind.GENERIC,
                     title = rawTitle,
+                    text = rawText,
                     packageName = sbn.packageName,
                     isConversation = isConversationNotification(sbn),
                     image = image,
-                    contentIntent = sbn.notification.contentIntent
+                    contentIntent = sbn.notification.contentIntent,
+                    actions = actions
                 )
             )
         } catch (_: Throwable) {
             // Same reasoning as mirror()'s own push block: never let this widget nice-to-have
             // crash the listener during catch-up.
         }
+    }
+
+    /**
+     * Up to three of [notification]'s own action buttons, as [WidgetAction]s — shared by mirror()
+     * (the true LATEST push) and pushAllNotifsHistoryOnly() (the "Toutes notifs" bootstrap catch-up)
+     * so a "peek" (see WidgetPeekPrefs' class doc) can show the same action row regardless of which
+     * path fed that entry. Gated behind WidgetActionsPrefs so the widget stays exactly as compact
+     * as before for anyone who hasn't opted in; an action with no usable title is skipped rather
+     * than shown as an empty button.
+     */
+    private fun widgetActionsFor(notification: Notification): List<WidgetAction> {
+        if (!WidgetActionsPrefs.isEnabled(applicationContext)) return emptyList()
+        return notification.actions
+            ?.take(3)
+            ?.mapNotNull { action ->
+                val pi = action.actionIntent ?: return@mapNotNull null
+                val label = action.title?.toString()?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                WidgetAction(label = label, pendingIntent = pi)
+            }
+            ?: emptyList()
     }
 
     /**
@@ -545,18 +601,7 @@ class MirrorNotificationListener : NotificationListenerService() {
         // rather than an icon, and an action with no usable title is skipped rather than shown
         // as an empty button. Gated behind the setting so the widget stays exactly as compact
         // as before for anyone who hasn't opted in.
-        val widgetActions = if (WidgetActionsPrefs.isEnabled(applicationContext)) {
-            n.actions
-                ?.take(3)
-                ?.mapNotNull { action ->
-                    val pi = action.actionIntent ?: return@mapNotNull null
-                    val label = action.title?.toString()?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
-                    WidgetAction(label = label, pendingIntent = pi)
-                }
-                ?: emptyList()
-        } else {
-            emptyList()
-        }
+        val widgetActions = widgetActionsFor(n)
 
         // The lock-screen widget mirrors whichever eligible notification arrived most recently
         // from ANY app configured with a mirror mode — no ALL vs LATEST distinction, unlike the
@@ -596,10 +641,12 @@ class MirrorNotificationListener : NotificationListenerService() {
                         postTimeMillis = sbn.postTime,
                         kind = WidgetAllNotificationsStore.Kind.GENERIC,
                         title = rawTitle,
+                        text = rawText,
                         packageName = sbn.packageName,
                         isConversation = isConversationNotification(sbn),
                         image = image,
-                        contentIntent = n.contentIntent
+                        contentIntent = n.contentIntent,
+                        actions = widgetActions
                     )
                 )
             }

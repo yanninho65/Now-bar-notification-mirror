@@ -97,6 +97,12 @@ object WidgetAllNotificationsStore {
         val postTimeMillis: Long,
         // GENERIC fields
         val title: String? = null,
+        // Raw notification body — GENERIC: EXTRA_BIG_TEXT/EXTRA_TEXT; SOFASCORE_MATCH: the most
+        // recent score/event line (see SofascoreNotificationListenerService.rawTitleAndText).
+        // NEW 18/09/2026, "peek" feature (see WidgetPeekPrefs' class doc) — this is what lets a
+        // tile in this history be shown full-format (same layout as the LATEST view) when tapped,
+        // rather than only ever opening the source app — see NowBarWidgetProvider.resolvePeek.
+        val text: String? = null,
         val packageName: String? = null,
         // GENERIC only — see the class doc's IDENTITY section. Whether the source notification is
         // a messaging-app conversation (MessagingStyle/shortcutId/CATEGORY_MESSAGE — see
@@ -122,6 +128,7 @@ object WidgetAllNotificationsStore {
         val kind: Kind,
         val postTimeMillis: Long,
         val title: String?,
+        val text: String?,
         val packageName: String?,
         val isConversation: Boolean,
         val homeTeam: String?,
@@ -176,6 +183,7 @@ object WidgetAllNotificationsStore {
                             kind = data.kind,
                             postTimeMillis = data.postTimeMillis,
                             title = data.title,
+                            text = data.text,
                             packageName = data.packageName,
                             isConversation = data.isConversation,
                             homeTeam = data.homeTeam,
@@ -207,6 +215,7 @@ object WidgetAllNotificationsStore {
                     put("kind", entry.kind.name)
                     put("postTimeMillis", entry.postTimeMillis)
                     put("title", entry.title ?: JSONObject.NULL)
+                    put("text", entry.text ?: JSONObject.NULL)
                     put("packageName", entry.packageName ?: JSONObject.NULL)
                     put("isConversation", entry.isConversation)
                     put("homeTeam", entry.homeTeam ?: JSONObject.NULL)
@@ -267,6 +276,7 @@ object WidgetAllNotificationsStore {
                 kind = data.kind,
                 postTimeMillis = data.postTimeMillis,
                 title = data.title,
+                text = data.text,
                 packageName = data.packageName,
                 isConversation = data.isConversation,
                 homeTeam = data.homeTeam,
@@ -330,6 +340,7 @@ object WidgetAllNotificationsStore {
                     kind = data.kind,
                     postTimeMillis = data.postTimeMillis,
                     title = data.title,
+                    text = data.text,
                     packageName = data.packageName,
                     isConversation = data.isConversation,
                     homeTeam = data.homeTeam,
@@ -362,6 +373,7 @@ object WidgetAllNotificationsStore {
                 kind = kind,
                 postTimeMillis = obj.optLong("postTimeMillis", 0L),
                 title = obj.optNullableString("title"),
+                text = obj.optNullableString("text"),
                 packageName = obj.optNullableString("packageName"),
                 isConversation = obj.optBoolean("isConversation", false),
                 homeTeam = obj.optNullableString("homeTeam"),

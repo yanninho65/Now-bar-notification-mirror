@@ -1,14 +1,18 @@
 package com.yann.nowbarmirror.sport
 
 import android.app.Notification
+import android.content.Intent
 import android.graphics.Bitmap
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import com.yann.nowbarmirror.NotificationImageExtractor
+import com.yann.nowbarmirror.settings.WidgetActionsPrefs
 import com.yann.nowbarmirror.widget.AllNotifEntryPush
 import com.yann.nowbarmirror.widget.NowBarWidgetProvider
 import com.yann.nowbarmirror.widget.SofascoreWidgetMatch
+import com.yann.nowbarmirror.widget.WidgetAction
 import com.yann.nowbarmirror.widget.WidgetAllNotificationsStore
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Une notification Sofascore active = un match. [key] est
@@ -107,11 +111,67 @@ data class SofascoreMatchOption(
  */
 class SofascoreNotificationListenerService : NotificationListenerService() {
 
+    // NEW 18/09/2026, "peek" feature (see WidgetPeekPrefs' class doc) — same robustness pattern as
+    // MirrorNotificationListener's own ready/pendingDismissKey: a peek's dismiss button targets
+    // this service directly (PendingIntent.getService), which can spin the process back up before
+    // onListenerConnected() has actually fired, so a dismiss request arriving that early is queued
+    // and replayed once the listener is really connected instead of silently failing.
+    private val ready = AtomicBoolean(false)
+    private var pendingDismissKey: String? = null
+    private var pendingDismissPostTime: Long = -1L
+
     override fun onListenerConnected() {
         super.onListenerConnected()
         instance = this
+        ready.set(true)
         refresh()
         bootstrapAllNotificationsHistory()
+        pendingDismissKey?.let { key ->
+            pendingDismissKey = null
+            val postTime = pendingDismissPostTime
+            pendingDismissPostTime = -1L
+            dismiss(key, postTime)
+        }
+    }
+
+    /**
+     * Same reasoning as MirrorNotificationListener.onStartCommand's ACTION_DISMISS_WIDGET
+     * handling — a peek's own dismiss button (see NowBarWidgetProvider.sofascoreDismissPendingIntent)
+     * targets this service directly with ACTION_DISMISS_WIDGET, so the tap keeps working even if
+     * this process had been killed and needs the system to spin it back up first.
+     */
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_DISMISS_WIDGET) {
+            val key = intent.getStringExtra(EXTRA_DISMISS_KEY)
+            val postTimeMillis = intent.getLongExtra(EXTRA_DISMISS_POST_TIME, -1L)
+            if (key != null) {
+                if (ready.get()) {
+                    dismiss(key, postTimeMillis)
+                } else {
+                    pendingDismissKey = key
+                    pendingDismissPostTime = postTimeMillis
+                }
+            }
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
+        return super.onStartCommand(intent, flags, startId)
+    }
+
+    /** Cancels the Sofascore notification identified by [key], then closes/refreshes the widget exactly like a normal removal would (see onNotificationRemoved) — a peek's dismiss button never waits for the async onNotificationRemoved round-trip for its own instant feedback. */
+    private fun dismiss(key: String, postTimeMillis: Long) {
+        try {
+            cancelNotification(key)
+        } catch (_: Throwable) {
+            activeNotifications?.firstOrNull { it.key == key }?.let { cancelNotification(it.key) }
+        }
+        SofascoreApiOverridePrefs.remove(applicationContext, key)
+        refresh()
+        removeFromAllNotificationsHistory(key, postTimeMillis)
+        try {
+            NowBarWidgetProvider.closePeekIfShowing(applicationContext, key, postTimeMillis)
+        } catch (_: Throwable) {
+        }
     }
 
     /**
@@ -176,12 +236,15 @@ class SofascoreNotificationListenerService : NotificationListenerService() {
     private fun pushToAllNotificationsHistory(sbn: StatusBarNotification) {
         try {
             val match = toMatchResult(sbn) ?: return
+            val (rawTitle, rawText) = rawTitleAndText(sbn, match)
             NowBarWidgetProvider.pushToAllNotifications(
                 applicationContext,
                 AllNotifEntryPush(
                     key = sbn.key,
                     postTimeMillis = sbn.postTime,
                     kind = WidgetAllNotificationsStore.Kind.SOFASCORE_MATCH,
+                    title = rawTitle,
+                    text = rawText,
                     homeTeam = match.homeTeam,
                     awayTeam = match.awayTeam,
                     homeScore = match.homeScore,
@@ -190,12 +253,49 @@ class SofascoreNotificationListenerService : NotificationListenerService() {
                     status = match.status,
                     apiSource = match.source.name,
                     image = extractNotificationImage(sbn),
-                    contentIntent = sbn.notification.contentIntent
+                    contentIntent = sbn.notification.contentIntent,
+                    actions = widgetActionsFor(sbn.notification)
                 )
             )
         } catch (_: Throwable) {
             // Voir la doc de la fonction : le widget ne doit jamais faire tomber ce service.
         }
+    }
+
+    /**
+     * Raw Android notification title/text for [sbn] — NEW 18/09/2026, "peek" feature (see
+     * WidgetPeekPrefs' class doc): [title] is EXTRA_TITLE itself (already exactly
+     * "$homeTeam - $awayTeam" — see extractTeams — with [match]'s own teams as a fallback if
+     * EXTRA_TITLE is ever missing), [text] is the single most recent score/event line (same
+     * "most recent first" ordering as [collectLines] — see that function's doc). This is what lets
+     * a SPORT/ALL_NOTIFS Sofascore tile be shown full-format when tapped, in the exact same shape
+     * a generic notification's peek uses.
+     */
+    private fun rawTitleAndText(sbn: StatusBarNotification, match: MatchResult): Pair<String, String> {
+        val rawTitle = sbn.notification.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?: "${match.homeTeam} - ${match.awayTeam}"
+        val rawText = collectLines(sbn).firstOrNull().orEmpty()
+        return rawTitle to rawText
+    }
+
+    /**
+     * Up to three of [notification]'s own action buttons, as [WidgetAction]s — same shape/gating
+     * as MirrorNotificationListener.widgetActionsFor, duplicated rather than shared (separate
+     * package/service, same reasoning as the rest of this app's Accueil/Sport split). Almost
+     * always empty in practice — Sofascore's own notifications don't appear to carry action
+     * buttons — kept for parity with "avec bouton d'action si active" in Yann's peek request.
+     */
+    private fun widgetActionsFor(notification: Notification): List<WidgetAction> {
+        if (!WidgetActionsPrefs.isEnabled(applicationContext)) return emptyList()
+        return notification.actions
+            ?.take(3)
+            ?.mapNotNull { action ->
+                val pi = action.actionIntent ?: return@mapNotNull null
+                val label = action.title?.toString()?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                WidgetAction(label = label, pendingIntent = pi)
+            }
+            ?: emptyList()
     }
 
     /**
@@ -214,6 +314,17 @@ class SofascoreNotificationListenerService : NotificationListenerService() {
             SofascoreApiOverridePrefs.remove(applicationContext, sbn.key)
             refresh()
             removeFromAllNotificationsHistory(sbn.key, sbn.postTime)
+            // "Peek" (NEW 18/09/2026, see WidgetPeekPrefs' class doc) — this match's notification
+            // might be the one currently peeked (from either SPORT or ALL_NOTIFS), removed by
+            // something other than the widget's own dismiss button (the match simply ending and
+            // Sofascore clearing its own notification, "clear all", a direct swipe from the shade)
+            // — Yann: "Si je supprime la notification ou la fais disparaitre [...] revenir
+            // automatiquement aux icônes." A no-op duplicate of the same call inside dismiss()
+            // when THAT was what triggered this removal — closePeekIfShowing is idempotent.
+            try {
+                NowBarWidgetProvider.closePeekIfShowing(applicationContext, sbn.key, sbn.postTime)
+            } catch (_: Throwable) {
+            }
         }
     }
 
@@ -328,6 +439,7 @@ class SofascoreNotificationListenerService : NotificationListenerService() {
         try {
             val matches = notifications.mapNotNull { sbn ->
                 val match = toMatchResult(sbn) ?: return@mapNotNull null
+                val (rawTitle, rawText) = rawTitleAndText(sbn, match)
                 SofascoreWidgetMatch(
                     key = sbn.key,
                     homeTeam = match.homeTeam,
@@ -338,8 +450,11 @@ class SofascoreNotificationListenerService : NotificationListenerService() {
                     status = match.status,
                     apiSource = match.source.name,
                     postTimeMillis = sbn.postTime,
+                    title = rawTitle,
+                    text = rawText,
                     image = extractNotificationImage(sbn),
-                    contentIntent = sbn.notification.contentIntent
+                    contentIntent = sbn.notification.contentIntent,
+                    actions = widgetActionsFor(sbn.notification)
                 )
             }
             NowBarWidgetProvider.pushSofascoreMatches(applicationContext, matches)
@@ -497,6 +612,15 @@ class SofascoreNotificationListenerService : NotificationListenerService() {
         // Pas privée : référencée aussi par NowBarWidgetProvider (icône Sofascore dans la colonne
         // de gauche + repli "ouvrir l'appli" côté widget, voir applySofascoreIcon/applySofascoreMatches).
         const val SOFASCORE_PACKAGE = "com.sofascore.results"
+
+        // NEW 18/09/2026, "peek" feature — symmetric to MirrorNotificationListener's own
+        // ACTION_DISMISS_WIDGET/EXTRA_DISMISS_KEY/EXTRA_DISMISS_POST_TIME, but routed through THIS
+        // service, since it's the one with the notification-access grant covering Sofascore (see
+        // README's "Two separate notification-access toggles"). See
+        // NowBarWidgetProvider.sofascoreDismissPendingIntent for the sender side.
+        const val ACTION_DISMISS_WIDGET = "com.yann.nowbarmirror.widget.ACTION_DISMISS_SOFASCORE"
+        const val EXTRA_DISMISS_KEY = "mirror.widget.sofascore_dismiss_key"
+        const val EXTRA_DISMISS_POST_TIME = "mirror.widget.sofascore_dismiss_post_time"
 
         private var instance: SofascoreNotificationListenerService? = null
 
