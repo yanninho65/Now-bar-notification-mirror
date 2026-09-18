@@ -920,6 +920,37 @@ class NowBarWidgetProvider : AppWidgetProvider() {
         }
 
         /**
+         * FIXED 18/09/2026 (Yann, after testing the fix above: "je t'assure que ça n'ouvre pas la
+         * notif. Ça revient juste aux icônes.") — a plain [target].send() from inside onReceive
+         * silently did nothing beyond closing the peek: before ACTION_OPEN_PEEK_CONTENT existed,
+         * a tap on the peeked text fired [target] DIRECTLY from the widget host (LockStar/the
+         * launcher) as a straight setOnClickPendingIntent — a single hop that Android always
+         * privileges to start an activity, since it's the immediate result of the user's own tap.
+         * Routing it through our own broadcast receiver first (so it can close the peek) added a
+         * SECOND hop — our app calling [target].send() from a BroadcastReceiver that Android does
+         * NOT consider to be "in the foreground" — which its background-activity-start
+         * restrictions silently veto: no exception, the activity just never opens. [target].send()
+         * with an [android.app.ActivityOptions] bundle whose
+         * [android.app.ActivityOptions.setPendingIntentBackgroundActivityStartMode] is set to
+         * MODE_BACKGROUND_ACTIVITY_START_ALLOWED is the OS-provided way for a sender to explicitly
+         * bless the PendingIntent it's about to send for exactly this "was triggered by a real tap
+         * a moment ago, chaining it is legitimate" case — only available from API 34 (Android 14)
+         * onward, so below that this falls back to a plain send() (unaffected devices below 34
+         * don't get the fix, but this app's own target device is well past that).
+         */
+        private fun sendAllowingBackgroundStart(context: Context, target: PendingIntent) {
+            if (Build.VERSION.SDK_INT >= 34) {
+                val options = android.app.ActivityOptions.makeBasic().apply {
+                    pendingIntentBackgroundActivityStartMode =
+                        android.app.ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED
+                }
+                target.send(context, 0, null, null, null, null, options.toBundle())
+            } else {
+                target.send()
+            }
+        }
+
+        /**
          * Shared renderer for widget_latest_content — used both by the TRUE LATEST view
          * (applyLatestContent) and by a "peek" (resolvePeek) showing a SPORT/ALL_NOTIFS tile
          * full-format instead of its grid. Populates title/text/image/dismiss/actions and the "tap
@@ -1205,18 +1236,21 @@ class NowBarWidgetProvider : AppWidgetProvider() {
             // la notif, revenir aux icônes dans le widget") — see openPeekContentPendingIntent's
             // doc. Closes the peek and rebuilds the widget FIRST, then fires the real target
             // (the notification/app the tap was actually meant to open) — order matters here
-            // since the widget update is a local, synchronous call while target.send() hands off
-            // to another app/process.
+            // since the widget update is a local, synchronous call while sending the target hands
+            // off to another app/process. FIXED same day (Yann: "je t'assure que ça n'ouvre pas
+            // la notif. Ça revient juste aux icônes.") — see sendAllowingBackgroundStart's doc for
+            // why a plain target.send() silently failed to actually open anything here.
             ACTION_OPEN_PEEK_CONTENT -> {
                 WidgetPeekPrefs.close(context)
                 pushToAllWidgets(context, buildViews(context))
                 peekContentTarget(intent)?.let { target ->
                     try {
-                        target.send()
-                    } catch (_: PendingIntent.CanceledException) {
-                        // The wrapped notification/app PendingIntent is no longer valid (source
-                        // notification gone, process restarted) — the peek is already closed
-                        // above, so there's nothing further to do.
+                        sendAllowingBackgroundStart(context, target)
+                    } catch (_: Throwable) {
+                        // Either the wrapped notification/app PendingIntent is no longer valid
+                        // (source notification gone, process restarted), or the OS refused the
+                        // activity start outright — the peek is already closed above either way,
+                        // so there's nothing further to do.
                     }
                 }
                 return
