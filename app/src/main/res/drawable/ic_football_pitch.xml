@@ -1,0 +1,65 @@
+<!--
+    Stylized football pitch glyph (NEW 18/09/2026, Yann: "Remplacer le ballon par une icône de
+    terrain de foot stylisee : tour blanc, ligne du milieu, surface de réparation et rond central.
+    Lignes blanches pour tout ça.") — white outline only, transparent background, same "hand-drawn
+    white silhouette" style as this app's other widget glyphs (ic_widget_dismiss.xml,
+    ic_widget_switch_view.xml, ic_notification_bell.xml). Four elements, exactly as asked: the
+    outer touchline border, the halfway line, a penalty area at each end, and the center circle.
+
+    Drawn in PORTRAIT orientation on purpose (Yann, re: the reference photo he attached — a
+    landscape pitch with the goals on the left/right edges: "Comme sur l'image jointe avec ligne
+    blanche et arrière transparent mais en la tournant pour que les cages du gardien soient en
+    haut et en bas") — the whole layout is the reference image rotated 90°, so the halfway line
+    runs horizontally and a penalty area sits at the top AND at the bottom instead of the sides.
+
+    Used as (see NowBarWidgetProvider):
+    - widget_app_icon in the SPORT view (applySofascoreIcon) — replaces Sofascore's own app icon,
+      shown at the left column's full 32dp size ("Afficher le même signe en plus grand sur la
+      gauche en vue sport").
+    - the right toggle's icon while ALL_NOTIFS is showing (applyRightToggleIcon) — replaces the
+      old arrows+Sofascore-silhouette composite ("supprimer les flèches et agrandir [...] le
+      ballon"); tapping it still leads to the SPORT view.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Outer touchline/byline border. -->
+    <path
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.4"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000"
+        android:pathData="M3,2 H21 V22 H3 Z" />
+    <!-- Halfway line. -->
+    <path
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.4"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M3,12 H21" />
+    <!-- Center circle. -->
+    <path
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.4"
+        android:fillColor="#00000000"
+        android:pathData="M15.2,12 A3.2,3.2 0 1,1 8.8,12 A3.2,3.2 0 1,1 15.2,12" />
+    <!-- Top penalty area (goal line = outer border's top edge, so only the other three sides are drawn). -->
+    <path
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.4"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000"
+        android:pathData="M7,2 V7 H17 V2" />
+    <!-- Bottom penalty area, mirrored. -->
+    <path
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.4"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000"
+        android:pathData="M7,22 V17 H17 V22" />
+</vector>

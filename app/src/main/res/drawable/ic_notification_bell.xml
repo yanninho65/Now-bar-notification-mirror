@@ -7,9 +7,10 @@
       (see applyLatestContent's empty branch / emptyViews) — Yann: "Remplacer l'icône sur la
       gauche en vue toutes notifs par une cloche représentant notification. Idem quand il n'y a
       pas de notifs en vue texte."
-    - the small badge layered over the rotating-arrows glyph for the SPORT view's right toggle
-      (see ic_widget_switch_to_notifs.xml) — "En vue sport, sur la droite, remplacer les flèches
-      par un bouton cloche et flèches qui tourne."
+    - the right toggle's own icon while the SPORT view is showing (see
+      NowBarWidgetProvider.applyRightToggleIcon) — shown alone now, no longer badged onto the
+      rotating-arrows glyph (FIXED 18/09/2026, Yann: "sur la droite, supprimer les flèches et
+      agrandir l'icône cloche et ballon").
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"

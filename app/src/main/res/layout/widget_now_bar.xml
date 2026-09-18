@@ -66,6 +66,16 @@
     the android:maxWidth="62dp" that used to cap it is gone, since the tile itself is the cap now),
     so it still scales down to fit while keeping its aspect ratio, just against a flexible box
     instead of a fixed one.
+
+    FIXED 18/09/2026 (Yann: "toujours aligner les icônes. Les aligner comme s'il y avait toujours 2
+    lignes en dessous. Là, quand il y en a une seule ligne, l'image descend, elle ne devrait pas.")
+    — widget_sofascore_content and widget_all_notifs_content both used android:gravity="center_vertical",
+    so a tile whose own content was SHORTER than its tallest sibling (chiefly a "Toutes notifs"
+    GENERIC tile whose title wraps to only 1 line instead of 2) got vertically centered within the
+    row's full height — splitting the height difference evenly above AND below it, which pushed
+    its image down relative to any neighbour with more text underneath. Both rows now use
+    android:gravity="top" instead, so every tile's image sits flush with the top of the row
+    regardless of how many lines its own text ends up using.
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/widget_root"
@@ -283,7 +293,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:gravity="center_vertical"
+            android:gravity="top"
             android:weightSum="5.4"
             android:visibility="gone">
 
@@ -605,7 +615,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:gravity="center_vertical"
+            android:gravity="top"
             android:weightSum="5.4"
             android:visibility="gone">
 
@@ -1083,10 +1093,17 @@
         by default, same convention as widget_view_toggle — only shown while SPORT or ALL_NOTIFS
         is the current view.
     -->
+    <!--
+        FIXED 18/09/2026 (Yann: "sur la droite, supprimer les flèches et agrandir l'icône cloche
+        et ballon") — grown from 20dp/3dp-padding (a ~14dp visible glyph) to 28dp/3dp-padding
+        (~22dp visible) now that NowBarWidgetProvider.applyRightToggleIcon shows a single plain
+        icon (bell or the football-pitch icon) instead of the old arrows+badge composite, which no
+        longer needs the smaller, fiddlier size that composite was tuned for.
+    -->
     <ImageView
         android:id="@+id/widget_view_toggle_right"
-        android:layout_width="20dp"
-        android:layout_height="20dp"
+        android:layout_width="28dp"
+        android:layout_height="28dp"
         android:layout_marginStart="8dp"
         android:padding="3dp"
         android:background="@drawable/widget_dismiss_background"

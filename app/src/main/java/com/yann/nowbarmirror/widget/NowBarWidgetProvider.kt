@@ -9,7 +9,6 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
-import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.PorterDuff
 import android.graphics.PorterDuffXfermode
@@ -17,6 +16,7 @@ import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
+import android.os.Build
 import android.view.View
 import android.widget.RemoteViews
 import android.widget.Toast
@@ -144,12 +144,18 @@ private fun <T> List<T>.sortedForWidget(
  * reusing the exact same widget_latest_content block the LATEST view renders with (title, text,
  * image, dismiss button, action buttons), WITHOUT touching WidgetViewModePrefs.currentView — "je
  * précise bien que ça ne change rien à la vue dernière notif [...] elle doit toujours bien montrer
- * la dernière notif". While peeking, the left column (normally the current view's own icon) shows
- * the rotating-arrows glyph instead, doubling as a "back to the tile grid" button (Yann: "Mettre
- * les flèches tournantes pour le symboliser"); dismissing the peeked notification, or its
- * disappearing for any other reason (an action button that marked it read/archived it, say),
- * closes the peek automatically (Yann: "revenir automatiquement aux icônes") — see
- * closePeekIfShowing, called from both listener services.
+ * la dernière notif". While peeking, the small toggle under the left column keeps showing the
+ * rotating-arrows glyph, doubling as a "back to the tile grid" button (Yann: "Mettre les flèches
+ * tournantes pour le symboliser"); dismissing the peeked notification, or its disappearing for any
+ * other reason (an action button that marked it read/archived it, say), closes the peek
+ * automatically (Yann: "revenir automatiquement aux icônes") — see closePeekIfShowing, called from
+ * both listener services. FIXED 18/09/2026, same request: tapping the peek's own text to open the
+ * real notification now closes the peek too, instead of leaving it shown until the notification is
+ * separately dismissed — Yann: "quand je clique sur une icône puis sur le texte pour ouvrir la
+ * notif, revenir aux icônes dans le widget" — see openPeekContentPendingIntent. ALSO CHANGED same
+ * day (Yann: "mettre l'icone de l'appli à gauche au lieu des grosses flèches qui tournent") — the
+ * big 32dp icon slot (widget_app_icon) now shows the peeked entry's own source-app icon instead of
+ * also switching to the arrows glyph; see applyPeekLeftColumn.
  */
 class NowBarWidgetProvider : AppWidgetProvider() {
 
@@ -159,6 +165,16 @@ class NowBarWidgetProvider : AppWidgetProvider() {
         private const val ACTION_TOGGLE_SPORT_NOTIFS = "com.yann.nowbarmirror.widget.ACTION_TOGGLE_SPORT_NOTIFS"
         private const val ACTION_OPEN_PEEK = "com.yann.nowbarmirror.widget.ACTION_OPEN_PEEK"
         private const val ACTION_CLOSE_PEEK = "com.yann.nowbarmirror.widget.ACTION_CLOSE_PEEK"
+        // NEW 18/09/2026 (Yann: "quand je clique sur une icône puis sur le texte pour ouvrir la
+        // notif, revenir aux icônes dans le widget") — a peek's own "open the real
+        // notification/app" tap used to be wired DIRECTLY to that target PendingIntent
+        // (renderLatestFormat's openIntent -> widget_latest_content), so tapping it left the peek
+        // showing (only a dismiss/removal closed it, see closePeekIfShowing). It now goes through
+        // this app's own broadcast first, carrying the real target as a Parcelable extra, so the
+        // peek can be closed and the widget rebuilt into the tile grid BEFORE that target intent
+        // is actually fired — see openPeekContentPendingIntent / onReceive.
+        private const val ACTION_OPEN_PEEK_CONTENT = "com.yann.nowbarmirror.widget.ACTION_OPEN_PEEK_CONTENT"
+        private const val EXTRA_PEEK_CONTENT_TARGET = "mirror.widget.peek_content_target"
         private const val EXTRA_PEEK_SOURCE = "mirror.widget.peek_source"
         private const val EXTRA_PEEK_ENTRY_ID = "mirror.widget.peek_entry_id"
 
@@ -451,10 +467,13 @@ class NowBarWidgetProvider : AppWidgetProvider() {
                     text = resolvedPeek.text,
                     image = resolvedPeek.image,
                     dismissIntent = resolvedPeek.dismissIntent,
-                    openIntent = resolvedPeek.openIntent,
+                    // Wrapped so tapping to open the notification ALSO closes the peek and drops
+                    // back to the tile grid, instead of just opening the target while the peek
+                    // stays shown — see ACTION_OPEN_PEEK_CONTENT's doc.
+                    openIntent = resolvedPeek.openIntent?.let { openPeekContentPendingIntent(context, it) },
                     actions = resolvedPeek.actions
                 )
-                applyPeekLeftColumn(context, views)
+                applyPeekLeftColumn(context, views, resolvedPeek.iconPackageName)
                 views.setViewVisibility(R.id.widget_view_toggle_right, View.GONE)
                 return views
             }
@@ -544,13 +563,14 @@ class NowBarWidgetProvider : AppWidgetProvider() {
             }
         }
 
+        /**
+         * CHANGED 18/09/2026 (Yann: "Afficher le même signe en plus grand sur la gauche en vue
+         * sport") — used to show Sofascore's own app icon; now shows the stylized football-pitch
+         * glyph instead (same one used on the right toggle for ALL_NOTIFS, see
+         * applyRightToggleIcon/ic_football_pitch.xml), at the left column's full 32dp size.
+         */
         private fun applySofascoreIcon(context: Context, views: RemoteViews) {
-            val icon = appIconBitmap(context, SofascoreNotificationListenerService.SOFASCORE_PACKAGE)
-            if (icon != null) {
-                views.setImageViewBitmap(R.id.widget_app_icon, circularBitmap(icon))
-            } else {
-                views.setImageViewResource(R.id.widget_app_icon, R.drawable.ic_stat_mirror)
-            }
+            views.setImageViewResource(R.id.widget_app_icon, R.drawable.ic_football_pitch)
         }
 
         /**
@@ -758,59 +778,63 @@ class NowBarWidgetProvider : AppWidgetProvider() {
          * Hidden on LATEST (nothing for it to do there — the left button already covers getting
          * to/from LATEST, see WidgetViewModePrefs' class doc).
          *
-         * CHANGED 18/09/2026: the icon itself is now context-dependent instead of always the plain
-         * arrows glyph — see applyRightToggleIcon (Yann: "En vue sport, sur la droite, remplacer
-         * les flèches par un bouton cloche et flèches qui tourne [...] En vue toutes notifs, mettre
-         * l'icone blanche de Sofascore avec flèches aussi").
+         * CHANGED 18/09/2026: the icon itself is context-dependent instead of always the plain
+         * arrows glyph — see applyRightToggleIcon. FIXED same day (Yann: "sur la droite, supprimer
+         * les flèches et agrandir l'icône cloche et ballon [...] Remplacer le ballon par une icône
+         * de terrain de foot stylisee") — the arrows are gone entirely now (the icon alone, shown
+         * bigger, is the affordance) and the ALL_NOTIFS-view icon is no longer derived from
+         * Sofascore's own app icon; see ic_football_pitch.xml.
          */
         private fun applyRightToggle(context: Context, views: RemoteViews, currentView: WidgetViewModePrefs.WidgetView) {
             val visible = currentView != WidgetViewModePrefs.WidgetView.LATEST
             views.setViewVisibility(R.id.widget_view_toggle_right, if (visible) View.VISIBLE else View.GONE)
             if (visible) {
-                applyRightToggleIcon(context, views, currentView)
+                applyRightToggleIcon(views, currentView)
                 views.setOnClickPendingIntent(R.id.widget_view_toggle_right, toggleSportNotifsPendingIntent(context))
             }
         }
 
         /**
          * Picks the right toggle's icon based on which view is currently showing (see
-         * applyRightToggle's doc for the request behind this):
-         * - SPORT -> a static bell-badged arrows glyph (ic_widget_switch_to_notifs) — a plain
-         *   drawable resource, since both parts (arrows + generic bell) are this app's own icons.
-         * - ALL_NOTIFS -> the SAME arrows glyph, but badged with a white silhouette DERIVED FROM
-         *   Sofascore's own currently-installed app icon at render time (sofascoreToggleIconBitmap)
-         *   rather than a hand-drawn recreation of their logo — falls back to the plain arrows
-         *   glyph if Sofascore isn't installed or anything here throws.
+         * applyRightToggle's doc for the request behind this) — both plain static drawables now,
+         * no arrows, no runtime-composited bitmap:
+         * - SPORT -> the plain bell glyph (ic_notification_bell), hinting at the ALL_NOTIFS view
+         *   it leads to.
+         * - ALL_NOTIFS -> the stylized football-pitch glyph (ic_football_pitch, see its own doc
+         *   comment), hinting at the SPORT view it leads to — the SAME glyph shown larger on the
+         *   left column while SPORT is showing (applySofascoreIcon).
          */
-        private fun applyRightToggleIcon(context: Context, views: RemoteViews, currentView: WidgetViewModePrefs.WidgetView) {
+        private fun applyRightToggleIcon(views: RemoteViews, currentView: WidgetViewModePrefs.WidgetView) {
             when (currentView) {
                 WidgetViewModePrefs.WidgetView.SPORT ->
-                    views.setImageViewResource(R.id.widget_view_toggle_right, R.drawable.ic_widget_switch_to_notifs)
-                WidgetViewModePrefs.WidgetView.ALL_NOTIFS -> {
-                    val sofascoreIcon = appIconBitmap(context, SofascoreNotificationListenerService.SOFASCORE_PACKAGE)
-                    if (sofascoreIcon != null) {
-                        try {
-                            views.setImageViewBitmap(R.id.widget_view_toggle_right, sofascoreToggleIconBitmap(context, sofascoreIcon))
-                        } catch (_: Throwable) {
-                            views.setImageViewResource(R.id.widget_view_toggle_right, R.drawable.ic_widget_switch_view)
-                        }
-                    } else {
-                        views.setImageViewResource(R.id.widget_view_toggle_right, R.drawable.ic_widget_switch_view)
-                    }
-                }
+                    views.setImageViewResource(R.id.widget_view_toggle_right, R.drawable.ic_notification_bell)
+                WidgetViewModePrefs.WidgetView.ALL_NOTIFS ->
+                    views.setImageViewResource(R.id.widget_view_toggle_right, R.drawable.ic_football_pitch)
                 WidgetViewModePrefs.WidgetView.LATEST -> Unit // hidden in this view, see applyRightToggle
             }
         }
 
         /**
-         * Left column while a "peek" is showing (see WidgetPeekPrefs' class doc) — replaces
-         * whichever icon that view would normally show with the rotating-arrows glyph on BOTH the
-         * main icon slot and the small toggle button beneath it (Yann: "Mettre les flèches
-         * tournantes pour le symboliser"), both bound to the SAME "close the peek, back to the
-         * tile grid" action — same "one enlarged tap zone" reasoning as applyLeftToggle above.
+         * Left column while a "peek" is showing (see WidgetPeekPrefs' class doc). The small toggle
+         * button beneath the main icon (widget_view_toggle) keeps showing the rotating-arrows
+         * glyph as before (Yann: "Garder les petites"), still bound to the "close the peek, back
+         * to the tile grid" action. FIXED 18/09/2026 (Yann: "vue texte dans widget : mettre
+         * l'icone de l'appli à gauche au lieu des grosses flèches qui tournent") — the main
+         * 32dp icon slot (widget_app_icon) used to ALSO switch to the arrows glyph; it now shows
+         * [iconPackageName]'s own app icon instead (the peeked notification's source app — see
+         * ResolvedPeek.iconPackageName / resolvePeek), same "this app's icon" treatment the true
+         * LATEST view already uses (applyLatestIcon), falling back to ic_stat_mirror if the lookup
+         * fails or no package is known. Both views stay bound to the same close action, same "one
+         * enlarged tap zone" reasoning as applyLeftToggle above — only the big icon's PICTURE
+         * changes, not what tapping it does.
          */
-        private fun applyPeekLeftColumn(context: Context, views: RemoteViews) {
-            views.setImageViewResource(R.id.widget_app_icon, R.drawable.ic_widget_switch_view)
+        private fun applyPeekLeftColumn(context: Context, views: RemoteViews, iconPackageName: String?) {
+            val appIcon = iconPackageName?.let { appIconBitmap(context, it) }
+            if (appIcon != null) {
+                views.setImageViewBitmap(R.id.widget_app_icon, circularBitmap(appIcon))
+            } else {
+                views.setImageViewResource(R.id.widget_app_icon, R.drawable.ic_stat_mirror)
+            }
             views.setViewVisibility(R.id.widget_view_toggle, View.VISIBLE)
             val backIntent = closePeekPendingIntent(context)
             views.setOnClickPendingIntent(R.id.widget_app_icon, backIntent)
@@ -863,6 +887,33 @@ class NowBarWidgetProvider : AppWidgetProvider() {
             return PendingIntent.getBroadcast(
                 context,
                 2,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+        }
+
+        /**
+         * NEW 18/09/2026 (Yann: "quand je clique sur une icône puis sur le texte pour ouvrir la
+         * notif, revenir aux icônes dans le widget") — wraps a peek's real "open" target
+         * ([target], e.g. the mirrored notification's own contentIntent, or a launch-app fallback)
+         * in a PendingIntent that routes through this app's own onReceive first: it closes the
+         * peek and rebuilds the widget back into that view's tile grid, THEN fires [target] itself
+         * (see the ACTION_OPEN_PEEK_CONTENT branch below) — a plain PendingIntent handed straight
+         * to the widget host can't do both, since only one PendingIntent can be bound per view.
+         * [target] rides along as a Parcelable extra (a PendingIntent can be put into another
+         * Intent's extras) rather than being re-derived here, so this works identically for every
+         * kind of peeked entry (mirrored notification, Sofascore match, launch-app fallback) with
+         * no extra branching. Request code 3 is fine unwrapped/unshared: only one peek can ever be
+         * showing at a time, so there's never more than one of these live at once.
+         */
+        private fun openPeekContentPendingIntent(context: Context, target: PendingIntent): PendingIntent {
+            val intent = Intent(context, NowBarWidgetProvider::class.java).apply {
+                action = ACTION_OPEN_PEEK_CONTENT
+                putExtra(EXTRA_PEEK_CONTENT_TARGET, target)
+            }
+            return PendingIntent.getBroadcast(
+                context,
+                3,
                 intent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
@@ -944,7 +995,12 @@ class NowBarWidgetProvider : AppWidgetProvider() {
             val image: Bitmap?,
             val dismissIntent: PendingIntent?,
             val openIntent: PendingIntent?,
-            val actions: List<WidgetAction>
+            val actions: List<WidgetAction>,
+            // NEW 18/09/2026 — the peeked entry's own source-app package, used by
+            // applyPeekLeftColumn to show that app's icon on widget_app_icon (Yann: "mettre
+            // l'icone de l'appli à gauche"). Sofascore for a SPORT match or an ALL_NOTIFS
+            // SOFASCORE_MATCH entry, the mirrored notification's own package otherwise.
+            val iconPackageName: String?
         )
 
         /**
@@ -965,7 +1021,8 @@ class NowBarWidgetProvider : AppWidgetProvider() {
                         dismissIntent = sofascoreDismissPendingIntent(context, match.key, match.postTimeMillis),
                         openIntent = liveSofascoreIntents[match.key]
                             ?: launchAppPendingIntent(context, SofascoreNotificationListenerService.SOFASCORE_PACKAGE),
-                        actions = liveSofascoreActions[match.key] ?: emptyList()
+                        actions = liveSofascoreActions[match.key] ?: emptyList(),
+                        iconPackageName = SofascoreNotificationListenerService.SOFASCORE_PACKAGE
                     )
                 }
                 WidgetPeekPrefs.Source.ALL_NOTIFS -> {
@@ -988,7 +1045,8 @@ class NowBarWidgetProvider : AppWidgetProvider() {
                         image = entry.imageFile?.let { BitmapFactory.decodeFile(it.path) },
                         dismissIntent = dismissIntent,
                         openIntent = liveAllNotifIntents[entryId] ?: fallbackPackage?.let { launchAppPendingIntent(context, it) },
-                        actions = liveAllNotifActions[entryId] ?: emptyList()
+                        actions = liveAllNotifActions[entryId] ?: emptyList(),
+                        iconPackageName = fallbackPackage
                     )
                 }
             }
@@ -1086,65 +1144,10 @@ class NowBarWidgetProvider : AppWidgetProvider() {
             return output
         }
 
-        /**
-         * Turns [source] into a WHITE silhouette (alpha kept, every opaque pixel painted white) —
-         * the same general technique Android itself uses to derive a themed/monochrome status-bar
-         * icon from an app's adaptive-icon foreground layer. Used for the ALL_NOTIFS-view right
-         * toggle's badge (see sofascoreToggleIconBitmap): [source] there is Sofascore's OWN,
-         * currently-installed app icon (via appIconBitmap), so this is always the real icon,
-         * recolored — never a hand-drawn recreation of their logo.
-         */
-        private fun whiteSilhouette(source: Bitmap): Bitmap {
-            val output = Bitmap.createBitmap(source.width, source.height, Bitmap.Config.ARGB_8888)
-            val canvas = Canvas(output)
-            canvas.drawBitmap(source, 0f, 0f, Paint(Paint.ANTI_ALIAS_FLAG))
-            val maskPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.WHITE
-                xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_IN)
-            }
-            canvas.drawRect(0f, 0f, source.width.toFloat(), source.height.toFloat(), maskPaint)
-            return output
-        }
-
-        /**
-         * Composites the rotating-arrows glyph with a small circular badge in the bottom-end
-         * corner made from [sofascoreIcon]'s white silhouette (see [whiteSilhouette]) — same
-         * badge-over-glyph proportions as the "Toutes notifs" generic tiles' own app-icon badge
-         * (widget_notif_N_badge, roughly 44% of its 32dp photo; here roughly 50% of the 24dp
-         * arrows glyph, since the whole icon is much smaller). A dark backdrop circle goes down
-         * first so the white silhouette stays legible against the white arrows underneath it, same
-         * convention as widget_dismiss_background's own translucent-dark-circle background. See
-         * applyRightToggleIcon for the ALL_NOTIFS-view call site (the SPORT-view equivalent,
-         * ic_widget_switch_to_notifs, is a plain static drawable instead, since both its parts —
-         * arrows and a generic bell — are this app's own icons).
-         */
-        private fun sofascoreToggleIconBitmap(context: Context, sofascoreIcon: Bitmap): Bitmap {
-            val density = context.resources.displayMetrics.density
-            val size = (24 * density).toInt().coerceAtLeast(1)
-            val output = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-            val canvas = Canvas(output)
-
-            context.getDrawable(R.drawable.ic_widget_switch_view)?.apply {
-                setBounds(0, 0, size, size)
-                draw(canvas)
-            }
-
-            val badgeSize = (size * 0.5f).toInt().coerceAtLeast(1)
-            val badgeRadius = badgeSize / 2f
-            val cx = size - badgeRadius
-            val cy = size - badgeRadius
-
-            val backdropPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#CC1A2230") }
-            canvas.drawCircle(cx, cy, badgeRadius, backdropPaint)
-
-            val silhouette = circularBitmap(whiteSilhouette(sofascoreIcon))
-            val inset = badgeRadius * 0.24f
-            val half = (badgeRadius - inset).coerceAtLeast(1f)
-            val dst = RectF(cx - half, cy - half, cx + half, cy + half)
-            canvas.drawBitmap(silhouette, null, dst, Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
-
-            return output
-        }
+        // whiteSilhouette/sofascoreToggleIconBitmap (composited the rotating-arrows glyph with a
+        // white silhouette of Sofascore's own icon for the ALL_NOTIFS-view right toggle) were
+        // REMOVED 18/09/2026 along with ic_widget_switch_to_notifs.xml — see applyRightToggleIcon
+        // for why the right toggle no longer needs either the arrows or a runtime-derived bitmap.
     }
 
     override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
@@ -1198,7 +1201,37 @@ class NowBarWidgetProvider : AppWidgetProvider() {
                 pushToAllWidgets(context, buildViews(context))
                 return
             }
+            // NEW 18/09/2026 (Yann: "quand je clique sur une icône puis sur le texte pour ouvrir
+            // la notif, revenir aux icônes dans le widget") — see openPeekContentPendingIntent's
+            // doc. Closes the peek and rebuilds the widget FIRST, then fires the real target
+            // (the notification/app the tap was actually meant to open) — order matters here
+            // since the widget update is a local, synchronous call while target.send() hands off
+            // to another app/process.
+            ACTION_OPEN_PEEK_CONTENT -> {
+                WidgetPeekPrefs.close(context)
+                pushToAllWidgets(context, buildViews(context))
+                peekContentTarget(intent)?.let { target ->
+                    try {
+                        target.send()
+                    } catch (_: PendingIntent.CanceledException) {
+                        // The wrapped notification/app PendingIntent is no longer valid (source
+                        // notification gone, process restarted) — the peek is already closed
+                        // above, so there's nothing further to do.
+                    }
+                }
+                return
+            }
         }
         super.onReceive(context, intent)
+    }
+
+    /** Type-safe [Intent.getParcelableExtra] for [EXTRA_PEEK_CONTENT_TARGET], following the same SDK_INT-gated pattern already used elsewhere in this app (e.g. AppSelectionActivity.installedApplications). */
+    @Suppress("DEPRECATION")
+    private fun peekContentTarget(intent: Intent): PendingIntent? {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            intent.getParcelableExtra(EXTRA_PEEK_CONTENT_TARGET, PendingIntent::class.java)
+        } else {
+            intent.getParcelableExtra(EXTRA_PEEK_CONTENT_TARGET)
+        }
     }
 }
