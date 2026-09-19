@@ -10,4 +10,19 @@
         <item name="android:textColorPrimary">@color/one_ui_text_primary</item>
         <item name="android:textColorSecondary">@color/one_ui_text_secondary</item>
     </style>
+
+    <!--
+        NEW 18/09/2026 — PeekOpenTrampolineActivity's theme (see its class doc). Fully transparent
+        and animation-less so this activity is never actually visible: it exists only to relay a
+        widget tap into a real target after closing the peek, and finishes itself immediately.
+    -->
+    <style name="Theme.NowBarMirror.Trampoline" parent="Theme.NowBarMirror">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:windowContentOverlay">@null</item>
+        <item name="android:windowDisablePreview">true</item>
+        <item name="android:backgroundDimEnabled">false</item>
+    </style>
 </resources>
