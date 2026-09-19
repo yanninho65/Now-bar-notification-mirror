@@ -53,6 +53,20 @@
             android:label="@string/app_selection_title"
             android:exported="false" />
 
+        <!--
+            Invisible "trampoline" Activity (NEW 18/09/2026) — see PeekOpenTrampolineActivity's
+            class doc. exported="false": only this app's own widget PendingIntents ever target it.
+            excludeFromRecents/noHistory/taskAffinity="" keep this instantaneous hand-off from ever
+            leaving a trace in the task switcher or back stack.
+        -->
+        <activity
+            android:name=".widget.PeekOpenTrampolineActivity"
+            android:exported="false"
+            android:theme="@style/Theme.NowBarMirror.Trampoline"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity="" />
+
         <service
             android:name=".MirrorNotificationListener"
             android:label="@string/service_name"
