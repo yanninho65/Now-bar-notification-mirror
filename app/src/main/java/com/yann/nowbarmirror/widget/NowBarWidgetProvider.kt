@@ -386,39 +386,76 @@ class NowBarWidgetProvider : AppWidgetProvider() {
          * those fields' doc — before rebuilding whichever view/peek is currently showing.
          */
         fun pushToAllNotifications(context: Context, entry: AllNotifEntryPush) {
-            val kept = WidgetAllNotificationsStore.push(
+            pushToAllNotificationsBatch(context, listOf(entry))
+        }
+
+        /**
+         * Batched version of [pushToAllNotifications] for several entries pushed together — added
+         * 20/09/2026 for MirrorNotificationListener.refillAllNotifsHistory/
+         * SofascoreNotificationListenerService's own equivalent refill, both of which used to call
+         * [pushToAllNotifications] once PER eligible notification still active after a dismissal.
+         * Each of those calls did its own WidgetAllNotificationsStore.push() (a full
+         * read-merge-save) AND its own pushToAllWidgets(buildViews()) — i.e. a full widget redraw —
+         * so refilling a history of, say, 8 notifications after dismissing one made the widget
+         * visibly flash through 8 intermediate states, oldest notification first (since the refill
+         * loops sorted-ascending so the true most-recent one wins the merge last), before settling
+         * on the real top-5 (Yann, 20/09/2026: "quand je supprime une notif [...] je vois apparaitre
+         * toutes les notifs dans un ordre chronologique croissant avant de voir la dernière reçue
+         * [...] ça pourrait de suite montrer la cinquième"). This does the same merge for every
+         * [entries] in ONE WidgetAllNotificationsStore.pushAll() call (one read, one save) and
+         * pushes exactly ONE widget rebuild at the end, so the widget jumps straight to the final
+         * state instead of animating through every step of the refill. [pushToAllNotifications]
+         * above is now just this with a single-element list, so both call sites share the exact
+         * same live-intent/action bookkeeping below instead of keeping two versions of it in sync.
+         */
+        fun pushToAllNotificationsBatch(context: Context, entries: List<AllNotifEntryPush>) {
+            if (entries.isEmpty()) return
+
+            val kept = WidgetAllNotificationsStore.pushAll(
                 context,
-                WidgetAllNotificationsStore.PersistableEntry(
-                    key = entry.key,
-                    kind = entry.kind,
-                    postTimeMillis = entry.postTimeMillis,
-                    title = entry.title,
-                    text = entry.text,
-                    packageName = entry.packageName,
-                    isConversation = entry.isConversation,
-                    homeTeam = entry.homeTeam,
-                    awayTeam = entry.awayTeam,
-                    homeScore = entry.homeScore,
-                    awayScore = entry.awayScore,
-                    lastScorer = entry.lastScorer,
-                    status = entry.status,
-                    apiSource = entry.apiSource,
-                    image = entry.image
-                )
+                entries.map { entry ->
+                    WidgetAllNotificationsStore.PersistableEntry(
+                        key = entry.key,
+                        kind = entry.kind,
+                        postTimeMillis = entry.postTimeMillis,
+                        title = entry.title,
+                        text = entry.text,
+                        packageName = entry.packageName,
+                        isConversation = entry.isConversation,
+                        homeTeam = entry.homeTeam,
+                        awayTeam = entry.awayTeam,
+                        homeScore = entry.homeScore,
+                        awayScore = entry.awayScore,
+                        lastScorer = entry.lastScorer,
+                        status = entry.status,
+                        apiSource = entry.apiSource,
+                        image = entry.image
+                    )
+                }
             )
 
-            val entryId = allNotifEntryId(entry.key, entry.postTimeMillis)
+            // Same rule as the old single-entry version, just applied to every entry in the batch:
+            // a PUSHED entry always contributes its OWN live PendingIntent/actions (even if that
+            // means nothing, when it has none — never falling back to a stale value from a
+            // previous push under the same id), and anything else still KEPT from before this
+            // batch but NOT itself part of it keeps whatever live PendingIntent/actions it already
+            // had in memory.
+            val pushedIds = entries.map { allNotifEntryId(it.key, it.postTimeMillis) }.toSet()
             val keptIds = kept.map { allNotifEntryId(it.key, it.postTimeMillis) }.toSet()
             liveAllNotifIntents = buildMap {
-                entry.contentIntent?.let { put(entryId, it) }
+                entries.forEach { entry ->
+                    entry.contentIntent?.let { put(allNotifEntryId(entry.key, entry.postTimeMillis), it) }
+                }
                 keptIds.forEach { id ->
-                    if (id != entryId) liveAllNotifIntents[id]?.let { put(id, it) }
+                    if (id !in pushedIds) liveAllNotifIntents[id]?.let { put(id, it) }
                 }
             }
             liveAllNotifActions = buildMap {
-                if (entry.actions.isNotEmpty()) put(entryId, entry.actions)
+                entries.forEach { entry ->
+                    if (entry.actions.isNotEmpty()) put(allNotifEntryId(entry.key, entry.postTimeMillis), entry.actions)
+                }
                 keptIds.forEach { id ->
-                    if (id != entryId) liveAllNotifActions[id]?.let { put(id, it) }
+                    if (id !in pushedIds) liveAllNotifActions[id]?.let { put(id, it) }
                 }
             }
 

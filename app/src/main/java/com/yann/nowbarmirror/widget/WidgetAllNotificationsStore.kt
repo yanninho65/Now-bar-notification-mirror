@@ -145,6 +145,50 @@ object WidgetAllNotificationsStore {
     private fun collapsesByKeyAlone(kind: Kind, isConversation: Boolean) =
         kind == Kind.SOFASCORE_MATCH || isConversation
 
+    /**
+     * [Data] -> [PersistableEntry], decoding its image file back to a Bitmap — the same
+     * field-by-field copy [push]/[remove]/[pruneAgainstActive] each used to write out inline
+     * (three copies of the same 15-field constructor call). Harmonized 20/09/2026 into this one
+     * place so a future field addition only needs updating here instead of in three places that
+     * could silently drift apart.
+     */
+    private fun Data.toPersistableEntry(): PersistableEntry = PersistableEntry(
+        key = key,
+        kind = kind,
+        postTimeMillis = postTimeMillis,
+        title = title,
+        text = text,
+        packageName = packageName,
+        isConversation = isConversation,
+        homeTeam = homeTeam,
+        awayTeam = awayTeam,
+        homeScore = homeScore,
+        awayScore = awayScore,
+        lastScorer = lastScorer,
+        status = status,
+        apiSource = apiSource,
+        image = imageFile?.let { BitmapFactory.decodeFile(it.path) }
+    )
+
+    /**
+     * The actual merge behind [push]/[pushAll]: folds [entry] into [existing] — same tile
+     * (collapsed by key alone, or the exact (key, postTimeMillis) pair re-pushed) gets replaced
+     * in place, anything else is kept — then re-sorts by recency and caps to [MAX_SLOTS]. Pure
+     * (no I/O), so [pushAll] can call it once per entry in memory without a store round-trip
+     * between each one.
+     */
+    private fun mergeEntry(existing: List<PersistableEntry>, entry: PersistableEntry): List<PersistableEntry> {
+        val collapse = collapsesByKeyAlone(entry.kind, entry.isConversation)
+        return buildList {
+            add(entry)
+            existing.forEach { data ->
+                val isSameTile = data.key == entry.key &&
+                    (collapse || data.postTimeMillis == entry.postTimeMillis)
+                if (!isSameTile) add(data)
+            }
+        }.sortedByDescending { it.postTimeMillis }.take(MAX_SLOTS)
+    }
+
     private fun prefs(context: Context) =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
@@ -163,44 +207,38 @@ object WidgetAllNotificationsStore {
      * PendingIntent map to exactly the (key, postTimeMillis) pairs still kept, without a second read.
      */
     fun push(context: Context, entry: PersistableEntry): List<Data> {
-        val existing = get(context)
         // See the class doc's IDENTITY section: a Sofascore match or a conversation always
         // updates its ONE existing tile (by key alone), no matter how many times it reposts;
         // anything else only updates in place when it's the exact same posting re-pushed
         // (same key AND same postTimeMillis) — a new posting with a different postTimeMillis is a
-        // genuinely new tile.
-        val collapse = collapsesByKeyAlone(entry.kind, entry.isConversation)
-
-        val merged = buildList {
-            add(entry)
-            existing.forEach { data ->
-                val isSameTile = data.key == entry.key &&
-                    (collapse || data.postTimeMillis == entry.postTimeMillis)
-                if (!isSameTile) {
-                    add(
-                        PersistableEntry(
-                            key = data.key,
-                            kind = data.kind,
-                            postTimeMillis = data.postTimeMillis,
-                            title = data.title,
-                            text = data.text,
-                            packageName = data.packageName,
-                            isConversation = data.isConversation,
-                            homeTeam = data.homeTeam,
-                            awayTeam = data.awayTeam,
-                            homeScore = data.homeScore,
-                            awayScore = data.awayScore,
-                            lastScorer = data.lastScorer,
-                            status = data.status,
-                            apiSource = data.apiSource,
-                            image = data.imageFile?.let { BitmapFactory.decodeFile(it.path) }
-                        )
-                    )
-                }
-            }
-        }.sortedByDescending { it.postTimeMillis }.take(MAX_SLOTS)
-
+        // genuinely new tile. See [mergeEntry].
+        val merged = mergeEntry(get(context).map { it.toPersistableEntry() }, entry)
         save(context, merged)
+        return get(context)
+    }
+
+    /**
+     * Batched version of [push] for several entries pushed together — see
+     * NowBarWidgetProvider.pushToAllNotificationsBatch's doc for the call site this exists for.
+     * Pushing N entries one at a time, each through [push], reads/merges/saves/rebuilds the whole
+     * widget N separate times; when a caller already has the full batch in hand (refilling
+     * "Toutes notifs" after a dismissal from everything still active in the shade, say), doing N
+     * separate saves means the store — and, via NowBarWidgetProvider, the on-screen widget —
+     * visibly passes through every intermediate partial state along the way, oldest entry first,
+     * before landing on the final top-5 (Yann, 20/09/2026: "quand je supprime une notif [...] je
+     * vois apparaitre toutes les notifs dans un ordre chronologique croissant avant de voir la
+     * dernière reçue [...] ça pourrait de suite montrer la cinquième"). This instead folds every
+     * entry into the SAME in-memory list (via [mergeEntry], applied repeatedly — order-independent
+     * for the final result, since capping to [MAX_SLOTS] after each fold only ever discards
+     * entries that are already outside the top [MAX_SLOTS] of everything merged so far) and saves
+     * ONCE at the end, so there's exactly one store write and the caller triggers exactly one
+     * widget rebuild for the whole batch.
+     */
+    fun pushAll(context: Context, entries: List<PersistableEntry>): List<Data> {
+        if (entries.isEmpty()) return get(context)
+        var current = get(context).map { it.toPersistableEntry() }
+        entries.forEach { entry -> current = mergeEntry(current, entry) }
+        save(context, current)
         return get(context)
     }
 
@@ -242,11 +280,6 @@ object WidgetAllNotificationsStore {
         prefs(context).edit().putString(KEY_ENTRIES, array.toString()).apply()
     }
 
-    fun clear(context: Context) {
-        for (slot in 0 until MAX_SLOTS) imageFile(context, slot).delete()
-        prefs(context).edit().remove(KEY_ENTRIES).apply()
-    }
-
     /**
      * Drops the entry matching BOTH [key] and [postTimeMillis], if present — see the class doc's
      * IDENTITY section for why postTimeMillis is part of the identity here too (17/09/2026): with
@@ -270,26 +303,7 @@ object WidgetAllNotificationsStore {
 
         if (existing.none(::matches)) return
 
-        val kept = existing.filterNot(::matches).map { data ->
-            PersistableEntry(
-                key = data.key,
-                kind = data.kind,
-                postTimeMillis = data.postTimeMillis,
-                title = data.title,
-                text = data.text,
-                packageName = data.packageName,
-                isConversation = data.isConversation,
-                homeTeam = data.homeTeam,
-                awayTeam = data.awayTeam,
-                homeScore = data.homeScore,
-                awayScore = data.awayScore,
-                lastScorer = data.lastScorer,
-                status = data.status,
-                apiSource = data.apiSource,
-                image = data.imageFile?.let { BitmapFactory.decodeFile(it.path) }
-            )
-        }
-        save(context, kept)
+        save(context, existing.filterNot(::matches).map { it.toPersistableEntry() })
     }
 
     /**
@@ -332,28 +346,7 @@ object WidgetAllNotificationsStore {
         val kept = existing.filter(::isStillActive)
         if (kept.size == existing.size) return
 
-        save(
-            context,
-            kept.map { data ->
-                PersistableEntry(
-                    key = data.key,
-                    kind = data.kind,
-                    postTimeMillis = data.postTimeMillis,
-                    title = data.title,
-                    text = data.text,
-                    packageName = data.packageName,
-                    isConversation = data.isConversation,
-                    homeTeam = data.homeTeam,
-                    awayTeam = data.awayTeam,
-                    homeScore = data.homeScore,
-                    awayScore = data.awayScore,
-                    lastScorer = data.lastScorer,
-                    status = data.status,
-                    apiSource = data.apiSource,
-                    image = data.imageFile?.let { BitmapFactory.decodeFile(it.path) }
-                )
-            }
-        )
+        save(context, kept.map { it.toPersistableEntry() })
     }
 
     fun get(context: Context): List<Data> {

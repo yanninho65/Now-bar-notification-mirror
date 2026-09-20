@@ -109,11 +109,6 @@ object SofascoreWidgetStore {
         prefs(context).edit().putString(KEY_MATCHES, array.toString()).apply()
     }
 
-    fun clear(context: Context) {
-        for (slot in 0 until MAX_SLOTS) imageFile(context, slot).delete()
-        prefs(context).edit().remove(KEY_MATCHES).apply()
-    }
-
     fun get(context: Context): List<Data> {
         val raw = prefs(context).getString(KEY_MATCHES, null) ?: return emptyList()
         val array = try { JSONArray(raw) } catch (_: Throwable) { return emptyList() }
