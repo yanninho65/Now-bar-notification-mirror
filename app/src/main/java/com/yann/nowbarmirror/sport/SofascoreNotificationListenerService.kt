@@ -587,11 +587,29 @@ class SofascoreNotificationListenerService : NotificationListenerService() {
      * " - " (espaces des deux côtés) et non sur tout tiret, pour ne pas
      * couper un nom d'équipe composé (ex. "Saint-Germain", sans espaces
      * autour de son tiret).
+     *
+     * AJOUTÉ le 20/09/2026 (demandé par Yann) : sport américain — Sofascore
+     * présente le titre "Équipe 2 @ Équipe 1" plutôt que "Équipe 1 - Équipe
+     * 2" (ex. "Phillies @ Nationals", capture fournie par Yann). Le "@" est
+     * traité comme le tiret pour séparer les deux équipes, SANS inverser
+     * l'ordre : le score des lignes d'événement ("Score : H - A", même
+     * gabarit que [SofascoreNotificationParser.scoreEvent]) suit l'ordre
+     * d'apparition dans le titre exactement comme pour les autres sports
+     * (premier nom = premier nombre du score) — confirmé sur la capture
+     * "Phillies @ Nationals" / "Match terminé : 3 - 6" / "Score : 3 - [6]
+     * Nationals" (Phillies toujours associé au premier nombre, Nationals au
+     * second). Testé AVANT le split " - " ci-dessous, un titre au format
+     * "@" ne contenant jamais " - ".
      */
     private fun extractTeams(sbn: StatusBarNotification): Pair<String, String>? {
         val title = sbn.notification.extras
             .getCharSequence(Notification.EXTRA_TITLE)?.toString()?.trim()
             ?: return null
+        if (title.contains("@")) {
+            val teams = title.split("@").map { it.trim() }
+            if (teams.size != 2 || teams.any { it.isEmpty() }) return null
+            return teams[0] to teams[1]
+        }
         val teams = title.split(" - ").map { it.trim() }
         if (teams.size != 2 || teams.any { it.isEmpty() }) return null
         return teams[0] to teams[1]

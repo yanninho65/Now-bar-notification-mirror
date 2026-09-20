@@ -162,9 +162,74 @@ package com.yann.nowbarmirror.sport
  * foot : ici Brive marque un essai (5), le transforme (+2 -> 7), puis
  * Aurillac fait de même (5, puis 7) — le score affiché passe donc par
  * 0-5, 0-7, 5-7, 7-7. "Mi-temps"/"Match terminé" au rugby suivent le même
- * libellé qu'au foot (non confirmé sur cet exemple, mais aucune raison de
- * différer) — [parseFootball] les gère déjà, [scoreEvent] est la seule
- * ligne d'événement propre au rugby.
+ * libellé qu'au foot (CONFIRMÉ depuis par un exemple réel, capture fournie
+ * par Yann le 20/09/2026, Vannes - Toulouse : "2de mi-temps a commencé:
+ * 16 - 17" / "Mi-temps : 16 - 17") — [parseFootball] les gère déjà,
+ * [scoreEvent] est la seule ligne d'événement propre au rugby.
+ *
+ * DEMANDÉ par Yann le 20/09/2026 : indiquer la période (1 ou 2) sur les
+ * lignes [scoreEvent] elles-mêmes — contrairement au foot ([timedEvent]),
+ * ces lignes ne portent aucune minute, donc rien ne dit dans quelle
+ * période on se trouve une fois la mi-temps passée. Résolu en cherchant,
+ * à partir de la ligne [scoreEvent] la plus récente, la prochaine ligne
+ * plus ANCIENNE (donc plus loin dans la liste, triée du plus récent au
+ * plus ancien) qui soit un marqueur de période déjà connu — voir
+ * [currentHalfStatus].
+ *
+ * Exemple réel de séance de tirs au but au foot (captures fournies par
+ * Yann le 20/09/2026) :
+ * - Italie U20 (F) - Chine U20 (F), séance EN COURS :
+ *   "Penalty raté : 5 - [4]Chenyu Li"
+ *   "Séance de tirs au but : [5] - 4 Gabriella Langella"
+ *   "Séance de tirs au but : 4 - [4] Xiao Yafei"
+ *   "Séance de tirs au but : [4] - 3 Martina Bressan"
+ *   "Séance de tirs au but : 3 - [3] Xinyi Zhou"
+ *   "Séance de tirs au but : [3] - 2 Marta Zamboni"
+ *   Même gabarit que [goalNoMinute]/[scoreEvent] (score de la séance déjà à
+ *   jour, crochet sur le côté qui vient de tirer) — voir [shootoutTick]/
+ *   [missedPenalty]. Un tir raté ne change pas le score mais reste posté
+ *   avec le même gabarit "H - A" (inchangé). À ce stade (6 lignes captées
+ *   par Android, voir SofascoreNotificationListenerService), le score du
+ *   match AVANT la séance (temps réglementaire + prolongation) a déjà
+ *   défilé hors de la notif dès que la séance dure plus de quelques tirs —
+ *   seul le score de la séance elle-même est donc affiché ici, statut
+ *   "TAB" (traduit en "PEN" côté montre/widget, voir MatchClock.kt/
+ *   SofascoreMatchPresentation.kt — nom interne différent du libellé
+ *   affiché pour ne pas entrer en collision avec le "PEN" déjà utilisé par
+ *   TheSportsDB pour un tout autre statut, "Fin (tab)").
+ * - Brésil U20 (F) - États-Unis U20 (F), match TERMINÉ aux tirs au but :
+ *   "Match terminé : 6 - 5 (5 - 4) (AP)"
+ *   Voir [matchFinishedWithShootout] : 6-5 est le score final (prolongation
+ *   comprise), (5-4) le score de la séance de tirs au but (pas de crochets
+ *   dans cet exemple précis, la ligne de gabarit les tolère quand même par
+ *   robustesse), "(AP)" confirme la décision aux tirs au but — réutilisé
+ *   tel quel comme statut ("AP" est déjà traduit en "Fin (tab)" côté
+ *   montre/widget, vocabulaire TheSportsDB existant, coïncidence bienvenue
+ *   plutôt que recherchée).
+ *
+ * Exemple réel de prolongation au foot (capture fournie par Yann le
+ * 20/09/2026, Italie U20 (F) - Chine U20 (F)), du plus ancien au plus
+ * récent :
+ *   "73' But : 1 - [1] Elena Belli (contre son camp)"
+ *   "En attente des prolongations : 1 - 1"
+ *   "1re prolongation a commencé: 1 - 1"
+ *   "Mi-temps des prolongations : 1 - 1"
+ *   "2de prolongation a commencé: 1 - 1"
+ *   "En attente des pénaltys : 1 - 1"
+ * Confirme toute la séquence : temps réglementaire terminé à 1-1 (aucun
+ * but marqué depuis, la ligne "But" la plus récente reste celle de la
+ * 73e), pause ("En attente des prolongations"), 1re période de
+ * prolongation ([extraTimeFirstStarted] -> "ET1"), pause médiane
+ * ([extraTimeHalftime] -> "MTP"), 2e période ([extraTimeSecondStarted] ->
+ * "ET2"), puis attente des tirs au but ([awaitingPenalties], même statut
+ * interne "TAB"/affiché "PEN" que [shootoutTick]/[missedPenalty], voir
+ * plus haut) — toujours à 1-1, avant le premier tir. Aucun crochet sur ces
+ * lignes de transition (contrairement aux lignes de but/tir), gabarits
+ * donc plus simples que le reste du fichier. "En attente des
+ * prolongations" (transition SANS équivalent demandé par Yann parmi
+ * ET1/MTP/ET2/PEN) réutilise le statut générique "ET" déjà traduit en
+ * "Prolongation" côté montre/widget (vocabulaire TheSportsDB existant,
+ * voir MatchClock.kt) plutôt que d'inventer un nouveau code d'affichage.
  */
 object SofascoreNotificationParser {
 
@@ -250,6 +315,76 @@ object SofascoreNotificationParser {
     // donc naturellement ignorée sans logique dédiée.
     private val correctionScore = Regex(
         """Correction du score\s*:\s*(?:\[(\d+)\]|(\d+))\s*-\s*(?:\[(\d+)\]|(\d+))""",
+        RegexOption.IGNORE_CASE
+    )
+
+    // --- Prolongation / tirs au but (foot) ---
+
+    // CONFIRMÉ par un exemple réel (20/09/2026, Brésil U20 (F) - États-Unis U20 (F)) :
+    // "Match terminé : 6 - 5 (5 - 4) (AP)" — voir doc de classe. Brackets optionnels sur le couple
+    // entre parenthèses par robustesse (aucun exemple réel n'en montre, mais rien n'empêche
+    // Sofascore de le faire un jour, comme sur les lignes de séance elles-mêmes) ; le score final
+    // "H - A" lui-même n'a jamais de crochet, comme pour [matchFinished].
+    private val matchFinishedWithShootout = Regex(
+        """Match termin[ée]\s*:\s*(\d+)\s*-\s*(\d+)\s*\(\s*(?:\[(\d+)\]|(\d+))\s*-\s*(?:\[(\d+)\]|(\d+))\s*\)\s*\(AP\)""",
+        RegexOption.IGNORE_CASE
+    )
+
+    // CONFIRMÉ par un exemple réel (20/09/2026, Italie U20 (F) - Chine U20 (F)) : "Séance de tirs
+    // au but : [5] - 4 Gabriella Langella" — voir doc de classe. Même gabarit que [goalNoMinute]/
+    // [scoreEvent] (score de la séance déjà à jour, crochet sur le côté qui vient de tirer).
+    private val shootoutTick = Regex(
+        """S[ée]ance de tirs au but\s*:\s*(?:\[(\d+)\]|(\d+))\s*-\s*(?:\[(\d+)\]|(\d+))""",
+        RegexOption.IGNORE_CASE
+    )
+
+    // CONFIRMÉ par un exemple réel (20/09/2026, Italie U20 (F) - Chine U20 (F)) : "Penalty raté :
+    // 5 - [4]Chenyu Li" — un tir raté ne change pas le score de la séance mais reste posté avec le
+    // même gabarit "H - A" (inchangé par rapport au tir précédent) — voir doc de classe.
+    private val missedPenalty = Regex(
+        """Penalty rat[ée]\s*:\s*(?:\[(\d+)\]|(\d+))\s*-\s*(?:\[(\d+)\]|(\d+))""",
+        RegexOption.IGNORE_CASE
+    )
+
+    // CONFIRMÉ par un exemple réel (20/09/2026, Italie U20 (F) - Chine U20 (F)) : "En attente des
+    // pénaltys : 1 - 1" — juste avant le premier tir de la séance, voir doc de classe. Pas de
+    // crochet sur cette ligne (le score du match, pas encore celui d'une séance commencée) — même
+    // statut interne "TAB" ("PEN" affiché) que [shootoutTick]/[missedPenalty], voir [parse].
+    private val awaitingPenalties = Regex(
+        """En attente des p[ée]naltys\s*:\s*(\d+)\s*-\s*(\d+)""",
+        RegexOption.IGNORE_CASE
+    )
+
+    // CONFIRMÉ par un exemple réel (20/09/2026, Italie U20 (F) - Chine U20 (F)) : "1re prolongation
+    // a commencé: 1 - 1" — "1re" (pas "1ère"), même gabarit que [firstHalfStarted]/
+    // [secondHalfStarted] mais pour la prolongation. Voir doc de classe pour la séquence complète.
+    private val extraTimeFirstStarted = Regex(
+        """1\w*\s*prolongation a commenc[ée]\s*:\s*(\d+)\s*-\s*(\d+)""",
+        RegexOption.IGNORE_CASE
+    )
+
+    // CONFIRMÉ par un exemple réel (20/09/2026, Italie U20 (F) - Chine U20 (F)) : "2de prolongation
+    // a commencé: 1 - 1" — voir doc de classe.
+    private val extraTimeSecondStarted = Regex(
+        """2\w*\s*prolongation a commenc[ée]\s*:\s*(\d+)\s*-\s*(\d+)""",
+        RegexOption.IGNORE_CASE
+    )
+
+    // CONFIRMÉ par un exemple réel (20/09/2026, Italie U20 (F) - Chine U20 (F)) : "Mi-temps des
+    // prolongations : 1 - 1" — pause médiane de la prolongation, À NE PAS CONFONDRE avec [halfTime]
+    // ("Mi-temps : H-A", sans "des prolongations") — voir doc de classe.
+    private val extraTimeHalftime = Regex(
+        """Mi-temps des prolongations\s*:\s*(\d+)\s*-\s*(\d+)""",
+        RegexOption.IGNORE_CASE
+    )
+
+    // CONFIRMÉ par un exemple réel (20/09/2026, Italie U20 (F) - Chine U20 (F)) : "En attente des
+    // prolongations : 1 - 1" — pause entre la fin du temps réglementaire et le début de la
+    // prolongation, voir doc de classe. Pas de statut dédié demandé par Yann pour cette transition
+    // précise (contrairement à ET1/MTP/ET2/PEN) — réutilise le statut générique "ET" ("Prolongation"
+    // côté montre/widget, vocabulaire TheSportsDB existant).
+    private val awaitingExtraTime = Regex(
+        """En attente des prolongations\s*:\s*(\d+)\s*-\s*(\d+)""",
         RegexOption.IGNORE_CASE
     )
 
@@ -339,6 +474,21 @@ object SofascoreNotificationParser {
      * affiche le texte brut de la ligne la plus récente.
      */
     fun parse(homeTeam: String, awayTeam: String, lines: List<String>): MatchResult? {
+        // Score final AVEC séance de tirs au but — DOIT être vérifié AVANT le [matchFinished]
+        // générique juste en dessous, qui matcherait déjà le préfixe "H - A" de cette même ligne
+        // sans capturer la partie tirs au but entre parenthèses ni le marqueur "(AP)". Voir la doc
+        // de classe pour l'exemple réel confirmé.
+        val finishedWithShootout = lines.firstNotNullOfOrNull { matchFinishedWithShootout.find(it.trim()) }
+        if (finishedWithShootout != null) {
+            val home = finishedWithShootout.groupValues[1]
+            val away = finishedWithShootout.groupValues[2]
+            val penHome = finishedWithShootout.groupValues[3].ifBlank { finishedWithShootout.groupValues[4] }
+            val penAway = finishedWithShootout.groupValues[5].ifBlank { finishedWithShootout.groupValues[6] }
+            val penHomeText = if (finishedWithShootout.groupValues[3].isNotBlank()) "[$penHome]" else penHome
+            val penAwayText = if (finishedWithShootout.groupValues[5].isNotBlank()) "[$penAway]" else penAway
+            return build(homeTeam, awayTeam, "$home ($penHomeText)", "$away ($penAwayText)", "AP")
+        }
+
         // Score final toujours prioritaire dès qu'il est présent, peu
         // importe sa position dans la liste et peu importe le sport — voir
         // la doc de classe pour les deux exemples réels qui l'imposent
@@ -349,6 +499,27 @@ object SofascoreNotificationParser {
             val home = finished.groupValues[1].ifBlank { finished.groupValues[2] }
             val away = finished.groupValues[3].ifBlank { finished.groupValues[4] }
             return build(homeTeam, awayTeam, home, away, "FT")
+        }
+
+        // Séance de tirs au but EN COURS, ou attente d'icelle (match pas encore fini) — statut
+        // interne "TAB", traduit en "PEN" côté montre/widget (voir MatchClock.kt/
+        // SofascoreMatchPresentation.kt). Un seul passage sur [lines], plus récent au plus ancien,
+        // pour que la ligne réellement la plus récente gagne entre les deux gabarits possibles
+        // ([shootoutTick]/[missedPenalty] pendant la séance, score de la séance déjà à jour, voir
+        // doc de classe pour l'exemple réel et pourquoi le score du match avant la séance n'est en
+        // général plus disponible à ce stade ; [awaitingPenalties] juste avant, score du match
+        // encore intact).
+        for (i in lines.indices) {
+            val trimmed = lines[i].trim()
+            val tick = shootoutTick.find(trimmed) ?: missedPenalty.find(trimmed)
+            if (tick != null) {
+                val home = tick.groupValues[1].ifBlank { tick.groupValues[2] }
+                val away = tick.groupValues[3].ifBlank { tick.groupValues[4] }
+                return build(homeTeam, awayTeam, home, away, "TAB", lastScorer = bracketedSide(tick.groupValues, 1, 3))
+            }
+            awaitingPenalties.find(trimmed)?.let { m ->
+                return build(homeTeam, awayTeam, m.groupValues[1], m.groupValues[2], "TAB")
+            }
         }
 
         if (lines.any { quarterMarker.containsMatchIn(it) }) {
@@ -375,8 +546,8 @@ object SofascoreNotificationParser {
     }
 
     private fun parseFootball(homeTeam: String, awayTeam: String, lines: List<String>): MatchResult? {
-        for (raw in lines) {
-            val line = raw.trim()
+        for (i in lines.indices) {
+            val line = lines[i].trim()
 
             // "Match terminé" n'est PAS vérifié ici : [parse] l'intercepte
             // déjà avant d'arriver dans cette fonction, pour tous les
@@ -391,6 +562,20 @@ object SofascoreNotificationParser {
                 val home = m.groupValues[1].ifBlank { "0" }
                 val away = m.groupValues[2].ifBlank { "0" }
                 return build(homeTeam, awayTeam, home, away, "1H")
+            }
+            // Prolongation — voir doc de classe pour l'exemple réel confirmé (Italie U20 (F) -
+            // Chine U20 (F), 20/09/2026) et la séquence complète.
+            awaitingExtraTime.find(line)?.let { m ->
+                return build(homeTeam, awayTeam, m.groupValues[1], m.groupValues[2], "ET")
+            }
+            extraTimeFirstStarted.find(line)?.let { m ->
+                return build(homeTeam, awayTeam, m.groupValues[1], m.groupValues[2], "ET1")
+            }
+            extraTimeHalftime.find(line)?.let { m ->
+                return build(homeTeam, awayTeam, m.groupValues[1], m.groupValues[2], "MTP")
+            }
+            extraTimeSecondStarted.find(line)?.let { m ->
+                return build(homeTeam, awayTeam, m.groupValues[1], m.groupValues[2], "ET2")
             }
             timedEvent.find(line)?.let { m ->
                 val minute = m.groupValues[1]
@@ -417,10 +602,34 @@ object SofascoreNotificationParser {
             scoreEvent.find(line)?.let { m ->
                 val home = m.groupValues[1].ifBlank { m.groupValues[2] }
                 val away = m.groupValues[3].ifBlank { m.groupValues[4] }
-                return build(homeTeam, awayTeam, home, away, "", lastScorer = bracketedSide(m.groupValues, 1, 3))
+                // Rugby (pas de minute sur cette ligne, contrairement à [timedEvent]) — voir doc de
+                // classe : détermine 1re/2e période à partir des marqueurs de mi-temps déjà connus.
+                val period = currentHalfStatus(lines, i)
+                return build(homeTeam, awayTeam, home, away, period, lastScorer = bracketedSide(m.groupValues, 1, 3))
             }
         }
         return null
+    }
+
+    /**
+     * Période (1re/2e mi-temps) en cours à la ligne [fromIndex] (une ligne [scoreEvent] — rugby,
+     * sans minute) : cherche, parmi les lignes plus ANCIENNES (index >= [fromIndex], [lines] étant
+     * triée du plus récent au plus ancien, voir la doc de [SofascoreNotificationListenerService.collectLines]),
+     * le premier marqueur de période déjà reconnu par ce fichier. "2de mi-temps a commencé" trouvé
+     * avant tout le reste -> 2e période déjà en cours ("2H", traduit en "P2" côté montre/widget) ;
+     * "Mi-temps"/"Match commencé" (ou rien trouvé jusqu'à la fin de la liste) -> encore en 1re
+     * période ("1H", traduit en "P1"). AJOUTÉ le 20/09/2026 à la demande de Yann ("indiquer la
+     * période 1 ou 2 au rugby") — voir doc de classe pour l'exemple réel (Vannes - Toulouse) qui
+     * montre pourquoi c'est nécessaire : la ligne [scoreEvent] la plus récente ne porte, à elle
+     * seule, aucune indication de période.
+     */
+    private fun currentHalfStatus(lines: List<String>, fromIndex: Int): String {
+        for (j in fromIndex until lines.size) {
+            val line = lines[j].trim()
+            if (secondHalfStarted.containsMatchIn(line)) return "2H"
+            if (halfTime.containsMatchIn(line) || firstHalfStarted.containsMatchIn(line)) return "1H"
+        }
+        return "1H"
     }
 
     /**
@@ -482,8 +691,21 @@ object SofascoreNotificationParser {
      * qu'en repli si cette ligne existait sans score exploitable (voir sa
      * doc). Pas de score de jeux du set en cours (Sofascore ne le donne pas
      * en direct dans ces notifs) : [MatchResult.currentSetHomeGames]/
-     * [MatchResult.currentSetAwayGames] restent null, wear/MatchClock.kt
-     * affiche alors "En direct" plutôt qu'un score de set détaillé.
+     * [MatchResult.currentSetAwayGames] restent null.
+     *
+     * MODIFIÉ le 20/09/2026 (demandé par Yann : "pour tennis, arrête de mettre en direct, mets les
+     * sets comme les autres sports") — avant cette date, retournait `source = LIVE_TENNIS` et
+     * `status = "live"/"completed"`, ce qui faisait passer ce résultat par
+     * wear/MatchClock.kt#tennisLabel -> liveSetLabel : comme [currentSetHomeGames]/
+     * [currentSetAwayGames] ci-dessus ne sont jamais renseignés par ce repli Sofascore, liveSetLabel
+     * retombait TOUJOURS sur "En direct", jamais sur un vrai score de set. Retourne maintenant
+     * `source = SPORTS_DB` et un statut "S<N>"/"Fin" — exactement le même gabarit que
+     * [parseSetTally] (tennis de table/volley) : traité tel quel par la branche générique de
+     * wear/MatchClock.kt#label / SofascoreMatchPresentation.kt#periodLabel (repli `else -> status`,
+     * déjà utilisé pour "S1".."S5"), donc aucune modification nécessaire côté montre/widget pour ce
+     * changement précis. Ne touche PAS le chemin d'override Live Tennis API
+     * (ApiOverrideFollowService/LiveTennisApi.kt), qui continue d'utiliser `LIVE_TENNIS` et
+     * `tennisLabel` normalement — seul ce repli de parsing direct des notifs Sofascore change.
      */
     private fun parseTennis(
         homeTeam: String,
@@ -504,9 +726,10 @@ object SofascoreNotificationParser {
             }
         }
         val finished = lines.any { setSportFinished.containsMatchIn(it) }
+        val status = if (finished) "Fin" else "S${homeSets + awaySets + 1}"
         return MatchResult(
             id = "sofascore_fallback",
-            source = ApiSource.LIVE_TENNIS,
+            source = ApiSource.SPORTS_DB,
             homeTeam = homeTeam,
             awayTeam = awayTeam,
             homeScore = homeSets.toString(),
@@ -514,7 +737,7 @@ object SofascoreNotificationParser {
             lastScorer = lastSetWinner,
             date = SportsDbApi.todayUtcDateString(),
             time = null,
-            status = if (finished) "completed" else "live",
+            status = status,
             league = "Sofascore",
             kickoffEpochMillis = null
         )
