@@ -76,6 +76,18 @@
     its image down relative to any neighbour with more text underneath. Both rows now use
     android:gravity="top" instead, so every tile's image sits flush with the top of the row
     regardless of how many lines its own text ends up using.
+
+    FIXED 20/09/2026 (Yann: "entre vue icônes sport et toutes notifs, les textes ne sont pas sur la
+    même ligne, mettre au même endroit que toutes notifs") — each widget_match_N_image used to be a
+    bare 30dp-tall ImageView sitting directly above its score/period text, while the equivalent
+    widget_notif_N image sits inside a fixed 32dp-tall widget_notif_N_image_area FrameLayout (the
+    image itself still 30dp, just centered in those 32dp — see that block's own doc below). That
+    2dp difference in image-area height meant the Sport view's score/period rows started 2dp
+    higher than the identical-looking rows in "Toutes notifs", so the two views visually
+    misaligned side by side despite otherwise-identical text sizes. Each widget_match_N_image is
+    now wrapped in its own widget_match_N_image_area, matching widget_notif_N_image_area exactly
+    (same 32dp height, same android:layout_gravity="center" on the image inside it), so both views
+    now start their text at the exact same vertical offset.
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/widget_root"
@@ -306,13 +318,21 @@
                 android:gravity="center_horizontal"
                 android:visibility="gone">
 
-                <ImageView
-                    android:id="@+id/widget_match_1_image"
+                <FrameLayout
+                    android:id="@+id/widget_match_1_image_area"
                     android:layout_width="match_parent"
-                    android:layout_height="30dp"
-                    android:adjustViewBounds="true"
-                    android:scaleType="fitCenter"
-                    android:contentDescription="@null" />
+                    android:layout_height="32dp">
+
+                    <ImageView
+                        android:id="@+id/widget_match_1_image"
+                        android:layout_width="match_parent"
+                        android:layout_height="30dp"
+                        android:layout_gravity="center"
+                        android:adjustViewBounds="true"
+                        android:scaleType="fitCenter"
+                        android:contentDescription="@null" />
+
+                </FrameLayout>
 
                 <TextView
                     android:id="@+id/widget_match_1_score"
@@ -361,13 +381,21 @@
                 android:gravity="center_horizontal"
                 android:visibility="gone">
 
-                <ImageView
-                    android:id="@+id/widget_match_2_image"
+                <FrameLayout
+                    android:id="@+id/widget_match_2_image_area"
                     android:layout_width="match_parent"
-                    android:layout_height="30dp"
-                    android:adjustViewBounds="true"
-                    android:scaleType="fitCenter"
-                    android:contentDescription="@null" />
+                    android:layout_height="32dp">
+
+                    <ImageView
+                        android:id="@+id/widget_match_2_image"
+                        android:layout_width="match_parent"
+                        android:layout_height="30dp"
+                        android:layout_gravity="center"
+                        android:adjustViewBounds="true"
+                        android:scaleType="fitCenter"
+                        android:contentDescription="@null" />
+
+                </FrameLayout>
 
                 <TextView
                     android:id="@+id/widget_match_2_score"
@@ -416,13 +444,21 @@
                 android:gravity="center_horizontal"
                 android:visibility="gone">
 
-                <ImageView
-                    android:id="@+id/widget_match_3_image"
+                <FrameLayout
+                    android:id="@+id/widget_match_3_image_area"
                     android:layout_width="match_parent"
-                    android:layout_height="30dp"
-                    android:adjustViewBounds="true"
-                    android:scaleType="fitCenter"
-                    android:contentDescription="@null" />
+                    android:layout_height="32dp">
+
+                    <ImageView
+                        android:id="@+id/widget_match_3_image"
+                        android:layout_width="match_parent"
+                        android:layout_height="30dp"
+                        android:layout_gravity="center"
+                        android:adjustViewBounds="true"
+                        android:scaleType="fitCenter"
+                        android:contentDescription="@null" />
+
+                </FrameLayout>
 
                 <TextView
                     android:id="@+id/widget_match_3_score"
@@ -471,13 +507,21 @@
                 android:gravity="center_horizontal"
                 android:visibility="gone">
 
-                <ImageView
-                    android:id="@+id/widget_match_4_image"
+                <FrameLayout
+                    android:id="@+id/widget_match_4_image_area"
                     android:layout_width="match_parent"
-                    android:layout_height="30dp"
-                    android:adjustViewBounds="true"
-                    android:scaleType="fitCenter"
-                    android:contentDescription="@null" />
+                    android:layout_height="32dp">
+
+                    <ImageView
+                        android:id="@+id/widget_match_4_image"
+                        android:layout_width="match_parent"
+                        android:layout_height="30dp"
+                        android:layout_gravity="center"
+                        android:adjustViewBounds="true"
+                        android:scaleType="fitCenter"
+                        android:contentDescription="@null" />
+
+                </FrameLayout>
 
                 <TextView
                     android:id="@+id/widget_match_4_score"
@@ -527,13 +571,21 @@
                 android:gravity="center_horizontal"
                 android:visibility="gone">
 
-                <ImageView
-                    android:id="@+id/widget_match_5_image"
+                <FrameLayout
+                    android:id="@+id/widget_match_5_image_area"
                     android:layout_width="match_parent"
-                    android:layout_height="30dp"
-                    android:adjustViewBounds="true"
-                    android:scaleType="fitCenter"
-                    android:contentDescription="@null" />
+                    android:layout_height="32dp">
+
+                    <ImageView
+                        android:id="@+id/widget_match_5_image"
+                        android:layout_width="match_parent"
+                        android:layout_height="30dp"
+                        android:layout_gravity="center"
+                        android:adjustViewBounds="true"
+                        android:scaleType="fitCenter"
+                        android:contentDescription="@null" />
+
+                </FrameLayout>
 
                 <TextView
                     android:id="@+id/widget_match_5_score"
