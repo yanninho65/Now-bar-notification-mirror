@@ -108,6 +108,7 @@ class MirrorNotificationListener : NotificationListenerService() {
             try {
                 if (key != null && WidgetNotificationStore.get(applicationContext)?.key == key) {
                     WidgetNotificationStore.clear(applicationContext)
+                    WatchNotificationSync.sendCleared(applicationContext)
                     NowBarWidgetProvider.requestUpdate(applicationContext)
                 }
             } catch (_: Throwable) {
@@ -177,6 +178,7 @@ class MirrorNotificationListener : NotificationListenerService() {
             WidgetNotificationStore.get(applicationContext)?.let { widgetData ->
                 if (all.none { it.key == widgetData.key }) {
                     WidgetNotificationStore.clear(applicationContext)
+                    WatchNotificationSync.sendCleared(applicationContext)
                     NowBarWidgetProvider.requestUpdate(applicationContext)
                 }
             }
@@ -406,6 +408,7 @@ class MirrorNotificationListener : NotificationListenerService() {
             WidgetNotificationStore.get(applicationContext)?.let { widgetData ->
                 if (widgetData.key == sbn.key) {
                     WidgetNotificationStore.clear(applicationContext)
+                    WatchNotificationSync.sendCleared(applicationContext)
                     NowBarWidgetProvider.requestUpdate(applicationContext)
                 }
             }
