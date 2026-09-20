@@ -1,11 +1,18 @@
 package com.yann.nowbarmirror.wear
 
 import android.graphics.Bitmap
+import android.graphics.BitmapShader
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.RectF
+import android.graphics.Shader
+import android.text.Layout
+import android.text.StaticLayout
+import android.text.TextPaint
+import android.text.TextUtils
 
 /**
  * Compose les images utilisées par les complications de score.
@@ -51,6 +58,18 @@ import android.graphics.RectF
  * vrais logos, seulement ses deux pastilles grises placeholder — remplacé
  * par [drawPlaceholder], une SEULE pastille, plus simple pour le même
  * résultat visuel (montrer qu'il n'y a pas d'image, sans rien inventer).
+ *
+ * - [composeNotificationImage] (AJOUTÉ 20/09/2026, demande de Yann) : image ronde pour la
+ *   complication SMALL_IMAGE distincte "Notification" (voir NotificationComplicationService),
+ *   pensée pour le rond central du tableau de bord Samsung. Reprend le même principe que
+ *   [composeRoundImage] (fond circulaire plein, contenu empilé verticalement, texte blanc gras +
+ *   contour noir) mais avec 4 lignes au lieu de 3 : image de notif en haut (avec un petit badge
+ *   rond de l'icône de l'app en bas à droite — [drawCircularBadge] — même idée que la vue "Toutes
+ *   notifs" du widget téléphone, NowBarWidgetProvider.applyAllNotifSlotAsGeneric : même
+ *   traitement pour toutes les apps, pas de cas particulier comme Sofascore), titre sur une ligne
+ *   ([drawFittedText] avec `ellipsizeIfNeeded = true`), puis le texte de la notif sur jusqu'à 2
+ *   lignes avec la taille de police ajustée automatiquement pour maximiser le nombre de
+ *   caractères affichés tout en restant lisible ([drawWrappedBodyText], via StaticLayout).
  */
 object ComplicationImageComposer {
 
@@ -110,6 +129,47 @@ object ComplicationImageComposer {
     private const val PERIOD_MAX_TEXT_WIDTH = 200f
     private const val PERIOD_STROKE_WIDTH = 5f
 
+    // Constantes de composeNotificationImage (AJOUTÉES 20/09/2026) — complication "Notification",
+    // 4 lignes empilées au lieu de 3 (image+titre+2 lignes de texte contre image+score+période),
+    // donc des marges un peu plus serrées que composeRoundImage ci-dessus pour tout garder sous
+    // le rayon du cercle (ROUND_RADIUS=160). Vérifiées au pire cas (coin le plus loin du centre
+    // pour chaque zone) : marge ~5-13px selon la zone, comparable aux marges déjà en place plus
+    // haut. Valeurs de départ, à ajuster si besoin (Yann : "on ajustera si besoin") une fois vues
+    // sur la montre.
+
+    // Ligne du HAUT — image de la notif (n'importe quelle app, ratio d'origine conservé, voir
+    // drawFittedBitmap) avec un petit badge rond de l'icône de l'app en bas à droite de l'image
+    // (drawCircularBadge, même idée que la vue "Toutes notifs" du widget téléphone). Sans image :
+    // l'icône de l'app remplit directement la zone (pas de badge alors, même règle que le
+    // widget) ; sans image NI icône (résolution PackageManager échouée) : pastille placeholder,
+    // réutilise TOP_PLACEHOLDER_RADIUS ci-dessus.
+    private const val NOTIF_IMAGE_CENTER_Y = ROUND_CENTER - 90f
+    private const val NOTIF_IMAGE_MAX_WIDTH = 170f
+    private const val NOTIF_IMAGE_MAX_HEIGHT = 78f
+    private const val NOTIF_BADGE_RADIUS = 26f
+    private const val NOTIF_BADGE_RING_WIDTH = 4f
+
+    // Ligne du TITRE — une seule ligne, réduite puis, en dernier recours (encore trop long au
+    // NOTIF_TITLE_MIN_TEXT_SIZE), tronquée avec "…" ([drawFittedText], ellipsizeIfNeeded = true).
+    // Proche du centre du cercle (corde la plus large disponible), marge large.
+    private const val NOTIF_TITLE_CENTER_Y = ROUND_CENTER - 10f
+    private const val NOTIF_TITLE_MAX_TEXT_SIZE = 32f
+    private const val NOTIF_TITLE_MIN_TEXT_SIZE = 20f
+    private const val NOTIF_TITLE_MAX_WIDTH = 250f
+    private const val NOTIF_TITLE_STROKE_WIDTH = 4f
+
+    // Corps du texte — jusqu'à 2 lignes, taille ajustée automatiquement pour tenir dans
+    // NOTIF_BODY_MAX_LINES en affichant le plus de caractères possible tout en restant lisible
+    // (demande de Yann), avec troncature "…" sur la dernière ligne en dernier recours si le texte
+    // ne tient toujours pas à NOTIF_BODY_MIN_TEXT_SIZE ([drawWrappedBodyText], via StaticLayout).
+    private const val NOTIF_BODY_TOP_Y = ROUND_CENTER + 26f
+    private const val NOTIF_BODY_MAX_WIDTH = 230f
+    private const val NOTIF_BODY_MAX_LINES = 2
+    private const val NOTIF_BODY_MAX_TEXT_SIZE = 26f
+    private const val NOTIF_BODY_MIN_TEXT_SIZE = 15f
+    private const val NOTIF_BODY_LINE_SPACING_MULT = 1.05f
+    private const val NOTIF_BODY_STROKE_WIDTH = 3f
+
     /**
      * Image UNIQUE pour le rond Dashboard Samsung en SMALL_IMAGE (voir
      * ScoreComplicationService.buildSmallImage) — fond circulaire plein,
@@ -160,19 +220,107 @@ object ComplicationImageComposer {
     }
 
     /**
+     * Image UNIQUE pour la complication ronde "Notification" (AJOUTÉ 20/09/2026, demande de
+     * Yann) — pensée pour le rond central du tableau de bord Samsung, distincte de
+     * [composeRoundImage]/"Score en direct". Fond circulaire plein (même couleur que
+     * [composeRoundImage], pour rester cohérent visuellement entre les deux complications), puis
+     * 4 éléments empilés verticalement :
+     * 1. image de la notif (n'importe quelle app mirorée, même traitement pour toutes — pas de
+     *    cas particulier comme Sofascore en Score en direct), avec un petit badge rond de l'icône
+     *    de l'app en bas à droite de l'image ([drawCircularBadge]) — même idée que la vue "Toutes
+     *    notifs" du widget téléphone. Sans image : l'icône de l'app remplit directement la zone
+     *    (pas de badge). Sans image ni icône : pastille placeholder ([drawPlaceholder]).
+     * 2. titre sur une seule ligne, réduit puis tronqué en dernier recours
+     *    ([drawFittedText], `ellipsizeIfNeeded = true`).
+     * 3. texte de la notif sur jusqu'à 2 lignes, taille ajustée automatiquement pour maximiser le
+     *    nombre de caractères affichés tout en restant lisible ([drawWrappedBodyText]).
+     *
+     * `notification == null` (rien reçu du téléphone depuis le dernier redémarrage du processus
+     * watch, voir NotificationInfoStore) affiche juste "Aucune notification" à la place du corps
+     * du texte, pas de titre ni d'image.
+     */
+    fun composeNotificationImage(notification: NotificationInfo?): Bitmap {
+        val bitmap = Bitmap.createBitmap(ROUND_SIZE, ROUND_SIZE, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+
+        val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor(ROUND_BACKGROUND_COLOR)
+        }
+        canvas.drawCircle(ROUND_CENTER, ROUND_CENTER, ROUND_RADIUS, backgroundPaint)
+
+        val notifImage = notification?.image
+        val appIcon = notification?.appIcon
+        when {
+            notifImage != null -> {
+                val dest = drawFittedBitmap(canvas, notifImage, ROUND_CENTER, NOTIF_IMAGE_CENTER_Y, NOTIF_IMAGE_MAX_WIDTH, NOTIF_IMAGE_MAX_HEIGHT)
+                if (appIcon != null) {
+                    drawCircularBadge(
+                        canvas, appIcon,
+                        dest.right - NOTIF_BADGE_RADIUS * 0.7f, dest.bottom - NOTIF_BADGE_RADIUS * 0.7f,
+                        NOTIF_BADGE_RADIUS
+                    )
+                }
+            }
+            appIcon != null -> {
+                // Pas d'image de notif : l'icône de l'app remplit directement la zone — même
+                // règle que le widget téléphone (NowBarWidgetProvider.applyAllNotifSlotAsGeneric),
+                // jamais les deux à la fois, donc pas de badge non plus ici.
+                drawFittedBitmap(canvas, appIcon, ROUND_CENTER, NOTIF_IMAGE_CENTER_Y, NOTIF_IMAGE_MAX_WIDTH, NOTIF_IMAGE_MAX_HEIGHT)
+            }
+            else -> drawPlaceholder(canvas, ROUND_CENTER, NOTIF_IMAGE_CENTER_Y, TOP_PLACEHOLDER_RADIUS)
+        }
+
+        val title = notification?.title.orEmpty()
+        if (title.isNotBlank()) {
+            drawFittedText(
+                canvas, title,
+                ROUND_CENTER, NOTIF_TITLE_CENTER_Y,
+                NOTIF_TITLE_MAX_TEXT_SIZE, NOTIF_TITLE_MIN_TEXT_SIZE, NOTIF_TITLE_MAX_WIDTH, NOTIF_TITLE_STROKE_WIDTH,
+                ellipsizeIfNeeded = true
+            )
+        }
+
+        val body = notification?.text.orEmpty()
+        if (body.isNotBlank()) {
+            drawWrappedBodyText(
+                canvas, body,
+                ROUND_CENTER, NOTIF_BODY_TOP_Y,
+                NOTIF_BODY_MAX_WIDTH, NOTIF_BODY_MAX_LINES,
+                NOTIF_BODY_MAX_TEXT_SIZE, NOTIF_BODY_MIN_TEXT_SIZE,
+                NOTIF_BODY_LINE_SPACING_MULT, NOTIF_BODY_STROKE_WIDTH
+            )
+        } else if (notification == null) {
+            drawFittedText(
+                canvas, "Aucune notification",
+                ROUND_CENTER, NOTIF_TITLE_CENTER_Y + 44f,
+                24f, 16f, NOTIF_BODY_MAX_WIDTH, 3f,
+                ellipsizeIfNeeded = true
+            )
+        }
+
+        return bitmap
+    }
+
+    /**
      * Dessine [bitmap] centré sur ([centerX], [centerY]) en conservant son
      * ratio d'origine, mis à l'échelle pour tenir dans [maxWidth]×[maxHeight]
      * (jamais étiré hors de son ratio réel) — remplace, depuis le
      * 16/09/2026, l'étirement dans un cadre fixe 190×100 qui aplatissait
      * l'image de notif Sofascore (voir le commentaire de tête de fichier).
+     *
+     * Renvoie le rectangle de destination réellement dessiné (AJOUTÉ 20/09/2026) — utilisé par
+     * composeNotificationImage pour positionner le badge d'icône d'app au bon endroit (coin bas
+     * droit de l'image telle qu'affichée, pas du cadre maximal théorique). Ignoré par
+     * composeRoundImage, qui n'en a pas besoin.
      */
-    private fun drawFittedBitmap(canvas: Canvas, bitmap: Bitmap, centerX: Float, centerY: Float, maxWidth: Float, maxHeight: Float) {
+    private fun drawFittedBitmap(canvas: Canvas, bitmap: Bitmap, centerX: Float, centerY: Float, maxWidth: Float, maxHeight: Float): RectF {
         val scale = minOf(maxWidth / bitmap.width, maxHeight / bitmap.height)
         val width = bitmap.width * scale
         val height = bitmap.height * scale
         val dest = RectF(centerX - width / 2f, centerY - height / 2f, centerX + width / 2f, centerY + height / 2f)
         val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
         canvas.drawBitmap(bitmap, null, dest, paint)
+        return dest
     }
 
     /**
@@ -183,6 +331,11 @@ object ComplicationImageComposer {
      * les plus longs (ex. "Prolongation", "Forfait technique") sans
      * jamais dépasser la corde du cercle disponible à cette hauteur, et
      * pour un score à deux chiffres des deux côtés + crochets.
+     *
+     * [ellipsizeIfNeeded] (AJOUTÉ 20/09/2026, `false` par défaut — composeRoundImage n'en a pas
+     * besoin, ses libellés sont toujours courts) : si `true` et que le texte dépasse encore
+     * [maxWidth] une fois réduit à [minTextSize] (titre de notif arbitrairement long), tronque
+     * avec "…" plutôt que de laisser le texte déborder du cercle.
      */
     private fun drawFittedText(
         canvas: Canvas,
@@ -192,7 +345,8 @@ object ComplicationImageComposer {
         maxTextSize: Float,
         minTextSize: Float,
         maxWidth: Float,
-        strokeWidthPx: Float
+        strokeWidthPx: Float,
+        ellipsizeIfNeeded: Boolean = false
     ) {
         val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE
@@ -200,9 +354,14 @@ object ComplicationImageComposer {
             textAlign = Paint.Align.CENTER
             textSize = maxTextSize
         }
-        val measuredWidth = fillPaint.measureText(text)
+        var measuredWidth = fillPaint.measureText(text)
         if (measuredWidth > maxWidth) {
             fillPaint.textSize = (maxTextSize * (maxWidth / measuredWidth)).coerceAtLeast(minTextSize)
+            measuredWidth = fillPaint.measureText(text)
+        }
+        var displayText = text
+        if (ellipsizeIfNeeded && measuredWidth > maxWidth) {
+            displayText = TextUtils.ellipsize(text, fillPaint, maxWidth, TextUtils.TruncateAt.END).toString()
         }
         val strokePaint = Paint(fillPaint).apply {
             style = Paint.Style.STROKE
@@ -210,10 +369,109 @@ object ComplicationImageComposer {
             color = Color.BLACK
         }
         val bounds = Rect()
-        fillPaint.getTextBounds(text, 0, text.length, bounds)
+        fillPaint.getTextBounds(displayText, 0, displayText.length, bounds)
         val baselineY = centerY - bounds.exactCenterY()
-        canvas.drawText(text, centerX, baselineY, strokePaint)
-        canvas.drawText(text, centerX, baselineY, fillPaint)
+        canvas.drawText(displayText, centerX, baselineY, strokePaint)
+        canvas.drawText(displayText, centerX, baselineY, fillPaint)
+    }
+
+    /**
+     * Corps de texte sur jusqu'à [maxLines] lignes (AJOUTÉ 20/09/2026 pour composeNotificationImage)
+     * — cherche la plus grande taille entre [maxTextSize] et [minTextSize] (pas de 1px) pour
+     * laquelle [text], une fois retourné à la ligne dans [maxWidth], tient en [maxLines] lignes
+     * SANS troncature ("afficher le max de caractères tout en gardant lisibilité", demande de
+     * Yann). Si même [minTextSize] ne suffit pas, tronque la dernière ligne avec "…"
+     * (StaticLayout.Builder.setEllipsize) plutôt que de déborder du cercle ou de continuer à
+     * réduire sous le seuil de lisibilité.
+     *
+     * Centré horizontalement (Layout.Alignment.ALIGN_CENTER) — StaticLayout ignore
+     * Paint.textAlign, d'où le canvas.translate vers le coin haut-gauche du bloc plutôt que
+     * [centerX] directement. Même technique contour noir + remplissage blanc que
+     * [drawFittedText] (deux passes de layout.draw avec le style du Paint changé entre les
+     * deux, la mesure/le retour à la ligne ne dépendant pas du style du trait).
+     */
+    private fun drawWrappedBodyText(
+        canvas: Canvas,
+        text: String,
+        centerX: Float,
+        topY: Float,
+        maxWidth: Float,
+        maxLines: Int,
+        maxTextSize: Float,
+        minTextSize: Float,
+        lineSpacingMultiplier: Float,
+        strokeWidthPx: Float
+    ) {
+        val paint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
+        val widthPx = maxWidth.toInt().coerceAtLeast(1)
+
+        var chosenLayout: StaticLayout? = null
+        var size = maxTextSize
+        while (size >= minTextSize) {
+            paint.textSize = size
+            val candidate = StaticLayout.Builder.obtain(text, 0, text.length, paint, widthPx)
+                .setAlignment(Layout.Alignment.ALIGN_CENTER)
+                .setLineSpacing(0f, lineSpacingMultiplier)
+                .setIncludePad(false)
+                .build()
+            if (candidate.lineCount <= maxLines) {
+                chosenLayout = candidate
+                break
+            }
+            size -= 1f
+        }
+
+        val layout = chosenLayout ?: run {
+            // Même à minTextSize, le texte complet ne tient pas en maxLines lignes — tronque la
+            // dernière avec "…" plutôt que de le laisser déborder du cercle.
+            paint.textSize = minTextSize
+            StaticLayout.Builder.obtain(text, 0, text.length, paint, widthPx)
+                .setAlignment(Layout.Alignment.ALIGN_CENTER)
+                .setLineSpacing(0f, lineSpacingMultiplier)
+                .setIncludePad(false)
+                .setMaxLines(maxLines)
+                .setEllipsize(TextUtils.TruncateAt.END)
+                .setEllipsizedWidth(widthPx)
+                .build()
+        }
+
+        val left = centerX - maxWidth / 2f
+        canvas.save()
+        canvas.translate(left, topY)
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = strokeWidthPx
+        paint.color = Color.BLACK
+        layout.draw(canvas)
+        paint.style = Paint.Style.FILL
+        paint.color = Color.WHITE
+        layout.draw(canvas)
+        canvas.restore()
+    }
+
+    /**
+     * Petit badge rond de l'icône de l'app source, en bas à droite de l'image de la notif
+     * (AJOUTÉ 20/09/2026 pour composeNotificationImage — même idée que la vue "Toutes notifs" du
+     * widget téléphone). Anneau de la couleur de fond du rond ([ROUND_BACKGROUND_COLOR]) sous
+     * l'icône pour la détacher visuellement de l'image derrière, quelle que soit sa couleur ;
+     * icône recadrée en cercle via un BitmapShader plutôt qu'un simple drawBitmap (pas de coins
+     * carrés qui dépasseraient du badge rond pour une icône non déjà circulaire).
+     */
+    private fun drawCircularBadge(canvas: Canvas, bitmap: Bitmap, centerX: Float, centerY: Float, radius: Float) {
+        val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor(ROUND_BACKGROUND_COLOR)
+        }
+        canvas.drawCircle(centerX, centerY, radius + NOTIF_BADGE_RING_WIDTH, ringPaint)
+
+        val scale = (radius * 2f) / minOf(bitmap.width, bitmap.height)
+        val matrix = Matrix().apply {
+            setScale(scale, scale)
+            postTranslate(centerX - bitmap.width * scale / 2f, centerY - bitmap.height * scale / 2f)
+        }
+        val shader = BitmapShader(bitmap, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP).apply {
+            setLocalMatrix(matrix)
+        }
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.shader = shader }
+        canvas.drawCircle(centerX, centerY, radius, paint)
     }
 
     /**
