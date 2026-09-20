@@ -53,8 +53,17 @@ object SofascoreMatchPresentation {
             trimmed.equals("BT", true) -> "Pause"
             trimmed.equals("P", true) -> "Tirs au but"
 
+            // Séance de tirs au but EN COURS (repli Sofascore, voir SofascoreNotificationParser.kt)
+            // — statut interne "TAB", pas "PEN" (déjà pris par TheSportsDB pour "fini aux tirs au
+            // but", voir plus bas) — affiché "PEN" comme demandé par Yann le 20/09/2026. Garder ce
+            // fichier aligné avec wear/MatchClock.kt#label (voir tête de fichier).
+            trimmed.equals("TAB", true) -> "PEN"
+
             trimmed.equals("FT", true) || trimmed.equals("AOT", true) || trimmed.contains("Finished", true) -> "Fin"
             trimmed.equals("AET", true) -> "Fin (a.p.)"
+            // AP est aussi, depuis le 20/09/2026, le statut renvoyé par le repli Sofascore pour un
+            // score final foot avec tirs au but (voir SofascoreNotificationParser.kt/
+            // matchFinishedWithShootout) — même coïncidence de vocabulaire que côté montre.
             trimmed.equals("PEN", true) || trimmed.equals("AP", true) -> "Fin (tab)"
 
             trimmed.equals("SUSP", true) || trimmed.contains("Suspended", true) -> "Suspendu"
@@ -98,5 +107,9 @@ object SofascoreMatchPresentation {
     fun isMatchFinished(status: String): Boolean =
         status.equals("FT", ignoreCase = true) ||
             status.equals("Fin", ignoreCase = true) ||
-            status.equals("completed", ignoreCase = true)
+            status.equals("completed", ignoreCase = true) ||
+            // "AP" : score final foot avec tirs au but (voir SofascoreNotificationParser.kt/
+            // matchFinishedWithShootout, ajouté le 20/09/2026) — sans cette entrée, un tel match
+            // resterait classé "en cours" dans le tri du widget (sortedForWidget) indéfiniment.
+            status.equals("AP", ignoreCase = true)
 }
