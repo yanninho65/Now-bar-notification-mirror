@@ -259,6 +259,27 @@ class MirrorNotificationListener : NotificationListenerService() {
             }
         }
 
+        // "Dernière notif" (widget texte + complication montre) ne fait aucune distinction
+        // ALL/LATEST — voir WidgetNotificationStore, doc de classe — mais elle n'est repeuplée
+        // par mirror()/pushLive() ci-dessus que pour (a) une notif ALL fraîchement mirrorée à
+        // l'instant (pas celles déjà mirorées avant ce redémarrage, exclues par
+        // `it.key !in allModeMirrors`) et (b) le slot LATEST partagé. Une notif ALL déjà mirorée
+        // avant le redémarrage ne repasse donc jamais par pushLive() ici : si en plus le clear de
+        // staleness plus haut a vidé WidgetNotificationStore (son ancienne notif n'est plus
+        // active) et qu'aucune notif LATEST n'est active pour reprendre le slot juste au-dessus,
+        // le widget et la montre restent bloqués sur "Aucune notification" alors que ces notifs
+        // ALL sont toujours là (Yann, 20/09/2026 : "widget et complication montre marquent
+        // aucune notification alors qu'il y en a plein"). Repli : si le store est toujours vide
+        // ici, reprendre la plus récente notif ALL déjà mirorée et la repasser par mirror() pour
+        // forcer son pushLive() — idempotent côté mirror système (re-notify() sur un id déjà
+        // posté = mise à jour en place, sans déclencher de removal).
+        if (WidgetNotificationStore.get(applicationContext) == null) {
+            allModeMirrors.keys
+                .mapNotNull { key -> all.firstOrNull { it.key == key } }
+                .maxByOrNull { it.postTime }
+                ?.let { sbn -> mirror(sbn, allModeMirrors.getValue(sbn.key)) }
+        }
+
         // Belt-and-braces top-up: everything eligible that's ALREADY active gets one more pass
         // through "Toutes notifs" here, in case any of it was missed above (e.g. an ALL-mode
         // notification that was already in allModeMirrors from before this reconnect, and so
