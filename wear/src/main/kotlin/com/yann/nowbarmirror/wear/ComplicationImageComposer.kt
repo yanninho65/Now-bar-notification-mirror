@@ -348,7 +348,10 @@ object ComplicationImageComposer {
         strokeWidthPx: Float,
         ellipsizeIfNeeded: Boolean = false
     ) {
-        val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        // TextPaint (pas juste Paint) : requis par TextUtils.ellipsize ci-dessous, qui n'accepte
+        // qu'un TextPaint — sans effet sur measureText/getTextBounds/drawText, qui fonctionnent
+        // pareil sur les deux (TextPaint hérite de Paint).
+        val fillPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE
             isFakeBoldText = true
             textAlign = Paint.Align.CENTER
