@@ -54,32 +54,16 @@
             android:exported="false" />
 
         <!--
-            Invisible "trampoline" Activity (NEW 18/09/2026) — see PeekOpenTrampolineActivity's
-            class doc. exported="false": only this app's own widget PendingIntents ever target it.
-            excludeFromRecents/noHistory/taskAffinity="" keep this instantaneous hand-off from ever
-            leaving a trace in the task switcher or back stack.
+            PeekOpenTrampolineActivity and OpenPeekTrampolineActivity (18/09 and 20/09/2026) were
+            REMOVED 20/09/2026 — see NowBarWidgetProvider's class doc, "REWORKED 20/09/2026"
+            section: any Activity a lock-screen widget host launches interacts with the keyguard
+            one way or another, whatever that Activity's own code asks for, which is what kept
+            causing new lock-screen regressions each time one of these was introduced or changed.
+            Opening a peek (a tile's tap) is a plain broadcast again (ACTION_OPEN_PEEK), and the
+            peek's own content tap is a direct PendingIntent to the real target again — neither
+            needs an Activity of its own any more, so Theme.NowBarMirror.Trampoline is unused too
+            (kept in styles.xml in case a future fix needs an invisible Activity again).
         -->
-        <activity
-            android:name=".widget.PeekOpenTrampolineActivity"
-            android:exported="false"
-            android:theme="@style/Theme.NowBarMirror.Trampoline"
-            android:excludeFromRecents="true"
-            android:noHistory="true"
-            android:taskAffinity="" />
-
-        <!--
-            Invisible "trampoline" Activity (NEW 20/09/2026) — see OpenPeekTrampolineActivity's
-            class doc, same reasoning/flags as PeekOpenTrampolineActivity just above (this one is
-            for a tile's tap that OPENS a peek, that one for the peek's own tap that opens the real
-            notification/app).
-        -->
-        <activity
-            android:name=".widget.OpenPeekTrampolineActivity"
-            android:exported="false"
-            android:theme="@style/Theme.NowBarMirror.Trampoline"
-            android:excludeFromRecents="true"
-            android:noHistory="true"
-            android:taskAffinity="" />
 
         <service
             android:name=".MirrorNotificationListener"
