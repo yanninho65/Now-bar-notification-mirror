@@ -151,24 +151,35 @@ object ComplicationImageComposer {
 
     // Ligne du TITRE — une seule ligne, réduite puis, en dernier recours (encore trop long au
     // NOTIF_TITLE_MIN_TEXT_SIZE), tronquée avec "…" ([drawFittedText], ellipsizeIfNeeded = true).
-    // Proche du centre du cercle (corde la plus large disponible), marge large.
-    private const val NOTIF_TITLE_CENTER_Y = ROUND_CENTER - 10f
+    // Proche du centre du cercle (corde la plus large disponible), marge large. Remontée de 12px
+    // le 20/09/2026 (ROUND_CENTER-10 -> ROUND_CENTER-22) pour laisser plus de place au corps du
+    // texte en dessous, agrandi et passé à 3 lignes ce même jour (Yann : "le texte de la
+    // notification peut être plus gros et occuper une troisième ligne") — marge quasi inchangée,
+    // cette ligne reste tout près du centre du cercle (corde large).
+    private const val NOTIF_TITLE_CENTER_Y = ROUND_CENTER - 22f
     private const val NOTIF_TITLE_MAX_TEXT_SIZE = 32f
     private const val NOTIF_TITLE_MIN_TEXT_SIZE = 20f
     private const val NOTIF_TITLE_MAX_WIDTH = 250f
     private const val NOTIF_TITLE_STROKE_WIDTH = 4f
 
-    // Corps du texte — jusqu'à 2 lignes, taille ajustée automatiquement pour tenir dans
-    // NOTIF_BODY_MAX_LINES en affichant le plus de caractères possible tout en restant lisible
-    // (demande de Yann), avec troncature "…" sur la dernière ligne en dernier recours si le texte
-    // ne tient toujours pas à NOTIF_BODY_MIN_TEXT_SIZE ([drawWrappedBodyText], via StaticLayout).
-    private const val NOTIF_BODY_TOP_Y = ROUND_CENTER + 26f
-    private const val NOTIF_BODY_MAX_WIDTH = 230f
-    private const val NOTIF_BODY_MAX_LINES = 2
-    private const val NOTIF_BODY_MAX_TEXT_SIZE = 26f
-    private const val NOTIF_BODY_MIN_TEXT_SIZE = 15f
-    private const val NOTIF_BODY_LINE_SPACING_MULT = 1.05f
-    private const val NOTIF_BODY_STROKE_WIDTH = 3f
+    // Corps du texte — REVU 20/09/2026 (Yann : "le texte de la notification peut être plus gros
+    // et occuper une troisième ligne"), jusqu'à NOTIF_BODY_MAX_LINES=3 lignes (contre 2
+    // auparavant) et NOTIF_BODY_MAX_TEXT_SIZE=28 (contre 26), taille ajustée automatiquement pour
+    // tenir dans NOTIF_BODY_MAX_LINES en affichant le plus de caractères possible tout en restant
+    // lisible, avec troncature "…" sur la dernière ligne en dernier recours si le texte ne tient
+    // toujours pas à NOTIF_BODY_MIN_TEXT_SIZE ([drawWrappedBodyText], via StaticLayout).
+    // NOTIF_BODY_MAX_WIDTH réduit (230 -> 210) et NOTIF_BODY_LINE_SPACING_MULT resserré
+    // (1.05 -> 1.0) pour garder de la marge sous le rayon du cercle malgré la 3e ligne — vérifié
+    // au pire cas (3 lignes au NOTIF_BODY_MAX_TEXT_SIZE, largeur au maxWidth) : marge ~8-12px
+    // selon l'estimation de hauteur de ligne réelle du système. Valeurs de départ, à ajuster si
+    // besoin une fois vues sur la montre.
+    private const val NOTIF_BODY_TOP_Y = ROUND_CENTER + 4f
+    private const val NOTIF_BODY_MAX_WIDTH = 210f
+    private const val NOTIF_BODY_MAX_LINES = 3
+    private const val NOTIF_BODY_MAX_TEXT_SIZE = 28f
+    private const val NOTIF_BODY_MIN_TEXT_SIZE = 16f
+    private const val NOTIF_BODY_LINE_SPACING_MULT = 1.0f
+    private const val NOTIF_BODY_STROKE_WIDTH = 3.5f
 
     /**
      * Image UNIQUE pour le rond Dashboard Samsung en SMALL_IMAGE (voir

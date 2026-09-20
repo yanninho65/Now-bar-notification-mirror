@@ -4,6 +4,11 @@ import android.graphics.drawable.Icon
 import androidx.wear.watchface.complications.data.*
 import androidx.wear.watchface.complications.datasource.ComplicationDataSourceService
 import androidx.wear.watchface.complications.datasource.ComplicationRequest
+import com.google.android.gms.tasks.Tasks
+import com.google.android.gms.wearable.DataItemBuffer
+import com.google.android.gms.wearable.DataMapItem
+import com.google.android.gms.wearable.Wearable
+import java.util.concurrent.TimeUnit
 
 /**
  * Fournit la dernière notification reçue (toutes apps mirorées confondues, voir NotificationInfo)
@@ -28,18 +33,57 @@ class NotificationComplicationService : ComplicationDataSourceService() {
         request: ComplicationRequest,
         listener: ComplicationRequestListener
     ) {
+        val notification = NotificationInfoStore.current ?: fetchPersistedNotification()
+
         val data: ComplicationData = when (request.complicationType) {
-            ComplicationType.SMALL_IMAGE -> buildSmallImage(NotificationInfoStore.current)
+            ComplicationType.SMALL_IMAGE -> buildSmallImage(notification)
             else -> NoDataComplicationData()
         }
 
         listener.onComplicationData(data)
     }
 
+    /**
+     * Repli quand NotificationInfoStore est vide (processus watch relancé depuis le dernier
+     * envoi du téléphone — fréquent sur Wear OS, voir NotificationInfoStore.current). Au lieu
+     * d'attendre passivement le prochain onDataChanged (qui ne se redéclenche PAS pour un
+     * DataItem déjà synchronisé avant le redémarrage — seul un vrai changement le fait), va
+     * relire directement le DataItem "/notification" déjà persistant côté Wear Data Layer API :
+     * même logique que le rattrapage déjà en place côté téléphone
+     * (MirrorNotificationListener.rebuildStateFromActiveNotifications, qui relit
+     * activeNotifications() plutôt que d'attendre un nouvel événement) transposée côté montre —
+     * Yann, 20/09/2026 : "comme pour le widget, il ne faut pas afficher que les dernières
+     * notifications reçues depuis l'installation [...] c'est rare de se retrouver sans rien à
+     * afficher".
+     *
+     * Appel bloquant, mais purement local (Play Services, pas de réseau — la Data Layer API
+     * synchronise déjà en tâche de fond) : sans risque ici pour les quelques dizaines/centaines
+     * de ms que ça prend, borné à [FETCH_TIMEOUT_SECONDS] par précaution. `null` si le DataItem
+     * n'existe pas encore (aucune notif jamais envoyée), s'il indique "cleared", ou si l'appel
+     * échoue/expire — repli identique à `NotificationInfoStore.current == null`.
+     */
+    private fun fetchPersistedNotification(): NotificationInfo? {
+        return try {
+            val items: DataItemBuffer = Tasks.await(
+                Wearable.getDataClient(this).getDataItems(),
+                FETCH_TIMEOUT_SECONDS, TimeUnit.SECONDS
+            )
+            try {
+                val item = items.firstOrNull { it.uri.path == NOTIFICATION_PATH } ?: return null
+                val dataMap = DataMapItem.fromDataItem(item).dataMap
+                NotificationDataCodec.decode(this, dataMap)?.also { NotificationInfoStore.current = it }
+            } finally {
+                items.release()
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     override fun getPreviewData(type: ComplicationType): ComplicationData? {
         // Données d'exemple affichées dans le sélecteur de complications de la montre — un texte
         // volontairement long pour donner un aperçu réaliste de l'ajustement automatique du corps
-        // du texte sur 2 lignes.
+        // du texte sur jusqu'à 3 lignes.
         val preview = NotificationInfo(
             title = "Nouveau message",
             text = "Exemple de texte de notification assez long pour vérifier l'ajustement automatique de la taille.",
@@ -64,5 +108,10 @@ class NotificationComplicationService : ComplicationDataSourceService() {
             smallImage = SmallImage.Builder(icon, SmallImageType.PHOTO).build(),
             contentDescription = PlainComplicationText.Builder(description).build()
         ).build()
+    }
+
+    companion object {
+        private const val NOTIFICATION_PATH = "/notification"
+        private const val FETCH_TIMEOUT_SECONDS = 2L
     }
 }
