@@ -165,10 +165,12 @@ class NowBarWidgetProvider : AppWidgetProvider() {
 
         private const val ACTION_TOGGLE_VIEW = "com.yann.nowbarmirror.widget.ACTION_TOGGLE_VIEW"
         private const val ACTION_TOGGLE_SPORT_NOTIFS = "com.yann.nowbarmirror.widget.ACTION_TOGGLE_SPORT_NOTIFS"
-        private const val ACTION_OPEN_PEEK = "com.yann.nowbarmirror.widget.ACTION_OPEN_PEEK"
         private const val ACTION_CLOSE_PEEK = "com.yann.nowbarmirror.widget.ACTION_CLOSE_PEEK"
-        private const val EXTRA_PEEK_SOURCE = "mirror.widget.peek_source"
-        private const val EXTRA_PEEK_ENTRY_ID = "mirror.widget.peek_entry_id"
+        // ACTION_OPEN_PEEK/EXTRA_PEEK_SOURCE/EXTRA_PEEK_ENTRY_ID (a broadcast PendingIntent) were
+        // REMOVED 20/09/2026, replaced by OpenPeekTrampolineActivity — see openPeekPendingIntent
+        // and that class's doc for why a tile's own "open peek" tap needed the same broadcast ->
+        // direct-Activity fix PeekOpenTrampolineActivity already got for the peek's "open the real
+        // notification" tap.
 
         // Base request codes for the per-tile "open peek" PendingIntents (5 fixed slots per view,
         // see SOFASCORE_SLOT_IDS / ALL_NOTIF_SLOT_IDS below) — distinct ranges so a SPORT tile and
@@ -197,6 +199,23 @@ class NowBarWidgetProvider : AppWidgetProvider() {
         // one — the actions row just stays hidden until the next live push.
         private var liveActions: List<WidgetAction> = emptyList()
         private var liveActionsKey: String? = null
+
+        // Same in-memory-only trick as liveActions above, but for the TRUE LATEST view's own
+        // tap-to-open target (NEW 20/09/2026, fixing a real regression). Before this, the content
+        // PendingIntent only ever reached applyLatestContent as a one-shot function parameter
+        // from pushLive() — nowhere else kept a copy. Harmless as long as nothing rebuilt the
+        // widget between "notification mirrored" and "user taps it", but several call sites
+        // (requestUpdate, pushSofascoreMatches, pushToAllNotifications, closePeekIfShowing — and,
+        // since 18/09/2026, PeekOpenTrampolineActivity's own requestUpdate() call on every single
+        // peek-tap-to-open) already rebuilt via buildViews(context) i.e. with NO contentIntent,
+        // which silently overwrote the LATEST tile's real deep-link PendingIntent with the generic
+        // launchAppPendingIntent fallback below — even though the tile's title/text/image
+        // (WidgetNotificationStore) stayed correct, so nothing LOOKED wrong. Yann: "en vue dernière
+        // notif, ça ouvre l'application mais plus l'article ou le message de la notification."
+        // liveContentIntentKey guards against reusing it for the wrong notification, same as
+        // liveActionsKey above.
+        private var liveContentIntent: PendingIntent? = null
+        private var liveContentIntentKey: String? = null
 
         // Same in-memory-only trick as liveActions above, for the Sofascore view: one live
         // PendingIntent/action-list per match key, refreshed on every pushSofascoreMatches call. A
@@ -250,7 +269,9 @@ class NowBarWidgetProvider : AppWidgetProvider() {
             WidgetNotificationStore.save(context, key, title, text, packageName, image)
             liveActions = actions
             liveActionsKey = key
-            pushToAllWidgets(context, buildViews(context, liveContentIntent = contentIntent))
+            liveContentIntent = contentIntent
+            liveContentIntentKey = key
+            pushToAllWidgets(context, buildViews(context, freshContentIntent = contentIntent))
         }
 
         /**
@@ -408,9 +429,9 @@ class NowBarWidgetProvider : AppWidgetProvider() {
             ids.forEach { id -> manager.updateAppWidget(id, views) }
         }
 
-        private fun buildViews(context: Context, liveContentIntent: PendingIntent? = null): RemoteViews {
+        private fun buildViews(context: Context, freshContentIntent: PendingIntent? = null): RemoteViews {
             return try {
-                buildViewsUnsafe(context, liveContentIntent)
+                buildViewsUnsafe(context, freshContentIntent)
             } catch (t: Throwable) {
                 // TEMPORARY diagnostic: surfaces the exact failure on screen since this device
                 // can't be hooked up to Android Studio for logcat. Safe to remove once the
@@ -442,7 +463,7 @@ class NowBarWidgetProvider : AppWidgetProvider() {
             return views
         }
 
-        private fun buildViewsUnsafe(context: Context, liveContentIntent: PendingIntent?): RemoteViews {
+        private fun buildViewsUnsafe(context: Context, freshContentIntent: PendingIntent?): RemoteViews {
             val views = RemoteViews(context.packageName, R.layout.widget_now_bar)
 
             // "Peek" takes priority over the three normal views when active — see the class doc
@@ -494,7 +515,7 @@ class NowBarWidgetProvider : AppWidgetProvider() {
             views.setViewVisibility(R.id.widget_all_notifs_content, if (currentView == WidgetViewModePrefs.WidgetView.ALL_NOTIFS) View.VISIBLE else View.GONE)
 
             when (currentView) {
-                WidgetViewModePrefs.WidgetView.LATEST -> applyLatestContent(context, views, liveContentIntent)
+                WidgetViewModePrefs.WidgetView.LATEST -> applyLatestContent(context, views, freshContentIntent)
                 WidgetViewModePrefs.WidgetView.SPORT -> {
                     applySofascoreIcon(context, views)
                     applySofascoreMatches(context, views, sofascoreMatches)
@@ -512,7 +533,7 @@ class NowBarWidgetProvider : AppWidgetProvider() {
             return views
         }
 
-        private fun applyLatestContent(context: Context, views: RemoteViews, liveContentIntent: PendingIntent?) {
+        private fun applyLatestContent(context: Context, views: RemoteViews, freshContentIntent: PendingIntent?) {
             val data = WidgetNotificationStore.get(context)
             applyLatestIcon(context, views, data)
 
@@ -538,7 +559,17 @@ class NowBarWidgetProvider : AppWidgetProvider() {
             // Bound to widget_latest_content specifically (not the whole widget_root any more —
             // widget_root also contains the left/right columns, shared with the other views,
             // which must NOT open this notification when tapped) inside renderLatestFormat.
-            val openIntent = liveContentIntent ?: launchAppPendingIntent(context, data.packageName)
+            //
+            // Prefer freshContentIntent (only non-null the instant pushLive() itself triggers this
+            // very rebuild); otherwise fall back to the same notification's own PendingIntent kept
+            // in memory since THAT pushLive() call (liveContentIntent, guarded by
+            // liveContentIntentKey so a stale entry for a different/older notification is never
+            // reused — see companion doc) — fixes the "Dernière notif tap opens the app but not the
+            // article" regression any later widget rebuild used to cause by silently resetting to
+            // the generic launchAppPendingIntent fallback.
+            val openIntent = freshContentIntent
+                ?: liveContentIntent.takeIf { liveContentIntentKey == data.key }
+                ?: launchAppPendingIntent(context, data.packageName)
 
             renderLatestFormat(
                 views,
@@ -867,19 +898,21 @@ class NowBarWidgetProvider : AppWidgetProvider() {
             )
         }
 
-        /** Opens a "peek" for one tile — see WidgetPeekPrefs' class doc. [requestCode] must be distinct per rendered tile (see PEEK_REQUEST_CODE_SPORT_BASE/PEEK_REQUEST_CODE_ALL_NOTIFS_BASE's doc) so up to 5 simultaneously-visible tiles each keep their own correctly-bound click. */
+        /**
+         * Opens a "peek" for one tile — see WidgetPeekPrefs' class doc. [requestCode] must be
+         * distinct per rendered tile (see PEEK_REQUEST_CODE_SPORT_BASE/PEEK_REQUEST_CODE_ALL_NOTIFS_BASE's
+         * doc) so up to 5 simultaneously-visible tiles each keep their own correctly-bound click.
+         *
+         * CHANGED 20/09/2026: used to be a plain broadcast PendingIntent to this provider's own
+         * onReceive (ACTION_OPEN_PEEK, removed) — now delegates to OpenPeekTrampolineActivity so
+         * the tile's tap is a direct, single-hop Activity PendingIntent, same fix/reasoning as
+         * PeekOpenTrampolineActivity for the peek's own "open notification" tap (see that class's
+         * doc): a lock-widget host only skips the manual-swipe keyguard dismissal for a direct
+         * Activity tap, not a broadcast. Yann: "en vue icônes toutes notif, ça deverrouille juste
+         * le lockscreen [...] je voudrais que ça soit pareil que dernière notif".
+         */
         private fun openPeekPendingIntent(context: Context, source: WidgetPeekPrefs.Source, entryId: String, requestCode: Int): PendingIntent {
-            val intent = Intent(context, NowBarWidgetProvider::class.java).apply {
-                action = ACTION_OPEN_PEEK
-                putExtra(EXTRA_PEEK_SOURCE, source.name)
-                putExtra(EXTRA_PEEK_ENTRY_ID, entryId)
-            }
-            return PendingIntent.getBroadcast(
-                context,
-                requestCode,
-                intent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
+            return OpenPeekTrampolineActivity.pendingIntent(context, source, entryId, requestCode)
         }
 
         private fun closePeekPendingIntent(context: Context): PendingIntent {
@@ -1164,27 +1197,14 @@ class NowBarWidgetProvider : AppWidgetProvider() {
                 pushToAllWidgets(context, buildViews(context))
                 return
             }
-            ACTION_OPEN_PEEK -> {
-                val sourceName = intent.getStringExtra(EXTRA_PEEK_SOURCE)
-                val entryId = intent.getStringExtra(EXTRA_PEEK_ENTRY_ID)
-                val source = sourceName?.let { name ->
-                    try {
-                        WidgetPeekPrefs.Source.valueOf(name)
-                    } catch (_: Throwable) {
-                        null
-                    }
-                }
-                if (source != null && entryId != null) {
-                    WidgetPeekPrefs.open(context, source, entryId)
-                    pushToAllWidgets(context, buildViews(context))
-                }
-                return
-            }
             ACTION_CLOSE_PEEK -> {
                 WidgetPeekPrefs.close(context)
                 pushToAllWidgets(context, buildViews(context))
                 return
             }
+            // ACTION_OPEN_PEEK (opening a peek from a tile tap) was REMOVED 20/09/2026, replaced
+            // by OpenPeekTrampolineActivity — see openPeekPendingIntent's doc.
+            //
             // ACTION_OPEN_PEEK_CONTENT (a same-day attempt at closing the peek on tap-to-open by
             // routing through this app's own onReceive) was REMOVED 18/09/2026, replaced by
             // PeekOpenTrampolineActivity — see openPeekContentPendingIntent's removal note above
