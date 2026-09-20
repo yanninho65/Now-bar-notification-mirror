@@ -42,5 +42,36 @@
             </intent-filter>
         </service>
 
+        <!-- Complication "Notification" (20/09/2026) : dernière notification reçue, toutes
+             apps mirorées confondues — distincte de "Score en direct" ci-dessus, SMALL_IMAGE
+             uniquement (voir NotificationComplicationService.kt). -->
+        <service
+            android:name=".NotificationComplicationService"
+            android:exported="true"
+            android:label="Notification"
+            android:icon="@drawable/ic_notification"
+            android:permission="com.google.android.wearable.permissions.BIND_COMPLICATION_PROVIDER">
+            <intent-filter>
+                <action android:name="android.support.wearable.complications.ACTION_COMPLICATION_UPDATE_REQUEST" />
+            </intent-filter>
+
+            <meta-data
+                android:name="android.support.wearable.complications.SUPPORTED_TYPES"
+                android:value="SMALL_IMAGE" />
+
+            <meta-data
+                android:name="android.support.wearable.complications.UPDATE_PERIOD_SECONDS"
+                android:value="60" />
+        </service>
+
+        <service
+            android:name=".NotificationDataListenerService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.DATA_CHANGED" />
+                <data android:scheme="wear" android:host="*" android:pathPrefix="/notification" />
+            </intent-filter>
+        </service>
+
     </application>
 </manifest>
