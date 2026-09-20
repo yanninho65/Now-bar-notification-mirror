@@ -273,7 +273,7 @@ class MirrorNotificationListener : NotificationListenerService() {
      * ongoing, not a group summary, not media playback, not this app's own mirrors — see
      * onNotificationPosted's own filters, duplicated here since this runs from a fresh
      * activeNotifications() snapshot rather than from a single posted event) notification gets
-     * pushed again through [pushAllNotifsHistoryOnly], which is also where Sofascore's package is
+     * pushed again through [buildAllNotifEntryPush], which is also where Sofascore's package is
      * excluded (see that function's doc) — no need to repeat that filter here.
      *
      * Added 18/09/2026 — Yann: "le widget doit afficher toutes les notifications dans le centre de
@@ -290,18 +290,43 @@ class MirrorNotificationListener : NotificationListenerService() {
      * by key alone for a collapsing kind — see WidgetAllNotificationsStore's IDENTITY section), so
      * re-pushing one already tracked just updates that tile in place, and the merge+cap-to-5 in
      * push() naturally promotes whichever candidates are actually the most recent.
+     *
+     * FIXED 20/09/2026 (Yann: "quand je supprime une notif, dans l'emplacement de la cinquième, je
+     * vois apparaitre toutes les notifs dans un ordre chronologique croissant avant de voir la
+     * dernière reçue [...] ça pourrait de suite montrer la cinquième") — this used to push each
+     * eligible notification one at a time via [pushAllNotifsHistoryOnly], which round-trips the
+     * store AND redraws the whole widget on every single call (see
+     * NowBarWidgetProvider.pushToAllNotificationsBatch's doc). With several eligible notifications
+     * in the shade, dismissing just one made this loop re-push all the others, oldest-first (the
+     * `sortedBy { it.postTime }` below, kept from the old ordering — harmless now, but no longer
+     * load-bearing: see [buildAllNotifEntryPush]/pushToAllNotificationsBatch's own merge, which
+     * settles on the correct top-5 regardless of push order), and each intermediate push briefly
+     * became the widget's on-screen state — visible as "toutes les notifs dans un ordre
+     * chronologique croissant" flashing by before the real top-5 appeared, and proportionally
+     * heavier the more notifications there were to refill. Now builds every entry first (pure, no
+     * store/widget I/O — [buildAllNotifEntryPush]) and hands the whole batch to
+     * [NowBarWidgetProvider.pushToAllNotificationsBatch] in one call, which does one store write
+     * and one widget redraw for the lot — the widget jumps straight to the final state.
      */
     private fun refillAllNotifsHistory(all: List<StatusBarNotification>) {
         if (!ServicePrefs.isEnabled(applicationContext)) return
 
-        all.asSequence()
+        val entries = all.asSequence()
             .filter { it.packageName != packageName }
             .filter { !it.isOngoing }
             .filter { it.notification.flags and Notification.FLAG_GROUP_SUMMARY == 0 }
             .filter { !isMediaPlaybackNotification(it) }
             .filter { AppMirrorPrefs.getMode(applicationContext, it.packageName) != MirrorMode.NONE }
             .sortedBy { it.postTime }
-            .forEach { sbn -> pushAllNotifsHistoryOnly(sbn) }
+            .mapNotNull { sbn -> buildAllNotifEntryPush(sbn) }
+            .toList()
+
+        try {
+            NowBarWidgetProvider.pushToAllNotificationsBatch(applicationContext, entries)
+        } catch (_: Throwable) {
+            // Same reasoning as pushAllNotifsHistoryOnly's own try/catch: never let this widget
+            // nice-to-have crash the listener.
+        }
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
@@ -456,15 +481,15 @@ class MirrorNotificationListener : NotificationListenerService() {
     }
 
     /**
-     * Pushes [sbn] into the shared "Toutes notifs" widget history ONLY — no system-notification
-     * mirror, no "Dernière notif" widget slot (mirror() below already covers both of those for
-     * the ALL-mode bootstrap and for the single LATEST-mode notification promoted into the shared
-     * slot). Used by rebuildStateFromActiveNotifications() to catch up every OTHER currently-active
-     * LATEST-mode notification too, so "Toutes notifs" isn't stuck showing just one entry per
-     * LATEST-mode app after a listener reconnect (see that call site's comment, 17/09/2026). Same
-     * title/image extraction as mirror(), duplicated rather than shared since mirror() also builds
-     * the actual system notification, which this deliberately skips. Wrapped in try/catch, same
-     * reasoning as mirror()'s own push block: a widget nice-to-have must never break the catch-up.
+     * Builds the [AllNotifEntryPush] that feeds [sbn] into the shared "Toutes notifs" widget
+     * history ONLY — no system-notification mirror, no "Dernière notif" widget slot (mirror()
+     * below already covers both of those for the ALL-mode bootstrap and for the single
+     * LATEST-mode notification promoted into the shared slot). Used to catch up every OTHER
+     * currently-active LATEST-mode notification too, so "Toutes notifs" isn't stuck showing just
+     * one entry per LATEST-mode app after a listener reconnect (see
+     * rebuildStateFromActiveNotifications' own comment, 17/09/2026). Same title/image extraction
+     * as mirror(), duplicated rather than shared since mirror() also builds the actual system
+     * notification, which this deliberately skips.
      *
      * Skips Sofascore's package unconditionally (18/09/2026): SofascoreNotificationListenerService
      * already pushes its OWN entry for the same notification into this same shared history, in its
@@ -477,10 +502,19 @@ class MirrorNotificationListener : NotificationListenerService() {
      * configured ALL/LATEST in the app-selection screen — mirror() still builds the real Now Bar
      * notification and the widget's Dernière notif slot for it as normal; only ITS OWN push into
      * "Toutes notifs" is skipped here (and in mirror() itself, see its own such guard).
+     *
+     * Split out 20/09/2026 from what used to be [pushAllNotifsHistoryOnly] in one step, so
+     * [refillAllNotifsHistory] can build a whole batch of these up front and hand it to
+     * [NowBarWidgetProvider.pushToAllNotificationsBatch] in one call instead of pushing (and
+     * redrawing the widget) once per notification — see that function's doc for why looping
+     * call-by-call used to make "Toutes notifs" visibly flicker through every notification,
+     * oldest first, after a dismissal. Returns null (silently) if [sbn] is Sofascore's own
+     * package, or if anything about building the entry throws — same "never let this widget
+     * nice-to-have crash the listener" reasoning the old inline try/catch had.
      */
-    private fun pushAllNotifsHistoryOnly(sbn: StatusBarNotification) {
-        if (sbn.packageName == SofascoreNotificationListenerService.SOFASCORE_PACKAGE) return
-        try {
+    private fun buildAllNotifEntryPush(sbn: StatusBarNotification): AllNotifEntryPush? {
+        if (sbn.packageName == SofascoreNotificationListenerService.SOFASCORE_PACKAGE) return null
+        return try {
             val extras = sbn.notification.extras
             val rawTitle = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.takeIf { it.isNotBlank() }
                 ?: getAppName(sbn.packageName)
@@ -500,21 +534,28 @@ class MirrorNotificationListener : NotificationListenerService() {
             // notifs" history. Always the ORIGINAL title (18/09/2026, Yann: "ne pas tenir
             // compte des applis où j'ai indiqué qu'il faut inverser titre et texte [...]
             // l'inversion ne doit servir que pour la now bar").
-            NowBarWidgetProvider.pushToAllNotifications(
-                applicationContext,
-                AllNotifEntryPush(
-                    key = sbn.key,
-                    postTimeMillis = sbn.postTime,
-                    kind = WidgetAllNotificationsStore.Kind.GENERIC,
-                    title = rawTitle,
-                    text = rawText,
-                    packageName = sbn.packageName,
-                    isConversation = isConversationNotification(sbn),
-                    image = image,
-                    contentIntent = sbn.notification.contentIntent,
-                    actions = actions
-                )
+            AllNotifEntryPush(
+                key = sbn.key,
+                postTimeMillis = sbn.postTime,
+                kind = WidgetAllNotificationsStore.Kind.GENERIC,
+                title = rawTitle,
+                text = rawText,
+                packageName = sbn.packageName,
+                isConversation = isConversationNotification(sbn),
+                image = image,
+                contentIntent = sbn.notification.contentIntent,
+                actions = actions
             )
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    /** Pushes [sbn] into "Toutes notifs" on its own — see [buildAllNotifEntryPush]. Used where a single, standalone push is enough (the LATEST-mode bootstrap loop below); [refillAllNotifsHistory] builds and pushes a whole batch instead. */
+    private fun pushAllNotifsHistoryOnly(sbn: StatusBarNotification) {
+        val entry = buildAllNotifEntryPush(sbn) ?: return
+        try {
+            NowBarWidgetProvider.pushToAllNotifications(applicationContext, entry)
         } catch (_: Throwable) {
             // Same reasoning as mirror()'s own push block: never let this widget nice-to-have
             // crash the listener during catch-up.
