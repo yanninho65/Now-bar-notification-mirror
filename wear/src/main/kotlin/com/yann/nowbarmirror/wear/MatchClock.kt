@@ -58,6 +58,17 @@ import java.util.Locale
  * d'inventer une période : wear/ScoreComplicationService.kt omet alors
  * le "· " devant le score plutôt que d'afficher un statut vide ou "?".
  *
+ * Foot, prolongation/tirs au but (repli Sofascore uniquement, AJOUTÉ le
+ * 20/09/2026 — voir mobile/SofascoreNotificationParser.kt/parse pour les
+ * exemples réels confirmés) : "ET1"/"MTP"/"ET2" (1re période, mi-temps,
+ * 2e période de la prolongation) passent tels quels par le repli `else`
+ * ci-dessous, sans règle dédiée ; "ET" (attente de la prolongation)
+ * réutilise le statut TheSportsDB existant ("Prolongation") ; "TAB"
+ * (séance de tirs au but en cours, ou attente d'icelle) a sa propre règle
+ * dédiée plus bas, affichée "PEN" — nom interne différent du "PEN"
+ * TheSportsDB existant (qui désigne, lui, un match FINI aux tirs au but,
+ * voir plus bas) pour ne pas entrer en collision avec lui.
+ *
  * Les statuts testés ci-dessous couvrent à la fois les codes courts
  * officiels documentés par TheSportsDB (NS, 1H, HT, 2H, FT, Q1... voir
  * le lien ci-dessus) et les libellés plus longs ("Not Started", "Match
@@ -108,14 +119,24 @@ object MatchClock {
 
             status.equals("P", ignoreCase = true) -> "Tirs au but"
 
+            // Séance de tirs au but EN COURS (repli Sofascore uniquement, voir
+            // mobile/SofascoreNotificationParser.kt/parse — statut interne "TAB", PAS "PEN" : ce
+            // dernier est déjà pris par TheSportsDB pour "match fini aux tirs au but", voir plus
+            // bas — affiché "PEN" comme demandé par Yann le 20/09/2026, sous un nom interne
+            // différent pour ne pas entrer en collision avec ce statut TheSportsDB existant).
+            status.equals("TAB", ignoreCase = true) -> "PEN"
+
             status.equals("FT", ignoreCase = true) ||
                 status.equals("AOT", ignoreCase = true) ||
                 status.contains("Finished", ignoreCase = true) -> "Fin"
 
             status.equals("AET", ignoreCase = true) -> "Fin (a.p.)"
 
-            // PEN (foot) et AP (handball, "After Penalties") désignent le
-            // même cas : match fini aux tirs au but.
+            // PEN (foot, TheSportsDB) et AP (handball, "After Penalties") désignent le même cas :
+            // match fini aux tirs au but. AP est AUSSI, depuis le 20/09/2026, le statut renvoyé par
+            // le repli Sofascore lui-même pour un score final foot avec tirs au but (voir mobile/
+            // SofascoreNotificationParser.kt/matchFinishedWithShootout, ex. "Match terminé : 6 - 5
+            // (5 - 4) (AP)") — coïncidence de vocabulaire bienvenue, aucune règle dédiée nécessaire.
             status.equals("PEN", ignoreCase = true) || status.equals("AP", ignoreCase = true) -> "Fin (tab)"
 
             status.equals("SUSP", ignoreCase = true) || status.contains("Suspended", ignoreCase = true) -> "Suspendu"
