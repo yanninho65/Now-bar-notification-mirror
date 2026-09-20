@@ -1,5 +1,6 @@
 package com.yann.nowbarmirror.widget
 
+import android.app.AlarmManager
 import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProvider
@@ -16,6 +17,7 @@ import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
+import android.os.SystemClock
 import android.view.View
 import android.widget.RemoteViews
 import android.widget.Toast
@@ -138,26 +140,56 @@ private fun <T> List<T>.sortedForWidget(
  *
  * PLUS a fourth, cross-cutting "peek" state (NEW 18/09/2026, see WidgetPeekPrefs' class doc — Yann:
  * "En vue toutes notifs ou sport, cliquer sur une icône doit ouvrir le texte de la notification en
- * question sous le même format que la dernière notif affichée"): tapping a tile in SPORT or
- * ALL_NOTIFS no longer opens the source app directly — it shows that ONE notification full-format,
- * reusing the exact same widget_latest_content block the LATEST view renders with (title, text,
- * image, dismiss button, action buttons), WITHOUT touching WidgetViewModePrefs.currentView — "je
- * précise bien que ça ne change rien à la vue dernière notif [...] elle doit toujours bien montrer
- * la dernière notif". While peeking, the small toggle under the left column keeps showing the
- * rotating-arrows glyph, doubling as a "back to the tile grid" button (Yann: "Mettre les flèches
- * tournantes pour le symboliser"); dismissing the peeked notification, or its disappearing for any
- * other reason (an action button that marked it read/archived it, say), closes the peek
- * automatically (Yann: "revenir automatiquement aux icônes") — see closePeekIfShowing, called from
- * both listener services. FIXED 18/09/2026, same request: tapping the peek's own text to open the
- * real notification now closes the peek too, instead of leaving it shown until the notification is
- * separately dismissed — Yann: "quand je clique sur une icône puis sur le texte pour ouvrir la
- * notif, revenir aux icônes dans le widget" — see PeekOpenTrampolineActivity, which both closes the
- * peek AND relays the tap into the real target, and its class doc for why a plain wrapped
- * PendingIntent broadcast wasn't enough (it broke the keyguard-dismissing, no-manual-swipe tap
- * Dernière notif already enjoyed). ALSO CHANGED same day (Yann: "mettre l'icone de l'appli à
- * gauche au lieu des grosses flèches qui tournent") — the big 32dp icon slot (widget_app_icon) now
- * shows the peeked entry's own source-app icon instead of also switching to the arrows glyph; see
- * applyPeekLeftColumn.
+ * question sous le même format que la dernière notif affichée"): tapping a tile's icon in SPORT or
+ * ALL_NOTIFS shows that ONE notification full-format, reusing the exact same widget_latest_content
+ * block the LATEST view renders with (title, text, image, dismiss button, action buttons), WITHOUT
+ * touching WidgetViewModePrefs.currentView — "je précise bien que ça ne change rien à la vue
+ * dernière notif [...] elle doit toujours bien montrer la dernière notif". While peeking, the small
+ * toggle under the left column keeps showing the rotating-arrows glyph, doubling as a "back to the
+ * tile grid" button (Yann: "Mettre les flèches tournantes pour le symboliser"); dismissing the
+ * peeked notification, or its disappearing for any other reason (an action button that marked it
+ * read/archived it, say), closes the peek automatically (Yann: "revenir automatiquement aux
+ * icônes") — see closePeekIfShowing, called from both listener services. ALSO CHANGED 18/09/2026
+ * (Yann: "mettre l'icone de l'appli à gauche au lieu des grosses flèches qui tournent") — the big
+ * 32dp icon slot (widget_app_icon) shows the peeked entry's own source-app icon instead of also
+ * switching to the arrows glyph; see applyPeekLeftColumn.
+ *
+ * REWORKED 20/09/2026 — the peek's own content tap, and how the peek closes, both went through
+ * several Activity-trampoline iterations (closing the peek AND relaying the tap into the real
+ * target from one invisible Activity, so a lock-widget host would treat it as a direct,
+ * no-manual-swipe tap same as Dernière notif's own) that each looked right on paper but broke on
+ * Yann's actual lock-screen host in a new way every time — most recently (today): tapping a tile's
+ * icon on the lock screen briefly flashed the peek and then fully unlocked the phone with the real
+ * notification never opened, and tapping the peek's own text on the home-screen widget just landed
+ * back on the same peek instead of opening the notification and returning to the grid. Yann's own
+ * diagnosis: "c'est quand j'ai introduit le mécanisme de retour à la vue toutes icônes après
+ * ouverture de la notif que ça a commencé à bugger" — the ENTIRE family of bugs traces back to
+ * inserting an extra invisible Activity hop into what used to be a single, direct tap, since
+ * *any* Activity a lock-screen widget host launches interacts with the keyguard one way or
+ * another, whether or not that Activity's own code asks it to. The fix removes that hop instead of
+ * trying to tame it:
+ * - Opening a peek (a tile's icon tap) is a plain BROADCAST again (ACTION_OPEN_PEEK below) — no
+ *   Activity at all, so nothing for a keyguard to react to. It only ever needs to flip
+ *   WidgetPeekPrefs and push a widget update; it was never the one relaying to a second,
+ *   real target the way the peek's own tap is, so there's no "second hop needs a direct Activity
+ *   tap" problem here to begin with — OpenPeekTrampolineActivity solved a problem this action
+ *   never actually had.
+ * - The peek's own content tap goes back to being a plain, DIRECT PendingIntent straight to
+ *   [ResolvedPeek.openIntent] — exactly the same shape as Dernière notif's own tap, which has
+ *   never had any of these issues — instead of being wrapped through an Activity that first
+ *   closes the peek and then relays the tap onward.
+ * - Since tapping the peek's content no longer closes it as a side effect, closing now happens on
+ *   its own timer instead — Yann: "on peut imaginer que au bout de 15 secondes d'affichage de la
+ *   vue texte ouverte depuis les icônes, le widget revienne automatiquement à la vue icônes. Comme
+ *   ce n'est pas lié au tap, ça simplifie peut-être." Opening a peek schedules a one-shot
+ *   ACTION_AUTO_CLOSE_PEEK alarm [AUTO_CLOSE_PEEK_DELAY_MILLIS] later (see scheduleAutoClosePeek);
+ *   it closes the peek only if it's still showing the SAME entry that scheduled it (a dismissal,
+ *   a re-peek of a different tile, or the peek self-healing away in the meantime all make it a
+ *   no-op) — see the ACTION_AUTO_CLOSE_PEEK branch in onReceive. A dismissal, a view toggle, or
+ *   ACTION_CLOSE_PEEK all still close the peek immediately as before, via [closePeekAndCancelAlarm],
+ *   which also cancels this alarm so it doesn't fire pointlessly (or, worse, against a peek Yann
+ *   re-opened on the same tile in the meantime — closePeekAndCancelAlarm always runs before any
+ *   later WidgetPeekPrefs.open, so a stale alarm can never outlive the peek it was scheduled for).
  */
 class NowBarWidgetProvider : AppWidgetProvider() {
 
@@ -166,11 +198,36 @@ class NowBarWidgetProvider : AppWidgetProvider() {
         private const val ACTION_TOGGLE_VIEW = "com.yann.nowbarmirror.widget.ACTION_TOGGLE_VIEW"
         private const val ACTION_TOGGLE_SPORT_NOTIFS = "com.yann.nowbarmirror.widget.ACTION_TOGGLE_SPORT_NOTIFS"
         private const val ACTION_CLOSE_PEEK = "com.yann.nowbarmirror.widget.ACTION_CLOSE_PEEK"
-        // ACTION_OPEN_PEEK/EXTRA_PEEK_SOURCE/EXTRA_PEEK_ENTRY_ID (a broadcast PendingIntent) were
-        // REMOVED 20/09/2026, replaced by OpenPeekTrampolineActivity — see openPeekPendingIntent
-        // and that class's doc for why a tile's own "open peek" tap needed the same broadcast ->
-        // direct-Activity fix PeekOpenTrampolineActivity already got for the peek's "open the real
-        // notification" tap.
+
+        // ACTION_OPEN_PEEK (a tile's icon tap) — REINTRODUCED as a plain broadcast 20/09/2026 (see
+        // the class doc's "REWORKED 20/09/2026" section) after a same-day detour through an
+        // Activity trampoline (OpenPeekTrampolineActivity, now deleted) turned out to interact with
+        // the lock screen's keyguard on Yann's actual device/host in a way this app's own code
+        // never asked for and couldn't prevent. This action only ever flips WidgetPeekPrefs and
+        // pushes a widget update — no second PendingIntent to relay to, so there was never a
+        // "second hop needs a direct Activity tap" problem here to justify an Activity in the
+        // first place; a broadcast doesn't touch the keyguard at all, which is exactly what's
+        // wanted for an action that's meant to update the widget IN PLACE without leaving the lock
+        // screen.
+        private const val ACTION_OPEN_PEEK = "com.yann.nowbarmirror.widget.ACTION_OPEN_PEEK"
+        private const val EXTRA_PEEK_SOURCE = "mirror.widget.peek_source"
+        private const val EXTRA_PEEK_ENTRY_ID = "mirror.widget.peek_entry_id"
+
+        // Fires [AUTO_CLOSE_PEEK_DELAY_MILLIS] after a peek opens and closes it — but only if it's
+        // still showing the SAME entry that scheduled it — see the class doc's "REWORKED
+        // 20/09/2026" section and the ACTION_AUTO_CLOSE_PEEK branch in onReceive. Replaces closing
+        // the peek as a side effect of tapping its own content, which is what all the trampoline
+        // back-and-forth above was really trying to make reliable on Yann's lock-screen host.
+        private const val ACTION_AUTO_CLOSE_PEEK = "com.yann.nowbarmirror.widget.ACTION_AUTO_CLOSE_PEEK"
+        private const val AUTO_CLOSE_PEEK_DELAY_MILLIS = 15_000L
+        // Single fixed request code is correct here (unlike the old, now-removed
+        // PeekOpenTrampolineActivity one that used to carry a different real target PendingIntent
+        // as an extra on every call): this alarm's extras only ever encode WHICH entry it's for, as
+        // plain strings, and android.app.AlarmManager.set() with an equivalent PendingIntent
+        // (same requestCode/action/component) always replaces whatever alarm was previously
+        // scheduled under it — exactly the "only one peek, only one pending auto-close, and a new
+        // one always supersedes an older one" behavior wanted here.
+        private const val AUTO_CLOSE_PEEK_REQUEST_CODE = 4200
 
         // Base request codes for the per-tile "open peek" PendingIntents (5 fixed slots per view,
         // see SOFASCORE_SLOT_IDS / ALL_NOTIF_SLOT_IDS below) — distinct ranges so a SPORT tile and
@@ -178,27 +235,8 @@ class NowBarWidgetProvider : AppWidgetProvider() {
         // away from the toggle buttons' own request codes (0/1, see toggleViewPendingIntent/
         // toggleSportNotifsPendingIntent) and the dismiss buttons' (0, different target components
         // so no actual clash, but distinct ranges make this easier to reason about).
-        private const val PEEK_REQUEST_CODE_SPORT_BASE = 4000
-        private const val PEEK_REQUEST_CODE_ALL_NOTIFS_BASE = 4100
-
-        // Base request code for PeekOpenTrampolineActivity's PendingIntent (Yann, 20/09/2026,
-        // testing the home-screen widget: "cliquer sur l'icône ouvre bien la vue texte mais
-        // cliquer sur le texte ramène à la vue texte" instead of closing the peek and opening the
-        // real notification). Used to be one single fixed request code on the reasoning that only
-        // one peek can ever be showing at a time — true, but that still means every distinct
-        // peeked entry (Sofascore match A, then match B, then a WhatsApp tile, ...) reused the
-        // EXACT SAME (requestCode, component) PendingIntent identity, relying purely on
-        // FLAG_UPDATE_CURRENT to swap in the new EXTRA_TARGET each time the peek changes. Every
-        // other per-tile PendingIntent in this file (PEEK_REQUEST_CODE_SPORT_BASE/
-        // PEEK_REQUEST_CODE_ALL_NOTIFS_BASE right above, and OpenPeekTrampolineActivity's own
-        // per-tile codes) deliberately avoids exactly this reuse pattern, precisely so a widget
-        // host can never serve a tap against a stale binding. Hardened the same way here: the
-        // actual request code passed to PeekOpenTrampolineActivity.pendingIntent (see its call
-        // site in buildViewsUnsafe) is now derived from the peeked entry's own identity
-        // (source + entryId), so a newly-peeked entry always gets ITS OWN PendingIntent identity
-        // instead of overwriting the previous one's — this base just keeps the derived range away
-        // from the other request codes above.
-        private const val PEEK_TRAMPOLINE_REQUEST_CODE_BASE = 4200
+        private const val PEEK_REQUEST_CODE_SPORT_BASE = 4300
+        private const val PEEK_REQUEST_CODE_ALL_NOTIFS_BASE = 4400
 
         // Actions are deliberately NOT persisted to WidgetNotificationStore/SharedPreferences,
         // for the same reason the content PendingIntent isn't (see the class doc on
@@ -417,9 +455,60 @@ class NowBarWidgetProvider : AppWidgetProvider() {
                 }
             }
             if (matches) {
-                WidgetPeekPrefs.close(context)
+                closePeekAndCancelAlarm(context)
                 pushToAllWidgets(context, buildViews(context))
             }
+        }
+
+        /**
+         * Closes the peek (if any) and cancels its pending [ACTION_AUTO_CLOSE_PEEK] alarm, if one
+         * is scheduled — the one place every "close the peek" path in this file should go through
+         * (REWORKED 20/09/2026, see the class doc), so a leftover alarm from a peek that already
+         * closed some other way (dismissal, view toggle, self-heal) never fires later against
+         * whatever happens to be peeking by then. Safe to call unconditionally, including when
+         * nothing is currently peeking or scheduled.
+         */
+        private fun closePeekAndCancelAlarm(context: Context) {
+            WidgetPeekPrefs.close(context)
+            cancelAutoClosePeekAlarm(context)
+        }
+
+        /** Schedules [ACTION_AUTO_CLOSE_PEEK] [AUTO_CLOSE_PEEK_DELAY_MILLIS] from now for the entry just peeked — see the class doc's "REWORKED 20/09/2026" section. Replaces any previously scheduled auto-close (same requestCode/action/component — android.app.AlarmManager.set() always supersedes an equivalent pending alarm), so re-peeking the same or a different tile always gets a fresh 15s window. An inexact alarm is deliberate: this is a UI nicety, not something that needs to survive Doze/App Standby down to the second, and inexact alarms need no special permission. */
+        private fun scheduleAutoClosePeek(context: Context, source: WidgetPeekPrefs.Source, entryId: String) {
+            val alarmManager = context.getSystemService(AlarmManager::class.java) ?: return
+            alarmManager.set(
+                AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                SystemClock.elapsedRealtime() + AUTO_CLOSE_PEEK_DELAY_MILLIS,
+                autoClosePeekPendingIntent(context, source, entryId)
+            )
+        }
+
+        /** Cancels a pending [ACTION_AUTO_CLOSE_PEEK] alarm, if any — see [closePeekAndCancelAlarm]. FLAG_NO_CREATE makes getBroadcast() return null instead of creating a new PendingIntent when none is currently scheduled, so this is a safe no-op in that case. */
+        private fun cancelAutoClosePeekAlarm(context: Context) {
+            val alarmManager = context.getSystemService(AlarmManager::class.java) ?: return
+            val intent = Intent(context, NowBarWidgetProvider::class.java).apply { action = ACTION_AUTO_CLOSE_PEEK }
+            val pendingIntent = PendingIntent.getBroadcast(
+                context,
+                AUTO_CLOSE_PEEK_REQUEST_CODE,
+                intent,
+                PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
+            ) ?: return
+            alarmManager.cancel(pendingIntent)
+            pendingIntent.cancel()
+        }
+
+        private fun autoClosePeekPendingIntent(context: Context, source: WidgetPeekPrefs.Source, entryId: String): PendingIntent {
+            val intent = Intent(context, NowBarWidgetProvider::class.java).apply {
+                action = ACTION_AUTO_CLOSE_PEEK
+                putExtra(EXTRA_PEEK_SOURCE, source.name)
+                putExtra(EXTRA_PEEK_ENTRY_ID, entryId)
+            }
+            return PendingIntent.getBroadcast(
+                context,
+                AUTO_CLOSE_PEEK_REQUEST_CODE,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
         }
 
         /**
@@ -485,7 +574,7 @@ class NowBarWidgetProvider : AppWidgetProvider() {
             val peek = WidgetPeekPrefs.current(context)
             val resolvedPeek = peek?.let { resolvePeek(context, it) }
             if (peek != null && resolvedPeek == null) {
-                WidgetPeekPrefs.close(context)
+                closePeekAndCancelAlarm(context)
             }
 
             if (resolvedPeek != null) {
@@ -499,22 +588,12 @@ class NowBarWidgetProvider : AppWidgetProvider() {
                     text = resolvedPeek.text,
                     image = resolvedPeek.image,
                     dismissIntent = resolvedPeek.dismissIntent,
-                    // Routed through PeekOpenTrampolineActivity so tapping to open the
-                    // notification ALSO closes the peek and drops back to the tile grid, instead
-                    // of just opening the target while the peek stays shown — see that class's doc
-                    // for why it's a real (invisible) Activity rather than this app's own
-                    // broadcast receiver.
-                    //
-                    // requestCode is derived from THIS peeked entry's own identity (source +
-                    // entryId), not a single shared constant — see PEEK_TRAMPOLINE_REQUEST_CODE_BASE's
-                    // doc: `peek` is guaranteed non-null here (resolvedPeek was derived from it
-                    // above), the !! just documents that to the compiler.
-                    openIntent = resolvedPeek.openIntent?.let {
-                        val requestCode = PEEK_TRAMPOLINE_REQUEST_CODE_BASE +
-                            peek!!.source.ordinal * 1_000_000 +
-                            (peek.entryId.hashCode() and 0xFFFFF)
-                        PeekOpenTrampolineActivity.pendingIntent(context, requestCode, it)
-                    },
+                    // Direct tap-to-open again (REWORKED 20/09/2026, see the class doc) — no
+                    // longer wrapped through an Activity that closes the peek before relaying the
+                    // tap: the peek now closes on its own timer (scheduleAutoClosePeek) instead of
+                    // as a side effect of this tap, so this can just be the real target, exactly
+                    // like Dernière notif's own tap-to-open above.
+                    openIntent = resolvedPeek.openIntent,
                     actions = resolvedPeek.actions
                 )
                 applyPeekLeftColumn(context, views, resolvedPeek.iconPackageName)
@@ -924,16 +1003,28 @@ class NowBarWidgetProvider : AppWidgetProvider() {
          * distinct per rendered tile (see PEEK_REQUEST_CODE_SPORT_BASE/PEEK_REQUEST_CODE_ALL_NOTIFS_BASE's
          * doc) so up to 5 simultaneously-visible tiles each keep their own correctly-bound click.
          *
-         * CHANGED 20/09/2026: used to be a plain broadcast PendingIntent to this provider's own
-         * onReceive (ACTION_OPEN_PEEK, removed) — now delegates to OpenPeekTrampolineActivity so
-         * the tile's tap is a direct, single-hop Activity PendingIntent, same fix/reasoning as
-         * PeekOpenTrampolineActivity for the peek's own "open notification" tap (see that class's
-         * doc): a lock-widget host only skips the manual-swipe keyguard dismissal for a direct
-         * Activity tap, not a broadcast. Yann: "en vue icônes toutes notif, ça deverrouille juste
-         * le lockscreen [...] je voudrais que ça soit pareil que dernière notif".
+         * REWORKED 20/09/2026 (see the class doc's "REWORKED 20/09/2026" section) — briefly went
+         * through an Activity trampoline (OpenPeekTrampolineActivity, now deleted) on the theory
+         * that a lock-widget host only skips the manual-swipe keyguard dismissal for a direct
+         * Activity tap, not a broadcast — true for the peek's OWN "open the real notification" tap
+         * (a genuine second hop to a different target), but this action was never that: it only
+         * ever flips WidgetPeekPrefs and pushes a widget update, so wrapping it in an Activity just
+         * gave the keyguard something to react to for no reason, and Yann's actual host ended up
+         * fully unlocking on tap instead of just showing the peek in place. Back to a plain
+         * broadcast, same as ACTION_TOGGLE_VIEW/ACTION_CLOSE_PEEK below.
          */
         private fun openPeekPendingIntent(context: Context, source: WidgetPeekPrefs.Source, entryId: String, requestCode: Int): PendingIntent {
-            return OpenPeekTrampolineActivity.pendingIntent(context, source, entryId, requestCode)
+            val intent = Intent(context, NowBarWidgetProvider::class.java).apply {
+                action = ACTION_OPEN_PEEK
+                putExtra(EXTRA_PEEK_SOURCE, source.name)
+                putExtra(EXTRA_PEEK_ENTRY_ID, entryId)
+            }
+            return PendingIntent.getBroadcast(
+                context,
+                requestCode,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
         }
 
         private fun closePeekPendingIntent(context: Context): PendingIntent {
@@ -947,15 +1038,6 @@ class NowBarWidgetProvider : AppWidgetProvider() {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
         }
-
-        // openPeekContentPendingIntent/sendAllowingBackgroundStart (a same-day attempt at this
-        // fix, routing the peek's "open" tap through this app's own BroadcastReceiver) were
-        // REMOVED 18/09/2026, replaced by PeekOpenTrampolineActivity — see that class's doc for
-        // why a wrapped broadcast wasn't enough (Yann: "je t'assure que ça n'ouvre pas la notif.
-        // Ça revient juste aux icônes." — the notification DID eventually open once
-        // sendAllowingBackgroundStart was added, but only behind a manual "swipe to unlock"
-        // instead of Dernière notif's direct, no-swipe tap — Yann: "je dois glisser mon doigt
-        // sortir du lockscreen [...] je voudrais que ce soit pareil que dernière notif").
 
         /**
          * Shared renderer for widget_latest_content — used both by the TRUE LATEST view
@@ -1207,29 +1289,62 @@ class NowBarWidgetProvider : AppWidgetProvider() {
                 // Defensive: the toggle buttons aren't bound to this action while a peek is
                 // showing (see applyPeekLeftColumn), so this should never actually fire mid-peek —
                 // closed here anyway as cheap insurance against any stale binding.
-                WidgetPeekPrefs.close(context)
+                closePeekAndCancelAlarm(context)
                 WidgetViewModePrefs.toggleLatest(context)
                 pushToAllWidgets(context, buildViews(context))
                 return
             }
             ACTION_TOGGLE_SPORT_NOTIFS -> {
-                WidgetPeekPrefs.close(context)
+                closePeekAndCancelAlarm(context)
                 WidgetViewModePrefs.toggleSportAllNotifs(context)
                 pushToAllWidgets(context, buildViews(context))
                 return
             }
             ACTION_CLOSE_PEEK -> {
-                WidgetPeekPrefs.close(context)
+                closePeekAndCancelAlarm(context)
                 pushToAllWidgets(context, buildViews(context))
                 return
             }
-            // ACTION_OPEN_PEEK (opening a peek from a tile tap) was REMOVED 20/09/2026, replaced
-            // by OpenPeekTrampolineActivity — see openPeekPendingIntent's doc.
-            //
+            // Opens a peek for one tile (a tile's icon tap) — see openPeekPendingIntent's doc for
+            // why this is a plain broadcast again (REWORKED 20/09/2026, no Activity trampoline).
+            ACTION_OPEN_PEEK -> {
+                val sourceName = intent.getStringExtra(EXTRA_PEEK_SOURCE)
+                val entryId = intent.getStringExtra(EXTRA_PEEK_ENTRY_ID)
+                val source = sourceName?.let { name ->
+                    try {
+                        WidgetPeekPrefs.Source.valueOf(name)
+                    } catch (_: Throwable) {
+                        null
+                    }
+                }
+                if (source != null && entryId != null) {
+                    WidgetPeekPrefs.open(context, source, entryId)
+                    scheduleAutoClosePeek(context, source, entryId)
+                    pushToAllWidgets(context, buildViews(context))
+                }
+                return
+            }
+            // Fires AUTO_CLOSE_PEEK_DELAY_MILLIS after a peek opens (scheduleAutoClosePeek) — see
+            // the class doc's "REWORKED 20/09/2026" section. Only actually closes the peek if it's
+            // STILL showing the exact entry that scheduled this alarm: a dismissal, a view toggle,
+            // or a re-peek of a different (or the same) tile in the meantime all cancel/replace
+            // this alarm already (closePeekAndCancelAlarm / scheduleAutoClosePeek), but this check
+            // is kept as a defensive second guard rather than trusting that alone.
+            ACTION_AUTO_CLOSE_PEEK -> {
+                val sourceName = intent.getStringExtra(EXTRA_PEEK_SOURCE)
+                val entryId = intent.getStringExtra(EXTRA_PEEK_ENTRY_ID)
+                val current = WidgetPeekPrefs.current(context)
+                if (current != null && current.source.name == sourceName && current.entryId == entryId) {
+                    WidgetPeekPrefs.close(context)
+                    pushToAllWidgets(context, buildViews(context))
+                }
+                return
+            }
             // ACTION_OPEN_PEEK_CONTENT (a same-day attempt at closing the peek on tap-to-open by
-            // routing through this app's own onReceive) was REMOVED 18/09/2026, replaced by
-            // PeekOpenTrampolineActivity — see openPeekContentPendingIntent's removal note above
-            // and that Activity's class doc.
+            // routing through this app's own onReceive) and PeekOpenTrampolineActivity (the
+            // Activity that replaced it, then was itself removed 20/09/2026) are both gone — the
+            // peek's own content tap is a plain, direct PendingIntent again, see buildViewsUnsafe's
+            // renderLatestFormat call and the class doc's "REWORKED 20/09/2026" section.
         }
         super.onReceive(context, intent)
     }
