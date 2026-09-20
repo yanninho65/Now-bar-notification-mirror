@@ -23,6 +23,7 @@ import android.widget.RemoteViews
 import android.widget.Toast
 import com.yann.nowbarmirror.MirrorNotificationListener
 import com.yann.nowbarmirror.R
+import com.yann.nowbarmirror.WatchNotificationSync
 import com.yann.nowbarmirror.settings.WidgetActionsPrefs
 import com.yann.nowbarmirror.sport.SofascoreNotificationListenerService
 
@@ -318,6 +319,13 @@ class NowBarWidgetProvider : AppWidgetProvider() {
             actions: List<WidgetAction> = emptyList()
         ) {
             WidgetNotificationStore.save(context, key, title, text, packageName, image)
+            // Mirrors the same "dernière notif" data to the watch complication "Notification"
+            // (20/09/2026, Yann) — same choke point as WidgetNotificationStore.save above, so a
+            // new notification, an in-place update, and the "revenir à la précédente" promotion
+            // (LatestModePrefs, which just calls mirror() -> pushLive() again for the survivor)
+            // all reach the watch the same way, without extra call sites. See
+            // WatchNotificationSync's class doc.
+            WatchNotificationSync.send(context, title, text, packageName, image)
             liveActions = actions
             liveActionsKey = key
             liveContentIntent = contentIntent
