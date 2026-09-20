@@ -181,11 +181,24 @@ class NowBarWidgetProvider : AppWidgetProvider() {
         private const val PEEK_REQUEST_CODE_SPORT_BASE = 4000
         private const val PEEK_REQUEST_CODE_ALL_NOTIFS_BASE = 4100
 
-        // Request code for PeekOpenTrampolineActivity's PendingIntent — a single fixed value is
-        // fine, unshared with anything above: only one peek can ever be showing at a time, so
-        // there's never more than one of these live at once (same reasoning as closePeekPendingIntent's
-        // own fixed code below).
-        private const val PEEK_TRAMPOLINE_REQUEST_CODE = 4200
+        // Base request code for PeekOpenTrampolineActivity's PendingIntent (Yann, 20/09/2026,
+        // testing the home-screen widget: "cliquer sur l'icône ouvre bien la vue texte mais
+        // cliquer sur le texte ramène à la vue texte" instead of closing the peek and opening the
+        // real notification). Used to be one single fixed request code on the reasoning that only
+        // one peek can ever be showing at a time — true, but that still means every distinct
+        // peeked entry (Sofascore match A, then match B, then a WhatsApp tile, ...) reused the
+        // EXACT SAME (requestCode, component) PendingIntent identity, relying purely on
+        // FLAG_UPDATE_CURRENT to swap in the new EXTRA_TARGET each time the peek changes. Every
+        // other per-tile PendingIntent in this file (PEEK_REQUEST_CODE_SPORT_BASE/
+        // PEEK_REQUEST_CODE_ALL_NOTIFS_BASE right above, and OpenPeekTrampolineActivity's own
+        // per-tile codes) deliberately avoids exactly this reuse pattern, precisely so a widget
+        // host can never serve a tap against a stale binding. Hardened the same way here: the
+        // actual request code passed to PeekOpenTrampolineActivity.pendingIntent (see its call
+        // site in buildViewsUnsafe) is now derived from the peeked entry's own identity
+        // (source + entryId), so a newly-peeked entry always gets ITS OWN PendingIntent identity
+        // instead of overwriting the previous one's — this base just keeps the derived range away
+        // from the other request codes above.
+        private const val PEEK_TRAMPOLINE_REQUEST_CODE_BASE = 4200
 
         // Actions are deliberately NOT persisted to WidgetNotificationStore/SharedPreferences,
         // for the same reason the content PendingIntent isn't (see the class doc on
@@ -491,8 +504,16 @@ class NowBarWidgetProvider : AppWidgetProvider() {
                     // of just opening the target while the peek stays shown — see that class's doc
                     // for why it's a real (invisible) Activity rather than this app's own
                     // broadcast receiver.
+                    //
+                    // requestCode is derived from THIS peeked entry's own identity (source +
+                    // entryId), not a single shared constant — see PEEK_TRAMPOLINE_REQUEST_CODE_BASE's
+                    // doc: `peek` is guaranteed non-null here (resolvedPeek was derived from it
+                    // above), the !! just documents that to the compiler.
                     openIntent = resolvedPeek.openIntent?.let {
-                        PeekOpenTrampolineActivity.pendingIntent(context, PEEK_TRAMPOLINE_REQUEST_CODE, it)
+                        val requestCode = PEEK_TRAMPOLINE_REQUEST_CODE_BASE +
+                            peek!!.source.ordinal * 1_000_000 +
+                            (peek.entryId.hashCode() and 0xFFFFF)
+                        PeekOpenTrampolineActivity.pendingIntent(context, requestCode, it)
                     },
                     actions = resolvedPeek.actions
                 )
