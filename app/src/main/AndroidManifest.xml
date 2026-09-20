@@ -67,6 +67,20 @@
             android:noHistory="true"
             android:taskAffinity="" />
 
+        <!--
+            Invisible "trampoline" Activity (NEW 20/09/2026) — see OpenPeekTrampolineActivity's
+            class doc, same reasoning/flags as PeekOpenTrampolineActivity just above (this one is
+            for a tile's tap that OPENS a peek, that one for the peek's own tap that opens the real
+            notification/app).
+        -->
+        <activity
+            android:name=".widget.OpenPeekTrampolineActivity"
+            android:exported="false"
+            android:theme="@style/Theme.NowBarMirror.Trampoline"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity="" />
+
         <service
             android:name=".MirrorNotificationListener"
             android:label="@string/service_name"
