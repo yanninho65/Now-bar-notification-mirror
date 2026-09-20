@@ -204,7 +204,22 @@ class SofascoreNotificationListenerService : NotificationListenerService() {
             // Voir la doc de la fonction : le widget ne doit jamais faire tomber ce service.
         }
         val notifications = activeSofascoreNotifications() ?: return
-        notifications.forEach { sbn -> pushToAllNotificationsHistory(sbn) }
+        pushAllToAllNotificationsHistory(notifications)
+    }
+
+    /**
+     * Construit puis pousse en UN seul appel batch l'[AllNotifEntryPush] de chaque match de
+     * [notifications] — voir [buildAllNotifEntryPush]/[NowBarWidgetProvider.pushToAllNotificationsBatch]
+     * pour pourquoi (20/09/2026, même correction que MirrorNotificationListener.refillAllNotifsHistory) :
+     * pousser un par un redessinait le widget autant de fois qu'il y avait de matchs actifs.
+     */
+    private fun pushAllToAllNotificationsHistory(notifications: List<StatusBarNotification>) {
+        val entries = notifications.mapNotNull { sbn -> buildAllNotifEntryPush(sbn) }
+        try {
+            NowBarWidgetProvider.pushToAllNotificationsBatch(applicationContext, entries)
+        } catch (_: Throwable) {
+            // Voir la doc de la fonction : le widget ne doit jamais faire tomber ce service.
+        }
     }
 
     override fun onListenerDisconnected() {
@@ -220,43 +235,57 @@ class SofascoreNotificationListenerService : NotificationListenerService() {
     }
 
     /**
-     * Feeds the SAME shared "Toutes notifs" history the generic mirror listener feeds (see
-     * WidgetAllNotificationsStore's class doc) — added 17/09/2026 at Yann's request
-     * ("Garder la même présentation qu'aujourd'hui pour les notifs de Sofascore" inside that
-     * view). Reuses [toMatchResult]/[extractNotificationImage], the EXACT same parsing already
-     * used for the dedicated Sport view (see [pushWidgetMatches]), so a Sofascore entry in
-     * "Toutes notifs" renders with today's match-tile presentation instead of the generic
-     * image+title one — see NowBarWidgetProvider.applyAllNotifSlotAsMatch. One push per RECEIVED
-     * event (this function runs once per onNotificationPosted), independent of [refresh]'s own
-     * "which notification is currently active" bookkeeping — a history entry is never removed
-     * just because the match finished or its notification was later dismissed. Wrapped in
-     * try/catch for the same reason as [pushWidgetMatches]: never let a widget nice-to-have take
-     * this service down.
+     * Builds the [AllNotifEntryPush] that feeds the SAME shared "Toutes notifs" history the
+     * generic mirror listener feeds (see WidgetAllNotificationsStore's class doc) — added
+     * 17/09/2026 at Yann's request ("Garder la même présentation qu'aujourd'hui pour les notifs de
+     * Sofascore" inside that view). Reuses [toMatchResult]/[extractNotificationImage], the EXACT
+     * same parsing already used for the dedicated Sport view (see [pushWidgetMatches]), so a
+     * Sofascore entry in "Toutes notifs" renders with today's match-tile presentation instead of
+     * the generic image+title one — see NowBarWidgetProvider.applyAllNotifSlotAsMatch.
+     *
+     * Split out 20/09/2026 from what used to be [pushToAllNotificationsHistory] in one step, so
+     * [removeFromAllNotificationsHistory]/[bootstrapAllNotificationsHistory] can build a whole
+     * batch of these up front and hand it to
+     * [NowBarWidgetProvider.pushToAllNotificationsBatch]/[pushAllToAllNotificationsHistory] in ONE
+     * call instead of pushing (and redrawing the widget) match by match — see that function's doc
+     * for why looping call-by-call used to make "Toutes notifs" visibly flicker through every
+     * match, oldest first, on every dismissal (same bug/fix as
+     * MirrorNotificationListener.refillAllNotifsHistory). Returns `null` (silently) if
+     * [toMatchResult] can't parse [sbn], or if anything about building the entry throws — same
+     * "never let this widget nice-to-have take this service down" reasoning the old inline
+     * try/catch had.
      */
-    private fun pushToAllNotificationsHistory(sbn: StatusBarNotification) {
-        try {
-            val match = toMatchResult(sbn) ?: return
+    private fun buildAllNotifEntryPush(sbn: StatusBarNotification): AllNotifEntryPush? {
+        return try {
+            val match = toMatchResult(sbn) ?: return null
             val (rawTitle, rawText) = rawTitleAndText(sbn, match)
-            NowBarWidgetProvider.pushToAllNotifications(
-                applicationContext,
-                AllNotifEntryPush(
-                    key = sbn.key,
-                    postTimeMillis = sbn.postTime,
-                    kind = WidgetAllNotificationsStore.Kind.SOFASCORE_MATCH,
-                    title = rawTitle,
-                    text = rawText,
-                    homeTeam = match.homeTeam,
-                    awayTeam = match.awayTeam,
-                    homeScore = match.homeScore,
-                    awayScore = match.awayScore,
-                    lastScorer = match.lastScorer,
-                    status = match.status,
-                    apiSource = match.source.name,
-                    image = extractNotificationImage(sbn),
-                    contentIntent = sbn.notification.contentIntent,
-                    actions = widgetActionsFor(sbn.notification)
-                )
+            AllNotifEntryPush(
+                key = sbn.key,
+                postTimeMillis = sbn.postTime,
+                kind = WidgetAllNotificationsStore.Kind.SOFASCORE_MATCH,
+                title = rawTitle,
+                text = rawText,
+                homeTeam = match.homeTeam,
+                awayTeam = match.awayTeam,
+                homeScore = match.homeScore,
+                awayScore = match.awayScore,
+                lastScorer = match.lastScorer,
+                status = match.status,
+                apiSource = match.source.name,
+                image = extractNotificationImage(sbn),
+                contentIntent = sbn.notification.contentIntent,
+                actions = widgetActionsFor(sbn.notification)
             )
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    /** Pousse [sbn] seul dans "Toutes notifs" — voir [buildAllNotifEntryPush]. Utilisé là où un seul push suffit (onNotificationPosted) ; [bootstrapAllNotificationsHistory]/[removeFromAllNotificationsHistory] construisent et poussent un lot entier à la place. */
+    private fun pushToAllNotificationsHistory(sbn: StatusBarNotification) {
+        val entry = buildAllNotifEntryPush(sbn) ?: return
+        try {
+            NowBarWidgetProvider.pushToAllNotifications(applicationContext, entry)
         } catch (_: Throwable) {
             // Voir la doc de la fonction : le widget ne doit jamais faire tomber ce service.
         }
@@ -344,9 +373,14 @@ class SofascoreNotificationListenerService : NotificationListenerService() {
             WidgetAllNotificationsStore.remove(applicationContext, key, postTimeMillis)
             // Same top-up as MirrorNotificationListener.refillAllNotifsHistory: dropping this
             // entry just shrinks "Toutes notifs" unless something re-pushes whatever else is
-            // still actually active — re-push every currently active Sofascore match so a
-            // freed slot gets refilled immediately instead of only at the next reconnect.
-            activeSofascoreNotifications()?.forEach { sbn -> pushToAllNotificationsHistory(sbn) }
+            // still actually active — re-push every currently active Sofascore match so a freed
+            // slot gets refilled immediately instead of only at the next reconnect. FIXED
+            // 20/09/2026, same fix/reasoning as MirrorNotificationListener.refillAllNotifsHistory:
+            // this used to push each active match one at a time, redrawing the widget on every
+            // single one — now built and pushed as one batch (pushAllToAllNotificationsHistory),
+            // so a dismissal with several live matches settles on the final state directly
+            // instead of flickering through each intermediate one.
+            activeSofascoreNotifications()?.let { pushAllToAllNotificationsHistory(it) }
             NowBarWidgetProvider.requestUpdate(applicationContext)
         } catch (_: Throwable) {
         }
