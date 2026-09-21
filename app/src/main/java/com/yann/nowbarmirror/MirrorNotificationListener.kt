@@ -43,6 +43,9 @@ class MirrorNotificationListener : NotificationListenerService() {
         // posting being dismissed, letting closePeekIfShowing below match an ALL_NOTIFS peek's
         // exact (key, postTime) identity precisely instead of falling back to a key-prefix match.
         const val EXTRA_DISMISS_POST_TIME = "mirror.widget.dismiss_post_time"
+
+        // NEW 21/09/2026, watch detail screen — see [messageLinesFor]'s doc.
+        private const val MAX_DETAIL_LINES = 10
     }
 
     private val ready = AtomicBoolean(false)
@@ -502,6 +505,7 @@ class MirrorNotificationListener : NotificationListenerService() {
                 ?: ""
             val image = NotificationImageExtractor.extract(applicationContext, sbn)
             val actions = widgetActionsFor(sbn.notification)
+            val isConversation = isConversationNotification(sbn)
 
             // Deliberately NOT applying the per-app "Titre ↔ texte" invert flag here — that
             // setting is a Now Bar-only concern (see mirror()'s own note on this), and this
@@ -516,10 +520,11 @@ class MirrorNotificationListener : NotificationListenerService() {
                 title = rawTitle,
                 text = rawText,
                 packageName = sbn.packageName,
-                isConversation = isConversationNotification(sbn),
+                isConversation = isConversation,
                 image = image,
                 contentIntent = sbn.notification.contentIntent,
-                actions = actions
+                actions = actions,
+                detailLines = if (isConversation) messageLinesFor(sbn, rawTitle) else emptyList()
             )
         } catch (_: Throwable) {
             null
@@ -581,6 +586,42 @@ class MirrorNotificationListener : NotificationListenerService() {
         return n.extras.containsKey(Notification.EXTRA_MESSAGING_PERSON)
     }
 
+    /**
+     * NEW 21/09/2026, watch "Notification" complication detail screen (Yann: "pour les
+     * notifications comme les messages [...] afficher toutes les notifs de l'expéditeur";
+     * précision : "il suffit de lire le centre de notifs [...] ce que l'application fait déjà
+     * normalement") — feeds [AllNotifEntryPush.detailLines] for a conversation notification.
+     *
+     * A conversation is, confirmed on device (see [isConversationNotification]'s doc), ONE
+     * Android notification reused per conversation via NotificationCompat.MessagingStyle, which
+     * already accumulates the recent messages itself (EXTRA_MESSAGES/EXTRA_HISTORIC_MESSAGES) —
+     * exactly the same source NotificationImageExtractor already reads for the contact photo, so
+     * no new store is needed, just read what's already there. `.messages` covers the currently
+     * shown messages; historicMessages are the ones MessagingStyle has already rotated out of the
+     * visible set but the app still attached — both are included so a long-ish exchange isn't
+     * truncated to whatever fits the "visible" set alone.
+     *
+     * Ordered MOST RECENT FIRST (MessagingStyle's own list is chronological, oldest first, so
+     * reversed here) — same "glance and read the latest without scrolling" convention as
+     * SofascoreNotificationListenerService.collectLines' own EXTRA_TEXT_LINES ordering. Each line
+     * is prefixed with the sender's own name when it's available AND differs from the
+     * conversation's own title (i.e. only useful for a group chat — a 1:1 conversation's sender is
+     * already the notification's title, no need to repeat it on every line).
+     *
+     * Capped at [MAX_DETAIL_LINES] messages, same reasoning as Sofascore's own 6-line Android cap
+     * — this is a quick glance on a watch screen, not a full chat history browser.
+     */
+    private fun messageLinesFor(sbn: StatusBarNotification, conversationTitle: String): List<String> {
+        val style = NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(sbn.notification)
+            ?: return emptyList()
+        val all = (style.historicMessages + style.messages)
+        return all.takeLast(MAX_DETAIL_LINES).reversed().mapNotNull { message ->
+            val text = message.text?.toString()?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            val sender = message.person?.name?.toString()?.takeIf { it.isNotBlank() && it != conversationTitle }
+            if (sender != null) "$sender : $text" else text
+        }
+    }
+
     private fun mirror(sbn: StatusBarNotification, mirrorId: Int) {
         val n = sbn.notification
         val extras = n.extras
@@ -618,6 +659,7 @@ class MirrorNotificationListener : NotificationListenerService() {
         // as an empty button. Gated behind the setting so the widget stays exactly as compact
         // as before for anyone who hasn't opted in.
         val widgetActions = widgetActionsFor(n)
+        val isConversation = isConversationNotification(sbn)
 
         // Feeds the widget's shared "Toutes notifs" history (added 17/09/2026 at Yann's request) —
         // a rolling history of the last 5 RECEIVED notifications. MERGED 20/09/2026 (Yann: "Fusionne
@@ -656,10 +698,11 @@ class MirrorNotificationListener : NotificationListenerService() {
                         title = rawTitle,
                         text = rawText,
                         packageName = sbn.packageName,
-                        isConversation = isConversationNotification(sbn),
+                        isConversation = isConversation,
                         image = image,
                         contentIntent = n.contentIntent,
-                        actions = widgetActions
+                        actions = widgetActions,
+                        detailLines = if (isConversation) messageLinesFor(sbn, rawTitle) else emptyList()
                     )
                 )
             } catch (t: Throwable) {

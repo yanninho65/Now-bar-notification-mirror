@@ -46,14 +46,44 @@ object WatchNotificationSync {
      * [packageName] et envoyée séparément ("appIcon") — la montre en a besoin pour le petit badge
      * en bas à droite de l'image (voir ComplicationImageComposer.composeNotificationImage), et ne
      * peut pas la résoudre elle-même puisque l'app source n'est pas forcément installée dessus.
+     *
+     * NEW 21/09/2026, écran de détail montre (voir NowBarWidgetProvider.AllNotifEntryPush.
+     * detailLines' doc) :
+     * - [detailLines] : messages de la conversation / lignes d'événements du match, déjà résolus
+     *   côté téléphone (NowBarWidgetProvider.resolveAllNotifEntryContent) — vide pour une
+     *   notification générique sans historique particulier.
+     * - [actionLabels] : juste les libellés des boutons d'action (aucun PendingIntent ne peut
+     *   traverser vers la montre) — un tap sur le bouton N envoie à [WearActionRelayService] une
+     *   demande "actionIndex=N" pour ([entryKey], [entryPostTimeMillis]), que
+     *   NowBarWidgetProvider.fireAction résout dans son propre cache en mémoire des VRAIS
+     *   PendingIntents (jamais envoyés eux-mêmes, voir cette fonction).
+     * - [entryKey]/[entryPostTimeMillis]/[kind] : identité de l'entrée, pour que la montre puisse
+     *   adresser ses demandes d'action/suppression à CETTE notification précise (voir
+     *   NowBarWidgetProvider.fireAction/dismissEntry).
      */
-    fun send(context: Context, title: String, text: String, packageName: String, image: Bitmap?) {
+    fun send(
+        context: Context,
+        title: String,
+        text: String,
+        packageName: String,
+        image: Bitmap?,
+        detailLines: List<String> = emptyList(),
+        actionLabels: List<String> = emptyList(),
+        entryKey: String = "",
+        entryPostTimeMillis: Long = -1L,
+        kind: String = ""
+    ) {
         val request = PutDataMapRequest.create(NOTIFICATION_PATH).apply {
             dataMap.putString("title", title)
             dataMap.putString("text", text)
             dataMap.putString("packageName", packageName)
             image?.let { dataMap.putAsset("notifImage", WatchSync.bitmapToAsset(it)) }
             appIconAsset(context, packageName)?.let { dataMap.putAsset("appIcon", it) }
+            dataMap.putStringArrayList("detailLines", ArrayList(detailLines))
+            dataMap.putStringArrayList("actionLabels", ArrayList(actionLabels))
+            dataMap.putString("entryKey", entryKey)
+            dataMap.putLong("entryPostTimeMillis", entryPostTimeMillis)
+            dataMap.putString("kind", kind)
             // Force un DataChanged même si le contenu texte n'a pas bougé depuis le dernier envoi
             // (la Data Layer API ignore sinon un putDataItem identique au précédent) — même
             // raisonnement que WatchSync.sendMatch.
