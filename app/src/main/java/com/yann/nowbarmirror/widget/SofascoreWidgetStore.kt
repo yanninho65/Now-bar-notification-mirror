@@ -11,10 +11,9 @@ import java.io.FileOutputStream
  * Persists the up-to-[MAX_SLOTS] Sofascore matches shown in the widget's "Sport" view (see
  * NowBarWidgetProvider.pushSofascoreMatches / applySofascoreMatches) — already sorted and capped
  * by NowBarWidgetProvider before being saved here, this store just remembers whatever it's
- * handed, in order. Mirrors WidgetNotificationStore's approach (JSON in SharedPreferences for the
- * fields, PNG files on disk for the images — see its class doc for why a Bitmap can't just go in
- * SharedPreferences) extended to a small ordered list instead of a single entry, using org.json
- * like SettingsBackup.kt already does elsewhere in this app.
+ * handed, in order. Same storage approach as WidgetAllNotificationsStore (JSON in SharedPreferences
+ * for the fields, PNG files on disk for the images — a Bitmap can't just go in SharedPreferences),
+ * using org.json like SettingsBackup.kt already does elsewhere in this app.
  *
  * Images are saved by SLOT INDEX (0 until [MAX_SLOTS]), not by notification key: the whole list
  * is rewritten on every [save] (see SofascoreNotificationListenerService.pushWidgetMatches), so
@@ -36,7 +35,7 @@ object SofascoreWidgetStore {
     /** Kept in sync with NowBarWidgetProvider's fixed widget_match_1..5 layout slots (5th slot added 17/09/2026 at Yann's request). */
     const val MAX_SLOTS = 5
 
-    /** What [save] needs for one match. Deliberately Android-widget-agnostic (no PendingIntent — see NowBarWidgetProvider.SofascoreWidgetMatch, which carries the live one of those but never persists it, same limitation as WidgetNotificationStore's original PendingIntent). */
+    /** What [save] needs for one match. Deliberately Android-widget-agnostic (no PendingIntent — see NowBarWidgetProvider.SofascoreWidgetMatch, which carries the live one of those but never persists it, same limitation as WidgetAllNotificationsStore.PersistableEntry). */
     data class PersistableMatch(
         val key: String,
         val homeTeam: String,

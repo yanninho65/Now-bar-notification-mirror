@@ -15,15 +15,16 @@ import java.io.FileOutputStream
  * changer vue entre sport et toutes notifs. [...] prends les cinq dernieres notifs reçues.").
  *
  * A rolling HISTORY of up to [MAX_SLOTS] notifications RECEIVED, most-recent-first — LIKE
- * WidgetNotificationStore/SofascoreWidgetStore (and UNLIKE an initial version of this store), an
- * entry is removed as soon as its original notification is dismissed from the shade, by the user,
- * the source app, or "effacer tout" (Yann, 17/09/2026: "Si une notification a été supprimée du
- * centre de notifs, elle ne doit plus apparaître dans le widget") — see [remove], called from
+ * SofascoreWidgetStore (and UNLIKE an initial version of this store), an entry is removed as soon
+ * as its original notification is dismissed from the shade, by the user, the source app, or
+ * "effacer tout" (Yann, 17/09/2026: "Si une notification a été supprimée du centre de notifs, elle
+ * ne doit plus apparaître dans le widget") — see [remove], called from
  * MirrorNotificationListener/SofascoreNotificationListenerService's onNotificationRemoved. "History"
- * here just means it can hold MORE than one entry per source and isn't limited to whichever
- * notification is single most recent (unlike WidgetNotificationStore) or currently active for a
- * SPECIFIC match the watch complication follows (unlike SofascoreWidgetStore's override system) —
- * it does NOT mean entries survive their own dismissal. An entry with the same [key] as one
+ * here just means it can hold MORE than one entry per source — its own MOST RECENT entry (see
+ * [get], already most-recent-first) is ALSO what "Dernière notif"/la montre read (MERGED
+ * 20/09/2026, see NowBarWidgetProvider.applyLatestContent) — and isn't limited to one entry
+ * currently active for a SPECIFIC match the watch complication follows (unlike SofascoreWidgetStore's
+ * override system) — it does NOT mean entries survive their own dismissal. An entry with the same [key] as one
  * already present is treated as an UPDATE of that same notification (e.g. a Sofascore score change
  * posted in place) and is bumped back to the front rather than creating a duplicate.
  *
@@ -90,7 +91,7 @@ object WidgetAllNotificationsStore {
 
     enum class Kind { GENERIC, SOFASCORE_MATCH }
 
-    /** What [push] needs for one notification. Deliberately Android-widget-agnostic (no PendingIntent — see NowBarWidgetProvider.liveAllNotifIntents, which carries the live one of those but never persists it, same limitation as WidgetNotificationStore/SofascoreWidgetStore). */
+    /** What [push] needs for one notification. Deliberately Android-widget-agnostic (no PendingIntent — see NowBarWidgetProvider.liveAllNotifIntents, which carries the live one of those but never persists it, same limitation as SofascoreWidgetStore). */
     data class PersistableEntry(
         val key: String,
         val kind: Kind,

@@ -24,7 +24,6 @@ import android.widget.Toast
 import com.yann.nowbarmirror.MirrorNotificationListener
 import com.yann.nowbarmirror.R
 import com.yann.nowbarmirror.WatchNotificationSync
-import com.yann.nowbarmirror.settings.WidgetActionsPrefs
 import com.yann.nowbarmirror.sport.SofascoreNotificationListenerService
 
 /** One notification action, rendered as a small text button (the action's own label) in the widget. */
@@ -40,8 +39,8 @@ data class WidgetAction(
  * PendingIntent — tapping a match tile must open Sofascore on that exact match (same as tapping
  * the notification itself) WITHOUT cancelling the source notification, see applySofascoreMatches.
  * Neither [image] nor [contentIntent]/[actions] is persisted (see SofascoreWidgetStore) — only
- * held in memory for the current process, same limitation as [WidgetAction] above and the mirror's
- * own liveContentIntent.
+ * held in memory for the current process, same limitation as [WidgetAction] above and
+ * liveAllNotifIntents/liveAllNotifActions below.
  *
  * [title]/[text] (NEW 18/09/2026, "peek" feature) are the raw Android notification title/text for
  * this match ("$homeTeam - $awayTeam" / the latest score line — see
@@ -110,8 +109,9 @@ data class AllNotifEntryPush(
  * buildViewsUnsafe) — see pushSofascoreMatches for why it's applied at BOTH points rather than
  * just once at push time: re-sorting the same already-capped set on every render keeps their
  * RELATIVE order (live vs. finished-a-while-ago) accurate as time passes, even between Sofascore
- * events, without needing a periodic background refresh (this app has none, by design — see
- * WidgetNotificationStore's own class doc for the same reasoning elsewhere).
+ * events, without needing a periodic background refresh — this app has none, by design: every
+ * store here is only ever written in reaction to a real notification-listener event, never on a
+ * timer.
  */
 private fun <T> List<T>.sortedForWidget(
     nowMillis: Long,
@@ -131,13 +131,18 @@ private fun <T> List<T>.sortedForWidget(
  * through a third-party lock-widget host such as Samsung's LockStar. THREE views (extended
  * 17/09/2026 from the original two — see WidgetViewModePrefs' class doc for the full navigation
  * model and why there are two separate toggle buttons):
- * - LATEST: whatever WidgetNotificationStore currently holds, the single most recently posted
- *   notification from any app configured with a mirror mode, across ALL/LATEST alike.
+ * - LATEST ("Dernière notif"): whichever entry is currently MOST RECENT in
+ *   WidgetAllNotificationsStore (see applyLatestContent) — any app configured with a mirror mode,
+ *   ALL/LATEST alike, AND Sofascore matches, no distinction (MERGED 20/09/2026: this used to be a
+ *   separate store, WidgetNotificationStore, written by its own dedicated push and never eligible
+ *   for a Sofascore match — see applyLatestContent's own doc for why deriving it from the same
+ *   history instead is both simpler and self-healing).
  * - SPORT: up to 5 Sofascore matches from SofascoreWidgetStore, pushed by
  *   SofascoreNotificationListenerService whenever a Sofascore notification changes.
  * - ALL_NOTIFS ("Toutes notifs"): up to 5 recently received notifications from
  *   WidgetAllNotificationsStore, fed by both MirrorNotificationListener (generic) and
- *   SofascoreNotificationListenerService (Sofascore, kept in its match-tile presentation).
+ *   SofascoreNotificationListenerService (Sofascore, kept in its match-tile presentation) — the
+ *   SAME history LATEST above now reads too.
  *
  * PLUS a fourth, cross-cutting "peek" state (NEW 18/09/2026, see WidgetPeekPrefs' class doc — Yann:
  * "En vue toutes notifs ou sport, cliquer sur une icône doit ouvrir le texte de la notification en
@@ -239,42 +244,12 @@ class NowBarWidgetProvider : AppWidgetProvider() {
         private const val PEEK_REQUEST_CODE_SPORT_BASE = 4300
         private const val PEEK_REQUEST_CODE_ALL_NOTIFS_BASE = 4400
 
-        // Actions are deliberately NOT persisted to WidgetNotificationStore/SharedPreferences,
-        // for the same reason the content PendingIntent isn't (see the class doc on
-        // WidgetNotificationStore): a PendingIntent only survives a real Binder transaction
-        // (handing it straight to AppWidgetManager here), not a round-trip through disk. So
-        // these live only in memory, for as long as this process stays alive since the
-        // notification was posted. liveActionsKey guards against showing them for the wrong
-        // notification: buildViewsUnsafe() only uses liveActions when it matches the key
-        // WidgetNotificationStore currently holds, so a stale set from a previous notification
-        // (or the empty default right after a process restart) never leaks onto an unrelated
-        // one — the actions row just stays hidden until the next live push.
-        private var liveActions: List<WidgetAction> = emptyList()
-        private var liveActionsKey: String? = null
-
-        // Same in-memory-only trick as liveActions above, but for the TRUE LATEST view's own
-        // tap-to-open target (NEW 20/09/2026, fixing a real regression). Before this, the content
-        // PendingIntent only ever reached applyLatestContent as a one-shot function parameter
-        // from pushLive() — nowhere else kept a copy. Harmless as long as nothing rebuilt the
-        // widget between "notification mirrored" and "user taps it", but several call sites
-        // (requestUpdate, pushSofascoreMatches, pushToAllNotifications, closePeekIfShowing — and,
-        // since 18/09/2026, PeekOpenTrampolineActivity's own requestUpdate() call on every single
-        // peek-tap-to-open) already rebuilt via buildViews(context) i.e. with NO contentIntent,
-        // which silently overwrote the LATEST tile's real deep-link PendingIntent with the generic
-        // launchAppPendingIntent fallback below — even though the tile's title/text/image
-        // (WidgetNotificationStore) stayed correct, so nothing LOOKED wrong. Yann: "en vue dernière
-        // notif, ça ouvre l'application mais plus l'article ou le message de la notification."
-        // liveContentIntentKey guards against reusing it for the wrong notification, same as
-        // liveActionsKey above.
-        private var liveContentIntent: PendingIntent? = null
-        private var liveContentIntentKey: String? = null
-
-        // Same in-memory-only trick as liveActions above, for the Sofascore view: one live
+        // Same in-memory-only trick as liveAllNotifIntents/liveAllNotifActions below, for the Sofascore view: one live
         // PendingIntent/action-list per match key, refreshed on every pushSofascoreMatches call. A
         // match whose key isn't in liveSofascoreIntents (stale after a process restart, or never
         // had a usable contentIntent) falls back to launchAppPendingIntent(SOFASCORE_PACKAGE) — see
         // resolvePeek. liveSofascoreActions has no such fallback: a match with nothing recorded
-        // there just shows no action row, same as liveActions' own reset-on-restart limitation.
+        // there just shows no action row, same as liveAllNotifActions' own reset-on-restart limitation.
         private var liveSofascoreIntents: Map<String, PendingIntent> = emptyMap()
         private var liveSofascoreActions: Map<String, List<WidgetAction>> = emptyMap()
 
@@ -299,38 +274,48 @@ class NowBarWidgetProvider : AppWidgetProvider() {
         /** Composite identity for [liveAllNotifIntents]/[liveAllNotifActions] — see those fields' doc. */
         private fun allNotifEntryId(key: String, postTimeMillis: Long) = "$key::$postTimeMillis"
 
+        // Guards [syncWatchToLatest] against sending a redundant putDataItem to the watch on
+        // every widget rebuild (a view toggle, a peek open/close…) that doesn't actually change
+        // which notification is most recent — see that function's doc. null means "never synced
+        // yet this process" (or explicitly cleared), so the very first render after a process
+        // restart always (re)syncs once, same self-healing spirit as the rest of this file.
+        private var lastSyncedWatchIdentity: String? = null
+
         /**
-         * Called right when a notification is mirrored, with THAT notification's own live
-         * PendingIntent(s). This is the only reliable way to give the widget a working "open
-         * the exact conversation/article" tap and working action buttons: handing a
-         * PendingIntent to AppWidgetManager here goes through a real Binder transaction (same
-         * as NotificationManager.notify() already does for the system-notification mirror),
-         * which is what actually preserves it — trying to save and later reconstruct a
-         * PendingIntent from SharedPreferences does not.
+         * Keeps the watch complication "Notification" aligned on whatever the widget's "Dernière
+         * notif" view itself shows — both now read the exact SAME thing
+         * (WidgetAllNotificationsStore.get(context).firstOrNull(), see applyLatestContent) instead
+         * of the old separate WidgetNotificationStore that pushLive() used to write on its own.
+         *
+         * MERGED 20/09/2026 (Yann: "Fusionne toutes les listes que tu peux pour optimiser [...]
+         * Sofascore peut apparaître en dernière notif. Toutes les notifs des applis choisies
+         * peuvent y apparaître") — called from the very top of [buildViewsUnsafe], i.e. on every
+         * widget rebuild, rather than from a single dedicated push call site that every new
+         * mutation path had to remember to call too. That per-call-site duplication is exactly
+         * what let "Dernière notif"/la montre drift out of sync with "Toutes notifs" (fixed
+         * earlier today for two separate removal paths before this merge made the whole class of
+         * bug impossible: there's simply no separate state left to forget to update). Guarded by
+         * [lastSyncedWatchIdentity] so a rebuild that doesn't change the most-recent entry (a view
+         * toggle, opening/closing a peek…) doesn't also spam the Wear Data Layer API.
          */
-        fun pushLive(
-            context: Context,
-            key: String,
-            title: String,
-            text: String,
-            packageName: String,
-            contentIntent: PendingIntent?,
-            image: Bitmap?,
-            actions: List<WidgetAction> = emptyList()
-        ) {
-            WidgetNotificationStore.save(context, key, title, text, packageName, image)
-            // Mirrors the same "dernière notif" data to the watch complication "Notification"
-            // (20/09/2026, Yann) — same choke point as WidgetNotificationStore.save above, so a
-            // new notification, an in-place update, and the "revenir à la précédente" promotion
-            // (LatestModePrefs, which just calls mirror() -> pushLive() again for the survivor)
-            // all reach the watch the same way, without extra call sites. See
-            // WatchNotificationSync's class doc.
-            WatchNotificationSync.send(context, title, text, packageName, image)
-            liveActions = actions
-            liveActionsKey = key
-            liveContentIntent = contentIntent
-            liveContentIntentKey = key
-            pushToAllWidgets(context, buildViews(context, freshContentIntent = contentIntent))
+        private fun syncWatchToLatest(context: Context) {
+            val entry = WidgetAllNotificationsStore.get(context).firstOrNull()
+            val identity = entry?.let { "${it.key}::${it.postTimeMillis}" }
+            if (identity == lastSyncedWatchIdentity) return
+            lastSyncedWatchIdentity = identity
+
+            if (entry == null) {
+                WatchNotificationSync.sendCleared(context)
+                return
+            }
+            val content = resolveAllNotifEntryContent(context, entry)
+            WatchNotificationSync.send(
+                context,
+                title = content.title,
+                text = content.text,
+                packageName = content.iconPackageName ?: entry.packageName.orEmpty(),
+                image = content.image
+            )
         }
 
         /**
@@ -480,10 +465,11 @@ class NowBarWidgetProvider : AppWidgetProvider() {
          * automatiquement aux icônes"). A SPORT peek matches by [key] alone (a match's peek entryId
          * IS its key); an ALL_NOTIFS peek matches by the composite (key, postTimeMillis) id —
          * except when [postTimeMillis] is unknown (pass -1L), in which case it falls back to a
-         * key-prefix match (used by the true-LATEST dismiss button, which never tracked postTime
-         * for WidgetNotificationStore — see MirrorNotificationListener.EXTRA_DISMISS_POST_TIME's
-         * doc; harmless there in practice since a peek is never active while LATEST is showing, but
-         * kept correct rather than assumed). No-op, safe to call unconditionally, if no peek is
+         * key-prefix match. The true-LATEST dismiss button now always supplies its real
+         * postTimeMillis too (MERGED 20/09/2026: it reads the same WidgetAllNotificationsStore.Data
+         * as an ALL_NOTIFS peek, which always has one — see resolveAllNotifEntryContent), so -1L is
+         * kept only as a defensive default for any future caller that genuinely doesn't have one.
+         * No-op, safe to call unconditionally, if no peek is
          * active or it points elsewhere. Pushes a fresh render itself when it does close something,
          * independent of whatever rebuild the caller's own surrounding code triggers.
          */
@@ -576,9 +562,9 @@ class NowBarWidgetProvider : AppWidgetProvider() {
             ids.forEach { id -> manager.updateAppWidget(id, views) }
         }
 
-        private fun buildViews(context: Context, freshContentIntent: PendingIntent? = null): RemoteViews {
+        private fun buildViews(context: Context): RemoteViews {
             return try {
-                buildViewsUnsafe(context, freshContentIntent)
+                buildViewsUnsafe(context)
             } catch (t: Throwable) {
                 // TEMPORARY diagnostic: surfaces the exact failure on screen since this device
                 // can't be hooked up to Android Studio for logcat. Safe to remove once the
@@ -610,7 +596,13 @@ class NowBarWidgetProvider : AppWidgetProvider() {
             return views
         }
 
-        private fun buildViewsUnsafe(context: Context, freshContentIntent: PendingIntent?): RemoteViews {
+        private fun buildViewsUnsafe(context: Context): RemoteViews {
+            // Keeps the watch complication aligned with whatever "Dernière notif" derives below,
+            // on every rebuild — see [syncWatchToLatest]'s own doc. Runs unconditionally, before
+            // the peek early-return, so a store change is never missed just because a peek
+            // happens to be showing at the moment.
+            syncWatchToLatest(context)
+
             val views = RemoteViews(context.packageName, R.layout.widget_now_bar)
 
             // "Peek" takes priority over the three normal views when active — see the class doc
@@ -660,7 +652,7 @@ class NowBarWidgetProvider : AppWidgetProvider() {
             views.setViewVisibility(R.id.widget_all_notifs_content, if (currentView == WidgetViewModePrefs.WidgetView.ALL_NOTIFS) View.VISIBLE else View.GONE)
 
             when (currentView) {
-                WidgetViewModePrefs.WidgetView.LATEST -> applyLatestContent(context, views, freshContentIntent)
+                WidgetViewModePrefs.WidgetView.LATEST -> applyLatestContent(context, views)
                 WidgetViewModePrefs.WidgetView.SPORT -> {
                     applySofascoreIcon(context, views)
                     applySofascoreMatches(context, views, sofascoreMatches)
@@ -678,11 +670,22 @@ class NowBarWidgetProvider : AppWidgetProvider() {
             return views
         }
 
-        private fun applyLatestContent(context: Context, views: RemoteViews, freshContentIntent: PendingIntent?) {
-            val data = WidgetNotificationStore.get(context)
-            applyLatestIcon(context, views, data)
+        /**
+         * MERGED 20/09/2026 (Yann: "Fusionne toutes les listes que tu peux pour optimiser [...]
+         * Sofascore peut apparaître en dernière notif. Toutes les notifs des applis choisies
+         * peuvent y apparaître") — "Dernière notif" is no longer its own separately-written store
+         * (the old WidgetNotificationStore/pushLive()): it's simply whichever entry is currently
+         * MOST RECENT in the shared "Toutes notifs" history, of EITHER kind — a Sofascore match is
+         * exactly as eligible as a generic mirrored notification, per Yann's remark above. Reuses
+         * [resolveAllNotifEntryContent], the exact same resolver an ALL_NOTIFS "peek" already used
+         * to show one of these entries full-format — "Dernière notif" is now just that same
+         * rendering applied to entry #1 instead of a tapped one.
+         */
+        private fun applyLatestContent(context: Context, views: RemoteViews) {
+            val entry = WidgetAllNotificationsStore.get(context).firstOrNull()
 
-            if (data == null) {
+            if (entry == null) {
+                views.setImageViewResource(R.id.widget_app_icon, R.drawable.ic_notification_bell)
                 renderLatestFormat(
                     views,
                     title = context.getString(R.string.widget_empty_title),
@@ -695,45 +698,33 @@ class NowBarWidgetProvider : AppWidgetProvider() {
                 return
             }
 
-            val imageBitmap = data.imageFile?.let { BitmapFactory.decodeFile(it.path) }
-            val actions = if (WidgetActionsPrefs.isEnabled(context) && liveActionsKey == data.key) {
-                liveActions
-            } else {
-                emptyList()
-            }
+            val content = resolveAllNotifEntryContent(context, entry)
+            applyLatestIcon(context, views, content.iconPackageName)
             // Bound to widget_latest_content specifically (not the whole widget_root any more —
             // widget_root also contains the left/right columns, shared with the other views,
             // which must NOT open this notification when tapped) inside renderLatestFormat.
-            //
-            // Prefer freshContentIntent (only non-null the instant pushLive() itself triggers this
-            // very rebuild); otherwise fall back to the same notification's own PendingIntent kept
-            // in memory since THAT pushLive() call (liveContentIntent, guarded by
-            // liveContentIntentKey so a stale entry for a different/older notification is never
-            // reused — see companion doc) — fixes the "Dernière notif tap opens the app but not the
-            // article" regression any later widget rebuild used to cause by silently resetting to
-            // the generic launchAppPendingIntent fallback.
-            val openIntent = freshContentIntent
-                ?: liveContentIntent.takeIf { liveContentIntentKey == data.key }
-                ?: launchAppPendingIntent(context, data.packageName)
-
             renderLatestFormat(
                 views,
-                title = data.title,
-                text = data.text,
-                image = imageBitmap,
-                dismissIntent = dismissPendingIntent(context, data.key),
-                openIntent = openIntent,
-                actions = actions
+                title = content.title,
+                text = content.text,
+                image = content.image,
+                dismissIntent = content.dismissIntent,
+                openIntent = content.openIntent,
+                actions = content.actions
             )
         }
 
-        /** widget_app_icon for the TRUE LATEST view — "Idem quand il n'y a pas de notifs en vue texte" (18/09/2026): the bell replaces this app's own icon specifically for the "nothing to show" case; a real notification whose app-icon lookup itself fails keeps the pre-existing this-app-icon fallback, unrelated to that request. */
-        private fun applyLatestIcon(context: Context, views: RemoteViews, data: WidgetNotificationStore.Data?) {
-            if (data == null) {
-                views.setImageViewResource(R.id.widget_app_icon, R.drawable.ic_notification_bell)
-                return
-            }
-            val appIcon = appIconBitmap(context, data.packageName)
+        /**
+         * widget_app_icon for the TRUE LATEST view — "Idem quand il n'y a pas de notifs en vue
+         * texte" (18/09/2026): the bell (applied directly by the caller when there's no entry at
+         * all) replaces this app's own icon specifically for the "nothing to show" case; a real
+         * entry whose icon lookup itself fails (or names no package) keeps the pre-existing
+         * this-app-icon fallback instead, unrelated to that request. [iconPackageName] is the
+         * resolved entry's own source app (the mirrored app, or Sofascore for a match — see
+         * [resolveAllNotifEntryContent]).
+         */
+        private fun applyLatestIcon(context: Context, views: RemoteViews, iconPackageName: String?) {
+            val appIcon = iconPackageName?.let { appIconBitmap(context, it) }
             if (appIcon != null) {
                 views.setImageViewBitmap(R.id.widget_app_icon, circularBitmap(appIcon))
             } else {
@@ -1154,19 +1145,55 @@ class NowBarWidgetProvider : AppWidgetProvider() {
             )
         }
 
-        private data class ResolvedPeek(
+        /**
+         * RENAMED from ResolvedPeek 20/09/2026 when this stopped being peek-only — see
+         * [resolveAllNotifEntryContent]'s doc.
+         */
+        private data class ResolvedNotifContent(
             val title: String,
             val text: String,
             val image: Bitmap?,
             val dismissIntent: PendingIntent?,
             val openIntent: PendingIntent?,
             val actions: List<WidgetAction>,
-            // NEW 18/09/2026 — the peeked entry's own source-app package, used by
-            // applyPeekLeftColumn to show that app's icon on widget_app_icon (Yann: "mettre
-            // l'icone de l'appli à gauche"). Sofascore for a SPORT match or an ALL_NOTIFS
-            // SOFASCORE_MATCH entry, the mirrored notification's own package otherwise.
+            // NEW 18/09/2026 — the entry's own source-app package, used by applyPeekLeftColumn
+            // (peek) / applyLatestIcon (Dernière notif) to show that app's icon on
+            // widget_app_icon (Yann: "mettre l'icone de l'appli à gauche"). Sofascore for a SPORT
+            // match or a SOFASCORE_MATCH entry, the mirrored notification's own package otherwise.
             val iconPackageName: String?
         )
+
+        /**
+         * Resolves one [WidgetAllNotificationsStore.Data] entry (any [WidgetAllNotificationsStore.Kind])
+         * into everything [renderLatestFormat] needs — shared by an ALL_NOTIFS "peek" (below) and,
+         * since the 20/09/2026 merge, [applyLatestContent] as well: "Dernière notif" is just this
+         * SAME resolution applied to whichever entry is currently most recent, instead of a
+         * separately-peeked one. This is what lets a Sofascore match become "Dernière notif" too
+         * (Yann: "Sofascore peut apparaître en dernière notif") — it was already exactly how a
+         * SOFASCORE_MATCH entry rendered as a peek, long before this merge.
+         */
+        private fun resolveAllNotifEntryContent(context: Context, entry: WidgetAllNotificationsStore.Data): ResolvedNotifContent {
+            val entryId = allNotifEntryId(entry.key, entry.postTimeMillis)
+            val isMatch = entry.kind == WidgetAllNotificationsStore.Kind.SOFASCORE_MATCH
+
+            val dismissIntent = if (isMatch) {
+                sofascoreDismissPendingIntent(context, entry.key, entry.postTimeMillis)
+            } else {
+                dismissPendingIntent(context, entry.key, entry.postTimeMillis)
+            }
+            val fallbackPackage = if (isMatch) SofascoreNotificationListenerService.SOFASCORE_PACKAGE else entry.packageName
+            val title = entry.title ?: (if (isMatch) "${entry.homeTeam} - ${entry.awayTeam}" else "")
+
+            return ResolvedNotifContent(
+                title = title,
+                text = entry.text.orEmpty(),
+                image = entry.imageFile?.let { BitmapFactory.decodeFile(it.path) },
+                dismissIntent = dismissIntent,
+                openIntent = liveAllNotifIntents[entryId] ?: fallbackPackage?.let { launchAppPendingIntent(context, it) },
+                actions = liveAllNotifActions[entryId] ?: emptyList(),
+                iconPackageName = fallbackPackage
+            )
+        }
 
         /**
          * Resolves a [WidgetPeekPrefs.Peek] pointer into everything [renderLatestFormat] needs, by
@@ -1175,11 +1202,11 @@ class NowBarWidgetProvider : AppWidgetProvider() {
          * longer there (aged out of the capped top-5, or removed elsewhere) — buildViewsUnsafe
          * treats that as "close the peek and fall back to that view's tile grid".
          */
-        private fun resolvePeek(context: Context, peek: WidgetPeekPrefs.Peek): ResolvedPeek? {
+        private fun resolvePeek(context: Context, peek: WidgetPeekPrefs.Peek): ResolvedNotifContent? {
             return when (peek.source) {
                 WidgetPeekPrefs.Source.SPORT -> {
                     val match = SofascoreWidgetStore.get(context).firstOrNull { it.key == peek.entryId } ?: return null
-                    ResolvedPeek(
+                    ResolvedNotifContent(
                         title = match.title,
                         text = match.text,
                         image = match.imageFile?.let { BitmapFactory.decodeFile(it.path) },
@@ -1193,36 +1220,22 @@ class NowBarWidgetProvider : AppWidgetProvider() {
                 WidgetPeekPrefs.Source.ALL_NOTIFS -> {
                     val entry = WidgetAllNotificationsStore.get(context)
                         .firstOrNull { allNotifEntryId(it.key, it.postTimeMillis) == peek.entryId } ?: return null
-                    val entryId = allNotifEntryId(entry.key, entry.postTimeMillis)
-                    val isMatch = entry.kind == WidgetAllNotificationsStore.Kind.SOFASCORE_MATCH
-
-                    val dismissIntent = if (isMatch) {
-                        sofascoreDismissPendingIntent(context, entry.key, entry.postTimeMillis)
-                    } else {
-                        dismissPendingIntent(context, entry.key, entry.postTimeMillis)
-                    }
-                    val fallbackPackage = if (isMatch) SofascoreNotificationListenerService.SOFASCORE_PACKAGE else entry.packageName
-                    val title = entry.title ?: (if (isMatch) "${entry.homeTeam} - ${entry.awayTeam}" else "")
-
-                    ResolvedPeek(
-                        title = title,
-                        text = entry.text.orEmpty(),
-                        image = entry.imageFile?.let { BitmapFactory.decodeFile(it.path) },
-                        dismissIntent = dismissIntent,
-                        openIntent = liveAllNotifIntents[entryId] ?: fallbackPackage?.let { launchAppPendingIntent(context, it) },
-                        actions = liveAllNotifActions[entryId] ?: emptyList(),
-                        iconPackageName = fallbackPackage
-                    )
+                    resolveAllNotifEntryContent(context, entry)
                 }
             }
         }
 
         /**
-         * Dismiss target for a GENERIC notification (the true LATEST view's own dismiss button, or
-         * a GENERIC "peek" — see resolvePeek), routed through MirrorNotificationListener exactly as
-         * before. [postTimeMillis] (NEW 18/09/2026, defaults to -1L/"unknown" for the true-LATEST
-         * call site, which never tracked it) lets MirrorNotificationListener.closePeekIfShowing
-         * match an ALL_NOTIFS peek precisely — see EXTRA_DISMISS_POST_TIME's doc there.
+         * Dismiss target for a GENERIC notification — the true LATEST view's own dismiss button
+         * (via [applyLatestContent]/[resolveAllNotifEntryContent]) or a GENERIC "peek" alike, both
+         * always supplying the entry's real [postTimeMillis] since the 20/09/2026 merge (both now
+         * come from the same WidgetAllNotificationsStore.Data, which always has one — the
+         * true-LATEST call site used to have no postTime of its own to send, back when it read a
+         * separate WidgetNotificationStore that didn't track it, hence the -1L/"unknown" default
+         * kept here for any other caller that genuinely doesn't have one). Routed through
+         * MirrorNotificationListener. [postTimeMillis] (NEW 18/09/2026) lets
+         * MirrorNotificationListener.closePeekIfShowing match an ALL_NOTIFS peek precisely — see
+         * EXTRA_DISMISS_POST_TIME's doc there.
          */
         private fun dismissPendingIntent(context: Context, key: String, postTimeMillis: Long = -1L): PendingIntent {
             val intent = Intent(context, MirrorNotificationListener::class.java).apply {
