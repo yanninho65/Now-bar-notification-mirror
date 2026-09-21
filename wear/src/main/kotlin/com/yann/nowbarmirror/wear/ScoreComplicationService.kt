@@ -5,6 +5,11 @@ import android.graphics.drawable.Icon
 import androidx.wear.watchface.complications.data.*
 import androidx.wear.watchface.complications.datasource.ComplicationDataSourceService
 import androidx.wear.watchface.complications.datasource.ComplicationRequest
+import com.google.android.gms.tasks.Tasks
+import com.google.android.gms.wearable.DataItemBuffer
+import com.google.android.gms.wearable.DataMapItem
+import com.google.android.gms.wearable.Wearable
+import java.util.concurrent.TimeUnit
 
 /**
  * Fournit les données de score pour les emplacements de complication de
@@ -27,6 +32,17 @@ import androidx.wear.watchface.complications.datasource.ComplicationRequest
  * MatchClock n'a plus de minute à recalculer par lui-même (voir
  * MatchClock.kt : le statut affiché vient tel quel de TheSportsDB en
  * football, de Live Tennis API en tennis).
+ *
+ * AJOUTÉ (repli sur un changement de cadran/redémarrage du processus watch) : comme
+ * NotificationComplicationService.fetchPersistedNotification, [fetchPersistedMatch] relit
+ * directement le DataItem "/match" déjà persistant côté Wear Data Layer API quand
+ * MatchScoreStore est vide — MatchScoreStore étant un simple cache en mémoire, il repart de
+ * `null` à chaque fois que le système tue le processus watch entre deux requêtes de
+ * complication (fréquent, en particulier juste après avoir changé de cadran, qui force le
+ * système à réattacher les fournisseurs de complications). Sans ce repli, "Score en direct"
+ * réaffichait "Aucun match" jusqu'à la prochaine mise à jour poussée par le téléphone — ce que
+ * seul un forçage d'arrêt de l'appli téléphone (qui relance ses NotificationListenerServices et
+ * donc leur re-synchronisation au reconnect) redéclenchait dans l'immédiat.
  *
  * Un tap sur la complication ouvre l'app Sofascore SUR LA MONTRE (demandé
  * par Yann le 15/09/2026) — voir [sofascoreTapAction]. Nécessite que
@@ -56,13 +72,15 @@ class ScoreComplicationService : ComplicationDataSourceService() {
 
     companion object {
         private const val SOFASCORE_PACKAGE = "com.sofascore.results"
+        private const val MATCH_PATH = "/match"
+        private const val FETCH_TIMEOUT_SECONDS = 2L
     }
 
     override fun onComplicationRequest(
         request: ComplicationRequest,
         listener: ComplicationRequestListener
     ) {
-        val match = MatchScoreStore.current
+        val match = MatchScoreStore.current ?: fetchPersistedMatch()
 
         val data: ComplicationData = when (request.complicationType) {
             ComplicationType.LONG_TEXT -> buildLongText(match)
@@ -71,6 +89,38 @@ class ScoreComplicationService : ComplicationDataSourceService() {
         }
 
         listener.onComplicationData(data)
+    }
+
+    /**
+     * Repli quand MatchScoreStore est vide (processus watch relancé depuis le dernier envoi du
+     * téléphone — voir le commentaire de tête de fichier). Relit directement le DataItem "/match"
+     * déjà persistant côté Wear Data Layer API plutôt que d'attendre passivement le prochain
+     * onDataChanged (qui ne se redéclenche PAS pour un DataItem déjà synchronisé avant le
+     * redémarrage — seul un vrai changement le fait) — même logique que
+     * NotificationComplicationService.fetchPersistedNotification.
+     *
+     * Appel bloquant, mais purement local (Play Services, pas de réseau — la Data Layer API
+     * synchronise déjà en tâche de fond) : sans risque ici pour les quelques dizaines/centaines de
+     * ms que ça prend, borné à FETCH_TIMEOUT_SECONDS par précaution. `null` si le DataItem n'existe
+     * pas encore (aucun match jamais envoyé), s'il indique "cleared", ou si l'appel échoue/expire —
+     * repli identique à MatchScoreStore.current == null.
+     */
+    private fun fetchPersistedMatch(): MatchScore? {
+        return try {
+            val items: DataItemBuffer = Tasks.await(
+                Wearable.getDataClient(this).getDataItems(),
+                FETCH_TIMEOUT_SECONDS, TimeUnit.SECONDS
+            )
+            try {
+                val item = items.firstOrNull { it.uri.path == MATCH_PATH } ?: return null
+                val dataMap = DataMapItem.fromDataItem(item).dataMap
+                MatchDataCodec.decode(this, dataMap)?.also { MatchScoreStore.current = it }
+            } finally {
+                items.release()
+            }
+        } catch (e: Exception) {
+            null
+        }
     }
 
     override fun getPreviewData(type: ComplicationType): ComplicationData? {
