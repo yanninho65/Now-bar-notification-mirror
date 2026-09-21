@@ -58,8 +58,10 @@ Sofascore is the source of truth for match identity (team names, image) — API 
 
 Two independent complications, assignable separately on the watch face:
 
-- **"Score en direct"** (`ScoreComplicationService`, `LONG_TEXT`/`SMALL_IMAGE`) — the active Sofascore match. `WatchSync` pushes it to the watch (`MatchListenerService`) over the Wear Data Layer API (path `/match`) whenever it changes; `MatchClock` formats status/period per sport, `ComplicationImageComposer` composes the `SMALL_IMAGE` bitmap. Tapping opens Sofascore on the watch.
-- **"Notification"** (`NotificationComplicationService`, `SMALL_IMAGE` only) — the same "dernière notif" the lock-screen widget shows (any mirrored app, ALL/LATEST/Sofascore, no distinction), kept as its own complication rather than folded into "Score en direct" so the two can be assigned to different slots. `WatchNotificationSync` (phone, path `/notification`) is called from `NowBarWidgetProvider.syncWatchToLatest()`, on every widget rebuild, reading the same `WidgetAllNotificationsStore` entry the widget's own "Dernière notif" view derives from — one source of truth, no separate store to drift out of sync. `NotificationDataListenerService` receives live updates; `NotificationComplicationService.fetchPersistedNotification` re-reads the Data Layer item directly as a fallback when the watch process was killed and restarted since the last push (`onDataChanged` doesn't re-fire on its own for a DataItem already synced before that restart). No tap action yet (not every mirrored app has a Wear OS counterpart to open).
+- **"Score en direct"** (`ScoreComplicationService`, `LONG_TEXT`/`SMALL_IMAGE`) — the active Sofascore match. `WatchSync` pushes it to the watch (`MatchListenerService`) over the Wear Data Layer API (path `/match`) whenever it changes; `MatchClock` formats status/period per sport, `ComplicationImageComposer` composes the `SMALL_IMAGE` bitmap. `ScoreComplicationService.fetchPersistedMatch` re-reads the Data Layer item directly as a fallback when the watch process was killed and restarted since the last push (`onDataChanged` doesn't re-fire on its own for a DataItem already synced before that restart) — decoding shared with `MatchListenerService` via `MatchDataCodec`. Tapping opens Sofascore on the watch.
+- **"Notification"** (`NotificationComplicationService`, `SMALL_IMAGE` only) — the same "dernière notif" the lock-screen widget shows (any mirrored app, ALL/LATEST/Sofascore, no distinction), kept as its own complication rather than folded into "Score en direct" so the two can be assigned to different slots. `WatchNotificationSync` (phone, path `/notification`) is called from `NowBarWidgetProvider.syncWatchToLatest()`, on every widget rebuild, reading the same `WidgetAllNotificationsStore` entry the widget's own "Dernière notif" view derives from — one source of truth, no separate store to drift out of sync. `NotificationDataListenerService` receives live updates; `NotificationComplicationService.fetchPersistedNotification` re-reads the Data Layer item directly as a fallback, same principle and same `onDataChanged` limitation as "Score en direct" above, decoding shared with `NotificationDataListenerService` via `NotificationDataCodec`. No tap action yet (not every mirrored app has a Wear OS counterpart to open).
+
+**Known issue**: both complications can still show empty/stale after switching watch faces even with the fallback above, and are reported fixed (both at once) only by force-stopping the phone app — which suggests the phone-side push itself is being suppressed (Samsung battery/background-app management freezing the two `NotificationListenerService`s) rather than a watch-side cache-miss. Not yet root-caused; check the phone app's battery settings (unrestricted / not in sleeping-apps list) before assuming the watch side is still at fault.
 
 Setup: assign "Score en direct" to a `LONG_TEXT` and/or round `SMALL_IMAGE` slot, and/or "Notification" to another round `SMALL_IMAGE` slot, on the watch face.
 
@@ -124,10 +126,11 @@ app/src/main/java/com/yann/nowbarmirror/
     └── WidgetViewModePrefs.kt          which of the three views is showing, + which of Sport/Toutes-notifs was shown last
 
 wear/src/main/kotlin/com/yann/nowbarmirror/wear/
-├── ScoreComplicationService.kt        "Score en direct" — LONG_TEXT / SMALL_IMAGE complication data source
+├── ScoreComplicationService.kt        "Score en direct" — LONG_TEXT / SMALL_IMAGE complication data source, with a persisted-DataItem fallback for a freshly-restarted watch process
 ├── MatchListenerService.kt            receives match data from the phone (path /match)
+├── MatchDataCodec.kt                  shared decode of the /match DataMap
 ├── MatchClock.kt                      formats status/period per sport
-├── MatchScore.kt                      score text, incl. the "who just scored" bracket
+├── MatchScore.kt                      score text, incl. the "who just scored" bracket, + in-memory MatchScoreStore
 ├── ComplicationImageComposer.kt       composes the SMALL_IMAGE bitmap for both complications
 ├── NotificationComplicationService.kt "Notification" — SMALL_IMAGE-only complication data source, with a persisted-DataItem fallback for a freshly-restarted watch process
 ├── NotificationDataListenerService.kt receives "Dernière notif" updates from the phone (path /notification)
@@ -144,7 +147,7 @@ wear/src/main/kotlin/com/yann/nowbarmirror/wear/
 - Toutes-notifs is a capped-at-5 "recently received" list, not a log — an entry drops as soon as its source notification is gone (shade, source app, "effacer tout"), not kept for reference.
 - Declares `<queries>` for `MAIN`/`LAUNCHER` (app-selection screen) and `com.sofascore.results` (Sport tab), required on API 30+ package-visibility rules.
 - Sport tab depends entirely on Sofascore's own notification wording — a wording change on their end could break parsing until updated here. "Match commencé" briefly shows 0-0 with football-style status on every sport until sport-specific vocabulary kicks in (cosmetic, no functional impact).
-- Both watch complications only update live while both devices are reachable over the Wear Data Layer API (paired, Bluetooth/Wi-Fi connected); "Notification" additionally re-reads the last persisted Data Layer item on its own if the watch process restarted since the last live push (see `NotificationComplicationService.fetchPersistedNotification`), "Score en direct" does not.
+- Both watch complications only update live while both devices are reachable over the Wear Data Layer API (paired, Bluetooth/Wi-Fi connected); both also re-read the last persisted Data Layer item on their own if the watch process restarted since the last live push (`ScoreComplicationService.fetchPersistedMatch`, `NotificationComplicationService.fetchPersistedNotification`) — see the Known issue under [Watch complications](#watch-complications-wear) for a case this doesn't fully cover.
 
 ## Build
 
