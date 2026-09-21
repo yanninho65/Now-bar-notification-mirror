@@ -50,4 +50,13 @@ dependencies {
     implementation("androidx.core:core-ktx:1.17.0")
     implementation("androidx.wear.watchface:watchface-complications-data-source:1.3.0")
     implementation("com.google.android.gms:play-services-wearable:20.0.1")
+
+    // NEW 21/09/2026, écran de détail plein écran de la complication "Notification" (voir
+    // NotificationDetailActivity.kt) : SwipeDismissFrameLayout (geste de balayage standard Wear OS
+    // pour fermer un écran, comme les apps natives Galaxy Watch) + BoxInsetLayout (garde le contenu
+    // dans la zone "sûre" d'un écran rond). Bibliothèque de Views classique (PAS Compose) pour
+    // rester cohérent avec le reste de cette app (aucun module ici n'utilise Compose) et éviter
+    // d'introduire le plugin compilateur Compose dans une CI qui ne peut pas être testée localement
+    // (voir README, section Build : uniquement GitHub Actions puis installation manuelle).
+    implementation("androidx.wear:wear:1.3.0")
 }
