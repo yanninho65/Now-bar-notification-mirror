@@ -14,6 +14,16 @@
         android:supportsRtl="true"
         android:theme="@android:style/Theme.DeviceDefault">
 
+        <!-- NEW 21/09/2026 : écran de détail ouvert par un tap sur la complication "Notification"
+             (voir NotificationComplicationService.notificationDetailTapAction et
+             NotificationDetailActivity.kt). exported="true" : lancée depuis un PendingIntent tenu
+             par le système/le cadran (processus externe), pas par cette app elle-même. Thème noir
+             plein écran, sans barre de titre (style Galaxy Watch). -->
+        <activity
+            android:name=".NotificationDetailActivity"
+            android:exported="true"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+
         <service
             android:name=".ScoreComplicationService"
             android:exported="true"
