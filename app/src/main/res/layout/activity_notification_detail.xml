@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    NEW 21/09/2026 — écran plein écran ouvert par un tap sur la complication "Notification" (voir
+    NotificationDetailActivity.kt), style Galaxy Watch (fond noir, coins arrondis, gros pictogramme
+    en haut, boutons ronds/en pilule) : Yann, "ça ouvre une fenêtre avec en haut l'image et logo de
+    la notif, la notification en grand pour lire le texte en entier et les boutons d'actions [...]
+    et la possibilité de supprimer la notif. Adopter le style galaxy watch."
+
+    SwipeDismissFrameLayout = geste standard Wear OS/Galaxy Watch pour fermer un écran (balayage
+    depuis le bord gauche) — voir NotificationDetailActivity.onCreate. Le contenu est dans un
+    ScrollView classique plutôt qu'un BoxInsetLayout : une marge horizontale généreuse fixe
+    (detail_side_padding) suffit à rester dans la zone "sûre" d'un écran rond sans dépendre d'une
+    disposition plus complexe à mettre au point sans pouvoir compiler/tester localement (voir
+    README, section Build).
+-->
+<androidx.wear.widget.SwipeDismissFrameLayout
+    android:id="@+id/swipe_layout"
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/detail_background">
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scrollbars="none">
+
+        <LinearLayout
+            android:id="@+id/detail_content"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:gravity="center_horizontal"
+            android:paddingStart="24dp"
+            android:paddingEnd="24dp"
+            android:paddingTop="28dp"
+            android:paddingBottom="20dp">
+
+            <!-- En-tête : icône de l'app source + nom -->
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginBottom="10dp">
+
+                <ImageView
+                    android:id="@+id/detail_app_icon"
+                    android:layout_width="18dp"
+                    android:layout_height="18dp"
+                    android:layout_marginEnd="6dp"
+                    android:visibility="gone"
+                    android:contentDescription="@null" />
+
+                <TextView
+                    android:id="@+id/detail_app_name"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="@color/detail_text_secondary"
+                    android:textSize="12sp"
+                    android:maxLines="1"
+                    android:ellipsize="end" />
+            </LinearLayout>
+
+            <!-- Image/logo de la notif, en grand, en haut -->
+            <ImageView
+                android:id="@+id/detail_image"
+                android:layout_width="88dp"
+                android:layout_height="88dp"
+                android:layout_marginBottom="14dp"
+                android:visibility="gone"
+                android:scaleType="centerCrop"
+                android:contentDescription="@null" />
+
+            <!-- Titre -->
+            <TextView
+                android:id="@+id/detail_title"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="@color/detail_text_primary"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                android:gravity="center"
+                android:layout_marginBottom="8dp" />
+
+            <!-- Texte complet (notification simple, sans historique) -->
+            <TextView
+                android:id="@+id/detail_text"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="@color/detail_text_primary"
+                android:textSize="14sp"
+                android:gravity="center"
+                android:visibility="gone"
+                android:layout_marginBottom="16dp" />
+
+            <!-- Historique (messages de la conversation / événements du match) -->
+            <LinearLayout
+                android:id="@+id/detail_lines_container"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:visibility="gone"
+                android:layout_marginBottom="16dp" />
+
+            <!-- Boutons d'action de la notification -->
+            <LinearLayout
+                android:id="@+id/detail_actions_container"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center"
+                android:visibility="gone"
+                android:layout_marginBottom="18dp" />
+
+            <!-- Suppression -->
+            <ImageButton
+                android:id="@+id/detail_delete_button"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="@drawable/bg_delete_button"
+                android:src="@drawable/ic_delete"
+                android:padding="12dp"
+                android:contentDescription="@string/action_delete" />
+
+        </LinearLayout>
+    </ScrollView>
+</androidx.wear.widget.SwipeDismissFrameLayout>
