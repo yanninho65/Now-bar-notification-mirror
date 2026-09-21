@@ -29,7 +29,13 @@ object NotificationDataCodec {
             text = dataMap.getString("text").orEmpty(),
             packageName = dataMap.getString("packageName").orEmpty(),
             image = decodeImageAsset(context, dataMap, "notifImage"),
-            appIcon = decodeImageAsset(context, dataMap, "appIcon")
+            appIcon = decodeImageAsset(context, dataMap, "appIcon"),
+            // NEW 21/09/2026, écran de détail — voir NotificationInfo's doc.
+            detailLines = dataMap.getStringArrayList("detailLines") ?: emptyList(),
+            actionLabels = dataMap.getStringArrayList("actionLabels") ?: emptyList(),
+            entryKey = dataMap.getString("entryKey").orEmpty(),
+            entryPostTimeMillis = dataMap.getLong("entryPostTimeMillis", -1L),
+            kind = dataMap.getString("kind").orEmpty()
         )
     }
 

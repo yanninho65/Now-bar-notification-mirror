@@ -16,13 +16,28 @@ import android.graphics.Bitmap
  * ComplicationImageComposer.composeNotificationImage pour comment les deux se combinent : badge
  * en bas à droite de [image] si les deux sont là, [appIcon] seul en repli si [image] est absente
  * (même règle que le widget côté téléphone, NowBarWidgetProvider.applyAllNotifSlotAsGeneric).
+ *
+ * NEW 21/09/2026, écran de détail (voir NotificationDetailActivity.kt) : [detailLines] est
+ * l'historique déjà résolu côté téléphone (messages de la conversation / lignes d'événements du
+ * match Sofascore — voir mobile/WatchNotificationSync.send's doc), vide pour une notification
+ * générique sans historique particulier. [actionLabels] sont juste les LIBELLÉS des boutons
+ * d'action (aucun PendingIntent ne peut traverser vers la montre) ; un tap sur le bouton N envoie
+ * à [PhoneRelay] une demande "actionIndex=N" adressée par [entryKey]/[entryPostTimeMillis]/[kind]
+ * — l'identité de CETTE entrée précise côté téléphone (voir mobile/NowBarWidgetProvider.fireAction/
+ * dismissEntry), pour que le téléphone retrouve le vrai PendingIntent (ou déclenche la vraie
+ * suppression) dans son propre cache en mémoire plutôt que d'avoir à faire deviner la montre.
  */
 data class NotificationInfo(
     val title: String,
     val text: String,
     val packageName: String,
     val image: Bitmap?,
-    val appIcon: Bitmap?
+    val appIcon: Bitmap?,
+    val detailLines: List<String> = emptyList(),
+    val actionLabels: List<String> = emptyList(),
+    val entryKey: String = "",
+    val entryPostTimeMillis: Long = -1L,
+    val kind: String = ""
 )
 
 /**

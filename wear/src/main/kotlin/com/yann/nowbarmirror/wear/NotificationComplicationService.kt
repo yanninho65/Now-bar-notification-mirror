@@ -1,5 +1,7 @@
 package com.yann.nowbarmirror.wear
 
+import android.app.PendingIntent
+import android.content.Intent
 import android.graphics.drawable.Icon
 import androidx.wear.watchface.complications.data.*
 import androidx.wear.watchface.complications.datasource.ComplicationDataSourceService
@@ -23,11 +25,24 @@ import java.util.concurrent.TimeUnit
  * (Wear Data Layer API, chemin "/notification"). UPDATE_PERIOD_SECONDS=60 dans le manifest, même
  * raisonnement que ScoreComplicationService.
  *
- * Pas d'action au tap pour l'instant (contrairement à Score en direct, qui ouvre Sofascore sur la
- * montre) : rien ne garantit qu'une app source quelconque ait un équivalent Wear OS installé sur
- * la montre — à revoir si besoin.
+ * NEW 21/09/2026 (Yann : "quand je clique sur la complication notification ça ouvre une fenêtre
+ * [...]") : un tap ouvre désormais [NotificationDetailActivity], plutôt que d'essayer d'ouvrir un
+ * hypothétique équivalent Wear OS de l'app source (contrairement à Score en direct, qui ouvre
+ * Sofascore lui-même) — rien ne garantit qu'une app source quelconque en ait un installé sur la
+ * montre, alors que la fenêtre de détail, elle, est toujours disponible.
  */
 class NotificationComplicationService : ComplicationDataSourceService() {
+
+    private val notificationDetailTapAction: PendingIntent
+        get() {
+            val intent = Intent(this, NotificationDetailActivity::class.java)
+            return PendingIntent.getActivity(
+                this,
+                0,
+                intent,
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            )
+        }
 
     override fun onComplicationRequest(
         request: ComplicationRequest,
@@ -107,7 +122,7 @@ class NotificationComplicationService : ComplicationDataSourceService() {
         return SmallImageComplicationData.Builder(
             smallImage = SmallImage.Builder(icon, SmallImageType.PHOTO).build(),
             contentDescription = PlainComplicationText.Builder(description).build()
-        ).build()
+        ).setTapAction(notificationDetailTapAction).build()
     }
 
     companion object {
