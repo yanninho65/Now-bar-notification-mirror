@@ -274,7 +274,16 @@ class SofascoreNotificationListenerService : NotificationListenerService() {
                 apiSource = match.source.name,
                 image = extractNotificationImage(sbn),
                 contentIntent = sbn.notification.contentIntent,
-                actions = widgetActionsFor(sbn.notification)
+                actions = widgetActionsFor(sbn.notification),
+                // NEW 21/09/2026, watch "Notification" complication detail screen (Yann: "pour
+                // [...] Sofascore, afficher toutes [...] celles du match" ; précision : "il suffit
+                // de lire le centre de notifs [...] ce que l'application fait déjà normalement") —
+                // same raw lines [collectLines] already extracts for parsing (EXTRA_TEXT_LINES,
+                // Inbox style, capped at 6 by Android itself, already most-recent-first — see the
+                // class doc's "CONFIRMÉ SUR APPAREIL" section), just surfaced as-is instead of only
+                // feeding the parser. No new store needed: this match's whole notification already
+                // carries every event line Sofascore has posted for it so far.
+                detailLines = collectLines(sbn)
             )
         } catch (_: Throwable) {
             null
