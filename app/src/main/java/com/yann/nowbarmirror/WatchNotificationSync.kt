@@ -14,22 +14,24 @@ import com.yann.nowbarmirror.sport.WatchSync
 /**
  * Envoie la "dernière notification" (toutes apps mirorées confondues, ALL/LATEST et Sofascore
  * compris, aucune distinction — même source que la vue "Dernière notif" du widget écran de
- * verrouillage, voir widget/WidgetNotificationStore.kt) à la montre via la Wear Data Layer API,
- * pour la complication SMALL_IMAGE ronde "Notification" (wear/NotificationComplicationService.kt)
- * demandée par Yann le 20/09/2026, pensée pour le rond central du tableau de bord Samsung et
- * volontairement distincte de "Score en direct" pour pouvoir assigner les deux séparément.
+ * verrouillage : l'entrée la plus récente de widget/WidgetAllNotificationsStore.kt) à la montre
+ * via la Wear Data Layer API, pour la complication SMALL_IMAGE ronde "Notification"
+ * (wear/NotificationComplicationService.kt) demandée par Yann le 20/09/2026, pensée pour le rond
+ * central du tableau de bord Samsung et volontairement distincte de "Score en direct" pour
+ * pouvoir assigner les deux séparément.
  *
  * Chemin dédié "/notification", séparé de "/match" (sport/WatchSync.kt) — même principe que les
  * deux NotificationListenerServices déjà séparés côté téléphone (voir README, section "Deux
  * accès notifications séparés").
  *
- * [send] est appelé depuis NowBarWidgetProvider.pushLive() (le même point d'entrée qui alimente
- * déjà WidgetNotificationStore), donc couvre automatiquement les mêmes cas que la vue "Dernière
- * notif" : nouvelle notif, mise à jour en place, et promotion du survivant suivant après
- * suppression ("revenir à la précédente", voir LatestModePrefs) — tout repasse par pushLive().
- * [sendCleared] est appelé à chaque endroit où MirrorNotificationListener vide
- * WidgetNotificationStore, pour garder la montre synchronisée avec le widget plutôt que figée sur
- * la dernière notif connue.
+ * MERGED 20/09/2026 (voir WidgetAllNotificationsStore's class doc) — [send]/[sendCleared] sont
+ * maintenant appelés depuis NowBarWidgetProvider.syncWatchToLatest(), sur chaque reconstruction du
+ * widget plutôt que depuis un point d'entrée dédié (l'ancien pushLive(), qui écrivait aussi dans
+ * une WidgetNotificationStore séparée devenue obsolète) : couvre donc automatiquement tous les cas
+ * qui font bouger l'entrée la plus récente de "Toutes notifs" — nouvelle notif, mise à jour en
+ * place, promotion du survivant suivant après suppression ("revenir à la précédente", voir
+ * LatestModePrefs), ou simplement une suppression qui libère la place pour une autre notif déjà
+ * là — sans qu'un nouveau site de mutation puisse oublier d'appeler l'un ou l'autre.
  *
  * Réutilise [WatchSync.bitmapToAsset] (déjà utilisé pour notifImage côté Sport) plutôt que de
  * dupliquer la conversion Bitmap -> Asset.
@@ -62,11 +64,11 @@ object WatchNotificationSync {
     }
 
     /**
-     * Signale à la montre qu'il n'y a plus de notification éligible à afficher (dernier miroir
-     * supprimé côté téléphone, "revenir à la précédente" désactivé ou sans survivant — voir
-     * MirrorNotificationListener.kt, chaque site qui vide WidgetNotificationStore). La
-     * complication réaffiche alors son état "aucune notification" au lieu de rester bloquée sur
-     * la dernière connue.
+     * Signale à la montre qu'il n'y a plus de notification éligible à afficher — appelé par
+     * NowBarWidgetProvider.syncWatchToLatest() quand WidgetAllNotificationsStore devient vide
+     * (dernier miroir supprimé côté téléphone, "revenir à la précédente" désactivé ou sans
+     * survivant, et plus aucune notif ALL restante non plus). La complication réaffiche alors son
+     * état "aucune notification" au lieu de rester bloquée sur la dernière connue.
      */
     fun sendCleared(context: Context) {
         val request = PutDataMapRequest.create(NOTIFICATION_PATH).apply {

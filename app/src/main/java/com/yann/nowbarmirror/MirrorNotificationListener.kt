@@ -27,7 +27,6 @@ import com.yann.nowbarmirror.widget.AllNotifEntryPush
 import com.yann.nowbarmirror.widget.NowBarWidgetProvider
 import com.yann.nowbarmirror.widget.WidgetAction
 import com.yann.nowbarmirror.widget.WidgetAllNotificationsStore
-import com.yann.nowbarmirror.widget.WidgetNotificationStore
 import java.util.concurrent.atomic.AtomicBoolean
 
 class MirrorNotificationListener : NotificationListenerService() {
@@ -40,12 +39,9 @@ class MirrorNotificationListener : NotificationListenerService() {
         const val EXTRA_MIRROR = "mirror.is_mirror"
         const val ACTION_DISMISS_WIDGET = "com.yann.nowbarmirror.widget.ACTION_DISMISS"
         const val EXTRA_DISMISS_KEY = "mirror.widget.dismiss_key"
-        // NEW 18/09/2026, "peek" feature (see WidgetPeekPrefs' class doc) — the true-LATEST
-        // dismiss button doesn't track postTime for WidgetNotificationStore, so it's sent as -1L
-        // ("unknown") there; a peek's own dismiss button (see NowBarWidgetProvider.
-        // dismissPendingIntent) always sends the real value, letting closePeekIfShowing below
-        // match an ALL_NOTIFS peek's exact (key, postTime) identity precisely instead of falling
-        // back to a key-prefix match.
+        // NEW 18/09/2026, "peek" feature (see WidgetPeekPrefs' class doc) — carries the exact
+        // posting being dismissed, letting closePeekIfShowing below match an ALL_NOTIFS peek's
+        // exact (key, postTime) identity precisely instead of falling back to a key-prefix match.
         const val EXTRA_DISMISS_POST_TIME = "mirror.widget.dismiss_post_time"
     }
 
@@ -102,13 +98,17 @@ class MirrorNotificationListener : NotificationListenerService() {
             if (key != null) {
                 if (ready.get()) cancelOriginal(key) else pendingDismissKey = key
             }
-            // Clear the widget right away instead of waiting for the onNotificationRemoved
+            // Clear the widget/watch right away instead of waiting for the onNotificationRemoved
             // round-trip, so the tap always feels instant even if cancelOriginal() above is
-            // deferred (not yet connected) or silently no-ops (original already gone).
+            // deferred (not yet connected) or silently no-ops (original already gone). "Dernière
+            // notif"/la montre n'ont plus d'état séparé à vider (MERGED 20/09/2026, voir
+            // WidgetAllNotificationsStore's class doc) — retirer directement l'entrée de l'historique
+            // partagé suffit : requestUpdate() la redérivera correctement, et repeuplera "Dernière
+            // notif" à partir de l'entrée suivante si elle existait déjà. No-op si [key] ne
+            // correspond à aucune entrée suivie ici (ex. app non mirorée dans "Toutes notifs").
             try {
-                if (key != null && WidgetNotificationStore.get(applicationContext)?.key == key) {
-                    WidgetNotificationStore.clear(applicationContext)
-                    WatchNotificationSync.sendCleared(applicationContext)
+                if (key != null) {
+                    WidgetAllNotificationsStore.remove(applicationContext, key, postTimeMillis)
                     NowBarWidgetProvider.requestUpdate(applicationContext)
                 }
             } catch (_: Throwable) {
@@ -117,9 +117,9 @@ class MirrorNotificationListener : NotificationListenerService() {
             }
             // Same instant feedback for a "peek" (see WidgetPeekPrefs' class doc): this dismiss
             // button might be a peek's own rather than the true-LATEST one, in which case the
-            // WidgetNotificationStore check above is a no-op — closePeekIfShowing covers that case
-            // independently (Yann: "Si je supprime la notification [...] revenir automatiquement
-            // aux icônes").
+            // remove() above may be a no-op (the peeked entry isn't "Dernière notif"'s own) —
+            // closePeekIfShowing covers that case independently (Yann: "Si je supprime la
+            // notification [...] revenir automatiquement aux icônes").
             try {
                 if (key != null) {
                     NowBarWidgetProvider.closePeekIfShowing(applicationContext, key, postTimeMillis)
@@ -170,23 +170,9 @@ class MirrorNotificationListener : NotificationListenerService() {
             // here take down this service.
         }
 
-        // Same staleness concern as the mirrors below: if the widget was pointing at a
-        // notification that's no longer posted (removed while this process was dead), there
-        // will never be an onNotificationRemoved callback for it — clear it explicitly instead
-        // of leaving a dismiss button on screen that dismisses nothing.
-        try {
-            WidgetNotificationStore.get(applicationContext)?.let { widgetData ->
-                if (all.none { it.key == widgetData.key }) {
-                    WidgetNotificationStore.clear(applicationContext)
-                    WatchNotificationSync.sendCleared(applicationContext)
-                    NowBarWidgetProvider.requestUpdate(applicationContext)
-                }
-            }
-        } catch (_: Throwable) {
-            // The widget is a nice-to-have on top of the core mirror — never let a failure
-            // here take down this service.
-        }
-
+        // "Dernière notif" (widget + complication montre) n'a plus d'état séparé à revérifier ici
+        // (MERGED 20/09/2026, voir WidgetAllNotificationsStore's class doc) — elle se dérive
+        // maintenant de cette même liste, déjà nettoyée juste au-dessus par pruneAgainstActive.
         val ourMirrors = all.filter { it.packageName == packageName }
 
         for (mirrorSbn in ourMirrors) {
@@ -258,19 +244,6 @@ class MirrorNotificationListener : NotificationListenerService() {
                 mirror(sbn, MIRROR_ID)
             }
         }
-
-        // "Dernière notif" (widget texte + complication montre) ne fait aucune distinction
-        // ALL/LATEST — voir WidgetNotificationStore, doc de classe — mais elle n'est repeuplée
-        // par mirror()/pushLive() ci-dessus que pour (a) une notif ALL fraîchement mirrorée à
-        // l'instant (pas celles déjà mirorées avant ce redémarrage, exclues par
-        // `it.key !in allModeMirrors`) et (b) le slot LATEST partagé. Une notif ALL déjà mirorée
-        // avant le redémarrage ne repasse donc jamais par pushLive() ici : si en plus le clear de
-        // staleness plus haut a vidé WidgetNotificationStore (son ancienne notif n'est plus
-        // active) et qu'aucune notif LATEST n'est active pour reprendre le slot juste au-dessus,
-        // le widget et la montre restent bloqués sur "Aucune notification" alors que ces notifs
-        // ALL sont toujours là (Yann, 20/09/2026 : "widget et complication montre marquent
-        // aucune notification alors qu'il y en a plein"). Repli, voir repopulateWidgetLatestIfEmpty.
-        repopulateWidgetLatestIfEmpty(all.toList())
 
         // Belt-and-braces top-up: everything eligible that's ALREADY active gets one more pass
         // through "Toutes notifs" here, in case any of it was missed above (e.g. an ALL-mode
@@ -414,22 +387,6 @@ class MirrorNotificationListener : NotificationListenerService() {
             return
         }
 
-        // The widget shows whichever eligible notification was mirrored most recently,
-        // decoupled from ALL vs LATEST — clear it whenever ITS specific original disappears,
-        // regardless of which mirror-mode branch below ends up handling the removal.
-        try {
-            WidgetNotificationStore.get(applicationContext)?.let { widgetData ->
-                if (widgetData.key == sbn.key) {
-                    WidgetNotificationStore.clear(applicationContext)
-                    WatchNotificationSync.sendCleared(applicationContext)
-                    NowBarWidgetProvider.requestUpdate(applicationContext)
-                }
-            }
-        } catch (_: Throwable) {
-            // The widget is a nice-to-have on top of the core mirror — never let a failure
-            // here take down this service.
-        }
-
         // "Toutes notifs" (17/09/2026, Yann: "Si une notification a été supprimée du centre de
         // notifs, elle ne doit plus apparaître dans le widget") — unlike the single "latest" slot
         // above, this history can hold this notification even when it ISN'T the current latest
@@ -474,48 +431,9 @@ class MirrorNotificationListener : NotificationListenerService() {
                 latestOriginalKey = null
                 promoteNextLatestMode()
             }
-            try {
-                activeNotifications?.let { repopulateWidgetLatestIfEmpty(it.toList()) }
-            } catch (_: Throwable) {
-            }
             return
         }
         allModeMirrors.remove(sbn.key)?.let { cancelMirror(it) }
-        // "Dernière notif" pointait peut-être sur CETTE notif ALL (clear déjà fait plus haut) :
-        // contrairement au cas LATEST ci-dessus, rien ne la repeuple ici normalement — voir
-        // repopulateWidgetLatestIfEmpty (Yann, 20/09/2026, "encore" vu "aucune notification" en
-        // vue Dernière notif/montre alors que Toutes notifs en montrait 5 : cette notif ALL
-        // supprimée EN COURS DE FONCTIONNEMENT, pas au redémarrage du service, est le cas que le
-        // premier correctif — limité à rebuildStateFromActiveNotifications — ne couvrait pas).
-        try {
-            activeNotifications?.let { repopulateWidgetLatestIfEmpty(it.toList()) }
-        } catch (_: Throwable) {
-        }
-    }
-
-    /**
-     * "Dernière notif" (widget texte + complication montre, voir WidgetNotificationStore) se vide
-     * dès que la notif qu'elle affiche disparaît (clear() appelé plus haut dans
-     * onNotificationRemoved), mais rien ne la repeuple automatiquement à partir d'une AUTRE notif
-     * ALL déjà mirorée et toujours active — contrairement à "Toutes notifs", qui se re-dérive
-     * intégralement de ce qui est encore posté à chaque suppression (refillAllNotifsHistory). Ce
-     * repli reprend la notif ALL déjà mirorée la plus récente parmi celles encore actives et la
-     * repasse par mirror() pour forcer son pushLive() — idempotent côté mirror système (re-notify()
-     * sur un id déjà posté = mise à jour en place, sans déclencher de removal). No-op si le store
-     * n'est pas vide (rien à faire) ou si aucune notif ALL éligible n'est encore active.
-     *
-     * Utilisé (a) à la reconnexion du listener (rebuildStateFromActiveNotifications) et (b) à
-     * chaque suppression d'une notif originale (onNotificationRemoved) — le second cas est celui
-     * qui manquait initialement (correctif du 20/09/2026 limité au premier), laissant le widget et
-     * la montre bloqués sur "Aucune notification" jusqu'au prochain redémarrage du service alors
-     * que d'autres notifs ALL restaient affichées dans "Toutes notifs".
-     */
-    private fun repopulateWidgetLatestIfEmpty(all: List<StatusBarNotification>) {
-        if (WidgetNotificationStore.get(applicationContext) != null) return
-        allModeMirrors.keys
-            .mapNotNull { key -> all.firstOrNull { it.key == key } }
-            .maxByOrNull { it.postTime }
-            ?.let { sbn -> mirror(sbn, allModeMirrors.getValue(sbn.key)) }
     }
 
     /**
@@ -537,9 +455,10 @@ class MirrorNotificationListener : NotificationListenerService() {
 
     /**
      * Builds the [AllNotifEntryPush] that feeds [sbn] into the shared "Toutes notifs" widget
-     * history ONLY — no system-notification mirror, no "Dernière notif" widget slot (mirror()
-     * below already covers both of those for the ALL-mode bootstrap and for the single
-     * LATEST-mode notification promoted into the shared slot). Used to catch up every OTHER
+     * history — which also drives "Dernière notif"/la montre, see mirror()'s own push (MERGED
+     * 20/09/2026) — without touching the actual system-notification mirror (mirror() below
+     * already covers that for the ALL-mode bootstrap and for the single LATEST-mode notification
+     * promoted into the shared slot). Used to catch up every OTHER
      * currently-active LATEST-mode notification too, so "Toutes notifs" isn't stuck showing just
      * one entry per LATEST-mode app after a listener reconnect (see
      * rebuildStateFromActiveNotifications' own comment, 17/09/2026). Same title/image extraction
@@ -555,8 +474,9 @@ class MirrorNotificationListener : NotificationListenerService() {
      * s'affichent comme les autres notifs en vue toutes notifs [...] parfois j'ai même deux icônes
      * pour un même match"). This does NOT stop Sofascore from being mirrored elsewhere when
      * configured ALL/LATEST in the app-selection screen — mirror() still builds the real Now Bar
-     * notification and the widget's Dernière notif slot for it as normal; only ITS OWN push into
-     * "Toutes notifs" is skipped here (and in mirror() itself, see its own such guard).
+     * notification for it as normal; only ITS OWN push into "Toutes notifs" (and so, via it, into
+     * "Dernière notif"/la montre) is skipped here (and in mirror() itself, see its own such guard) —
+     * SofascoreNotificationListenerService's own match-tile push covers that instead.
      *
      * Split out 20/09/2026 from what used to be [pushAllNotifsHistoryOnly] in one step, so
      * [refillAllNotifsHistory] can build a whole batch of these up front and hand it to
@@ -679,9 +599,9 @@ class MirrorNotificationListener : NotificationListenerService() {
         // pas tenir compte des applis où j'ai indiqué qu'il faut inverser titre et texte [...]
         // l'inversion ne doit servir que pour la now bar") — nowBarTitle/nowBarText below feed
         // ONLY the actual system notification built further down (the real Samsung Now Bar
-        // surface). Both widget surfaces this function also feeds — pushLive (the widget's
-        // single-notification/"texte" view) and pushToAllNotifications ("Toutes notifs") —
-        // deliberately keep using the ORIGINAL rawTitle/rawText below instead, never these.
+        // surface). pushToAllNotifications ("Toutes notifs", and via it "Dernière notif"/la
+        // montre — voir plus bas) deliberately keeps using the ORIGINAL rawTitle/rawText below
+        // instead, never these.
         val invert = AppMirrorPrefs.getInvertTitleText(applicationContext, sbn.packageName)
         val nowBarTitle = if (invert) rawText.ifBlank { rawTitle } else rawTitle
         val nowBarText = if (invert) rawTitle else rawText
@@ -699,37 +619,34 @@ class MirrorNotificationListener : NotificationListenerService() {
         // as before for anyone who hasn't opted in.
         val widgetActions = widgetActionsFor(n)
 
-        // The lock-screen widget mirrors whichever eligible notification arrived most recently
-        // from ANY app configured with a mirror mode — no ALL vs LATEST distinction, unlike the
-        // system-notification mirror above. pushLive() is handed n.contentIntent directly, right
-        // now, while it's still a live object — that's what makes the widget's tap open the
-        // exact conversation/article instead of just the source app. Wrapped in try/catch: this
-        // is a nice-to-have on top of the core mirror, so a bug in it must never crash this
-        // service and take mirroring down with it.
-        try {
-            NowBarWidgetProvider.pushLive(
-                context = applicationContext,
-                key = sbn.key,
-                title = rawTitle,
-                text = rawText,
-                packageName = sbn.packageName,
-                contentIntent = n.contentIntent,
-                image = image,
-                actions = widgetActions
-            )
-
-            // Feeds the widget's "Toutes notifs" view (added 17/09/2026 at Yann's request) — a
-            // rolling history of the last 5 RECEIVED notifications, kept separate from the single
-            // "latest" slot above (see WidgetAllNotificationsStore's class doc for why). Pushed for
-            // every mirrored notification, ALL or LATEST mode alike, same universe as pushLive
-            // above — one push per received event, whether that's a brand new notification or an
-            // existing one updated in place (same sbn.key). EXCEPT Sofascore (18/09/2026, see
-            // pushAllNotifsHistoryOnly's doc for the full reasoning) — Sofascore still gets a
-            // proper Now Bar notification and Dernière notif widget slot from this function when
-            // configured ALL/LATEST, same as any other app; only this one push, into the shared
-            // "Toutes notifs" history, is skipped for it, since SofascoreNotificationListenerService
-            // already feeds that same history with the correct match-tile presentation.
-            if (sbn.packageName != SofascoreNotificationListenerService.SOFASCORE_PACKAGE) {
+        // Feeds the widget's shared "Toutes notifs" history (added 17/09/2026 at Yann's request) —
+        // a rolling history of the last 5 RECEIVED notifications. MERGED 20/09/2026 (Yann: "Fusionne
+        // toutes les listes que tu peux [...] Sofascore peut apparaître en dernière notif. Toutes
+        // les notifs des applis choisies peuvent y apparaître") — this is now also the SOLE source
+        // for the widget's "Dernière notif" view and the watch's "Notification" complication, which
+        // simply read whichever entry here is currently most recent (see
+        // NowBarWidgetProvider.applyLatestContent/syncWatchToLatest) instead of being written
+        // separately by their own dedicated push (the old WidgetNotificationStore/pushLive()).
+        // That separate store had to be independently kept in sync with this history on every
+        // removal path by hand, which is exactly the class of bug behind the "widget et
+        // complication montre marquent aucune notification alors qu'il y en a plein" reports —
+        // this history already self-heals correctly on every removal (see
+        // WidgetAllNotificationsStore.pruneAgainstActive / refillAllNotifsHistory below), so
+        // deriving "Dernière notif" from it instead removes that whole class of drift rather than
+        // patching each removal path one at a time.
+        //
+        // Pushed for every mirrored notification, ALL or LATEST mode alike — one push per received
+        // event, whether that's a brand new notification or an existing one updated in place (same
+        // sbn.key) — EXCEPT Sofascore (18/09/2026, see pushAllNotifsHistoryOnly's doc for the full
+        // reasoning): Sofascore still gets a proper Now Bar notification from this function when
+        // configured ALL/LATEST, same as any other app, but its OWN entry in this shared history —
+        // and so its eligibility for "Dernière notif"/the watch too, per Yann's remark above — comes
+        // from SofascoreNotificationListenerService's dedicated match-tile push instead, to avoid a
+        // second, racing, generic-looking entry for the same match (see that push's own doc,
+        // "j'ai encore des applis Sofascore qui s'affichent [...] parfois j'ai même deux icônes pour
+        // un même match").
+        if (sbn.packageName != SofascoreNotificationListenerService.SOFASCORE_PACKAGE) {
+            try {
                 NowBarWidgetProvider.pushToAllNotifications(
                     applicationContext,
                     AllNotifEntryPush(
@@ -745,16 +662,16 @@ class MirrorNotificationListener : NotificationListenerService() {
                         actions = widgetActions
                     )
                 )
+            } catch (t: Throwable) {
+                // TEMPORARY diagnostic: surfaces the exact failure on screen since this device
+                // can't be hooked up to Android Studio for logcat. Safe to remove once the widget
+                // update path is confirmed stable.
+                Toast.makeText(
+                    applicationContext,
+                    "Widget: ${t.javaClass.simpleName}: ${t.message}",
+                    Toast.LENGTH_LONG
+                ).show()
             }
-        } catch (t: Throwable) {
-            // TEMPORARY diagnostic: surfaces the exact failure on screen since this device
-            // can't be hooked up to Android Studio for logcat. Safe to remove once the widget
-            // update path is confirmed stable.
-            Toast.makeText(
-                applicationContext,
-                "Widget: ${t.javaClass.simpleName}: ${t.message}",
-                Toast.LENGTH_LONG
-            ).show()
         }
 
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
