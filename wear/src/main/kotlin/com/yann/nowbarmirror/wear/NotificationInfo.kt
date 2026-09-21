@@ -5,9 +5,9 @@ import android.graphics.Bitmap
 /**
  * Dernière notification reçue côté téléphone, toutes apps mirorées confondues (ALL/LATEST et
  * Sofascore compris, aucune distinction) — miroir exact de ce qui alimente la vue "Dernière
- * notif" du widget écran de verrouillage côté téléphone
- * (mobile/widget/WidgetNotificationStore.kt), envoyé à la montre via mobile/
- * WatchNotificationSync.kt sur le chemin "/notification".
+ * notif" du widget écran de verrouillage côté téléphone (l'entrée la plus récente de
+ * mobile/widget/WidgetAllNotificationsStore.kt, voir NowBarWidgetProvider.applyLatestContent),
+ * envoyé à la montre via mobile/WatchNotificationSync.kt sur le chemin "/notification".
  *
  * [image] est l'image de la notif elle-même (grande icône/photo, voir mobile/
  * NotificationImageExtractor.kt) — `null` si l'app source n'en fournit pas. [appIcon] est l'icône
