@@ -8,8 +8,8 @@ import android.content.Context
  * the widget is meant to stay compact, so this is opt-in.
  *
  * The buttons only work while this app's process is still alive since the notification was
- * mirrored (see the liveActions doc in NowBarWidgetProvider) — after a process restart they
- * simply don't show again until the next notification arrives, same limitation the widget's
+ * mirrored (see the liveAllNotifActions doc in NowBarWidgetProvider) — after a process restart
+ * they simply don't show again until the next notification arrives, same limitation the widget's
  * tap-to-open already has.
  */
 object WidgetActionsPrefs {
