@@ -96,7 +96,25 @@ data class AllNotifEntryPush(
     val apiSource: String? = null,
     val image: Bitmap?,
     val contentIntent: PendingIntent?,
-    val actions: List<WidgetAction> = emptyList()
+    val actions: List<WidgetAction> = emptyList(),
+    // NEW 21/09/2026, watch "Notification" complication detail screen (Yann : "quand je clique
+    // sur la complication notification ça ouvre une fenêtre [...] pour les notifications comme
+    // les messages ou Sofascore, afficher toutes les notifs de l'expéditeur ou toutes celles du
+    // match"). Rather than a new persisted history (Yann, précision : "Ils envoient plusieurs
+    // notifications dans un seul groupe [...] il suffit de lire le centre de notifs [...] ce que
+    // l'application fait déjà normalement"), this is read straight off the SAME live
+    // StatusBarNotification already being mirrored, at the exact moment it's pushed:
+    // - MirrorNotificationListener, only for a conversation (isConversation=true): each message
+    //   text from the notification's own NotificationCompat.MessagingStyle (EXTRA_MESSAGES/
+    //   EXTRA_HISTORIC_MESSAGES already bundled by Android into that ONE notification, most
+    //   recent first — see MirrorNotificationListener.messageLinesFor). Empty for a non-
+    //   conversation GENERIC entry: its single [text] above already covers it, nothing else to
+    //   show.
+    // - SofascoreNotificationListenerService: the notification's own EXTRA_TEXT_LINES (Inbox
+    //   style, already capped at 6 by Android, already most-recent-first — see its collectLines).
+    // Same in-memory-only rule as [contentIntent]/[actions] above (see liveAllNotifDetailLines) —
+    // lost across a process restart, same already-accepted limitation as those two.
+    val detailLines: List<String> = emptyList()
 )
 
 /**
@@ -271,6 +289,12 @@ class NowBarWidgetProvider : AppWidgetProvider() {
         private var liveAllNotifIntents: Map<String, PendingIntent> = emptyMap()
         private var liveAllNotifActions: Map<String, List<WidgetAction>> = emptyMap()
 
+        // Same in-memory-only/same-lifetime rule as liveAllNotifActions right above (NEW
+        // 21/09/2026, watch detail screen — see AllNotifEntryPush.detailLines' doc): one entry's
+        // worth of extra history lines (conversation messages / Sofascore match events), keyed
+        // the same way (allNotifEntryId), trimmed the same way in [pushToAllNotificationsBatch].
+        private var liveAllNotifDetailLines: Map<String, List<String>> = emptyMap()
+
         /** Composite identity for [liveAllNotifIntents]/[liveAllNotifActions] — see those fields' doc. */
         private fun allNotifEntryId(key: String, postTimeMillis: Long) = "$key::$postTimeMillis"
 
@@ -314,7 +338,18 @@ class NowBarWidgetProvider : AppWidgetProvider() {
                 title = content.title,
                 text = content.text,
                 packageName = content.iconPackageName ?: entry.packageName.orEmpty(),
-                image = content.image
+                image = content.image,
+                // NEW 21/09/2026, watch detail screen (see AllNotifEntryPush.detailLines' doc) —
+                // entryKey/entryPostTimeMillis/kind let the watch address its action/dismiss
+                // requests back at exactly this entry (see WearActionRelayService); actionLabels
+                // is just the label text (no PendingIntent can cross to the watch — see
+                // fireAction, which looks the real one back up on this side by that same identity
+                // when the watch asks for actionIndex N).
+                detailLines = content.detailLines,
+                actionLabels = content.actions.map { it.label },
+                entryKey = entry.key,
+                entryPostTimeMillis = entry.postTimeMillis,
+                kind = entry.kind.name
             )
         }
 
@@ -451,8 +486,65 @@ class NowBarWidgetProvider : AppWidgetProvider() {
                     if (id !in pushedIds) liveAllNotifActions[id]?.let { put(id, it) }
                 }
             }
+            liveAllNotifDetailLines = buildMap {
+                entries.forEach { entry ->
+                    if (entry.detailLines.isNotEmpty()) put(allNotifEntryId(entry.key, entry.postTimeMillis), entry.detailLines)
+                }
+                keptIds.forEach { id ->
+                    if (id !in pushedIds) liveAllNotifDetailLines[id]?.let { put(id, it) }
+                }
+            }
 
             pushToAllWidgets(context, buildViews(context))
+        }
+
+        /**
+         * Fires the [actionIndex]-th action button of the entry identified by ([key],
+         * [postTimeMillis]) — called by WearActionRelayService when the watch's notification
+         * detail screen's own action chip is tapped (NEW 21/09/2026). Reuses the exact same live,
+         * in-memory [liveAllNotifActions] map the widget's own action buttons already read (see
+         * that field's doc) — same PendingIntent, so pressing an action on the watch does exactly
+         * what pressing it on the widget/phone notification itself would. `false` (silently) if
+         * this process was restarted since the entry was last pushed (the PendingIntent is gone,
+         * same already-accepted limitation as the widget's own action buttons — see README's
+         * Limitations) or the index is out of range.
+         */
+        fun fireAction(key: String, postTimeMillis: Long, actionIndex: Int): Boolean {
+            val action = liveAllNotifActions[allNotifEntryId(key, postTimeMillis)]?.getOrNull(actionIndex)
+                ?: return false
+            return try {
+                action.pendingIntent.send()
+                true
+            } catch (_: Throwable) {
+                false
+            }
+        }
+
+        /**
+         * Dismisses the entry identified by ([kindName], [key], [postTimeMillis]) — called by
+         * WearActionRelayService when the watch's notification detail screen's own delete button
+         * is tapped (NEW 21/09/2026). Routes to the SAME service each kind's own widget dismiss
+         * button already targets (see [dismissPendingIntent]/[sofascoreDismissPendingIntent] just
+         * below) — cancelling the real source notification by key, not a live in-memory
+         * PendingIntent, so unlike [fireAction] this keeps working across a process restart
+         * (exactly like the widget's own dismiss button already does).
+         */
+        fun dismissEntry(context: Context, kindName: String, key: String, postTimeMillis: Long) {
+            val isMatch = kindName == WidgetAllNotificationsStore.Kind.SOFASCORE_MATCH.name
+            val intent = if (isMatch) {
+                Intent(context, SofascoreNotificationListenerService::class.java).apply {
+                    action = SofascoreNotificationListenerService.ACTION_DISMISS_WIDGET
+                    putExtra(SofascoreNotificationListenerService.EXTRA_DISMISS_KEY, key)
+                    putExtra(SofascoreNotificationListenerService.EXTRA_DISMISS_POST_TIME, postTimeMillis)
+                }
+            } else {
+                Intent(context, MirrorNotificationListener::class.java).apply {
+                    action = MirrorNotificationListener.ACTION_DISMISS_WIDGET
+                    putExtra(MirrorNotificationListener.EXTRA_DISMISS_KEY, key)
+                    putExtra(MirrorNotificationListener.EXTRA_DISMISS_POST_TIME, postTimeMillis)
+                }
+            }
+            context.startService(intent)
         }
 
         /**
@@ -1160,7 +1252,12 @@ class NowBarWidgetProvider : AppWidgetProvider() {
             // (peek) / applyLatestIcon (Dernière notif) to show that app's icon on
             // widget_app_icon (Yann: "mettre l'icone de l'appli à gauche"). Sofascore for a SPORT
             // match or a SOFASCORE_MATCH entry, the mirrored notification's own package otherwise.
-            val iconPackageName: String?
+            val iconPackageName: String?,
+            // NEW 21/09/2026, watch detail screen — see AllNotifEntryPush.detailLines' doc. Only
+            // ever non-empty for the ALL_NOTIFS resolution path (resolveAllNotifEntryContent);
+            // a SPORT peek (resolvePeek) doesn't set it — the "Score en direct"/Sport tab's own
+            // tap already opens Sofascore itself, this is only for the "Notification" complication.
+            val detailLines: List<String> = emptyList()
         )
 
         /**
@@ -1191,7 +1288,8 @@ class NowBarWidgetProvider : AppWidgetProvider() {
                 dismissIntent = dismissIntent,
                 openIntent = liveAllNotifIntents[entryId] ?: fallbackPackage?.let { launchAppPendingIntent(context, it) },
                 actions = liveAllNotifActions[entryId] ?: emptyList(),
-                iconPackageName = fallbackPackage
+                iconPackageName = fallbackPackage,
+                detailLines = liveAllNotifDetailLines[entryId] ?: emptyList()
             )
         }
 
