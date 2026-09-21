@@ -1,0 +1,16 @@
+<resources>
+    <!--
+        NEW 21/09/2026, écran de détail (voir NotificationDetailActivity.kt) — palette "Galaxy
+        Watch" (fond noir pur façon OLED, accent bleu repris de la palette One UI du téléphone —
+        voir app/src/main/res/values/colors.xml : one_ui_primary — pour rester visuellement
+        cohérent entre les deux apps).
+    -->
+    <color name="detail_background">#000000</color>
+    <color name="detail_text_primary">#FFFFFF</color>
+    <color name="detail_text_secondary">#B3B3B3</color>
+    <color name="detail_accent">#0B69FF</color>
+    <color name="detail_card_bg">#1C1C1E</color>
+    <color name="detail_chip_bg">#2C2C2E</color>
+    <color name="detail_delete_bg">#3A1414</color>
+    <color name="detail_delete_icon">#FF6B6B</color>
+</resources>

@@ -1,4 +1,7 @@
 <resources>
     <string name="app_name">Now Bar Mirror</string>
     <string name="complication_label">Score en direct</string>
+
+    <!-- NEW 21/09/2026, écran de détail (voir NotificationDetailActivity.kt) -->
+    <string name="action_delete">Supprimer</string>
 </resources>
