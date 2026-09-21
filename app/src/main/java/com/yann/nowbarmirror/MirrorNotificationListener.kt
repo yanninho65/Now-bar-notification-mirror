@@ -269,16 +269,8 @@ class MirrorNotificationListener : NotificationListenerService() {
         // active) et qu'aucune notif LATEST n'est active pour reprendre le slot juste au-dessus,
         // le widget et la montre restent bloqués sur "Aucune notification" alors que ces notifs
         // ALL sont toujours là (Yann, 20/09/2026 : "widget et complication montre marquent
-        // aucune notification alors qu'il y en a plein"). Repli : si le store est toujours vide
-        // ici, reprendre la plus récente notif ALL déjà mirorée et la repasser par mirror() pour
-        // forcer son pushLive() — idempotent côté mirror système (re-notify() sur un id déjà
-        // posté = mise à jour en place, sans déclencher de removal).
-        if (WidgetNotificationStore.get(applicationContext) == null) {
-            allModeMirrors.keys
-                .mapNotNull { key -> all.firstOrNull { it.key == key } }
-                .maxByOrNull { it.postTime }
-                ?.let { sbn -> mirror(sbn, allModeMirrors.getValue(sbn.key)) }
-        }
+        // aucune notification alors qu'il y en a plein"). Repli, voir repopulateWidgetLatestIfEmpty.
+        repopulateWidgetLatestIfEmpty(all.toList())
 
         // Belt-and-braces top-up: everything eligible that's ALREADY active gets one more pass
         // through "Toutes notifs" here, in case any of it was missed above (e.g. an ALL-mode
@@ -482,9 +474,48 @@ class MirrorNotificationListener : NotificationListenerService() {
                 latestOriginalKey = null
                 promoteNextLatestMode()
             }
+            try {
+                activeNotifications?.let { repopulateWidgetLatestIfEmpty(it.toList()) }
+            } catch (_: Throwable) {
+            }
             return
         }
         allModeMirrors.remove(sbn.key)?.let { cancelMirror(it) }
+        // "Dernière notif" pointait peut-être sur CETTE notif ALL (clear déjà fait plus haut) :
+        // contrairement au cas LATEST ci-dessus, rien ne la repeuple ici normalement — voir
+        // repopulateWidgetLatestIfEmpty (Yann, 20/09/2026, "encore" vu "aucune notification" en
+        // vue Dernière notif/montre alors que Toutes notifs en montrait 5 : cette notif ALL
+        // supprimée EN COURS DE FONCTIONNEMENT, pas au redémarrage du service, est le cas que le
+        // premier correctif — limité à rebuildStateFromActiveNotifications — ne couvrait pas).
+        try {
+            activeNotifications?.let { repopulateWidgetLatestIfEmpty(it.toList()) }
+        } catch (_: Throwable) {
+        }
+    }
+
+    /**
+     * "Dernière notif" (widget texte + complication montre, voir WidgetNotificationStore) se vide
+     * dès que la notif qu'elle affiche disparaît (clear() appelé plus haut dans
+     * onNotificationRemoved), mais rien ne la repeuple automatiquement à partir d'une AUTRE notif
+     * ALL déjà mirorée et toujours active — contrairement à "Toutes notifs", qui se re-dérive
+     * intégralement de ce qui est encore posté à chaque suppression (refillAllNotifsHistory). Ce
+     * repli reprend la notif ALL déjà mirorée la plus récente parmi celles encore actives et la
+     * repasse par mirror() pour forcer son pushLive() — idempotent côté mirror système (re-notify()
+     * sur un id déjà posté = mise à jour en place, sans déclencher de removal). No-op si le store
+     * n'est pas vide (rien à faire) ou si aucune notif ALL éligible n'est encore active.
+     *
+     * Utilisé (a) à la reconnexion du listener (rebuildStateFromActiveNotifications) et (b) à
+     * chaque suppression d'une notif originale (onNotificationRemoved) — le second cas est celui
+     * qui manquait initialement (correctif du 20/09/2026 limité au premier), laissant le widget et
+     * la montre bloqués sur "Aucune notification" jusqu'au prochain redémarrage du service alors
+     * que d'autres notifs ALL restaient affichées dans "Toutes notifs".
+     */
+    private fun repopulateWidgetLatestIfEmpty(all: List<StatusBarNotification>) {
+        if (WidgetNotificationStore.get(applicationContext) != null) return
+        allModeMirrors.keys
+            .mapNotNull { key -> all.firstOrNull { it.key == key } }
+            .maxByOrNull { it.postTime }
+            ?.let { sbn -> mirror(sbn, allModeMirrors.getValue(sbn.key)) }
     }
 
     /**
