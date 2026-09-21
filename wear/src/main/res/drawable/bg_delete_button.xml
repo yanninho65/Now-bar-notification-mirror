@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- NEW 21/09/2026, écran de détail : bouton rond de suppression, en bas de l'écran (style
+     bouton d'action circulaire Galaxy Watch). -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="oval">
+    <solid android:color="@color/detail_delete_bg" />
+</shape>

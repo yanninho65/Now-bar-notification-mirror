@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- NEW 21/09/2026, écran de détail : fond d'une ligne d'historique (message/événement). -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@color/detail_card_bg" />
+    <corners android:radius="12dp" />
+</shape>
