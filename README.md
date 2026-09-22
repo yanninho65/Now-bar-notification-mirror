@@ -63,13 +63,18 @@ Two independent complications, assignable separately on the watch face:
 
 ### Notification detail screen (`NotificationDetailActivity`)
 
-Galaxy Watch-style full-screen view opened by tapping the "Notification" complication: app icon + notification image header, full title/text, action buttons, and a delete button, inside a `SwipeDismissFrameLayout` (swipe-to-dismiss the screen itself, `androidx.wear:wear`).
+Full-screen view opened by tapping the "Notification" complication, matching the real Wear OS/Galaxy Watch notification look, inside a `SwipeDismissFrameLayout` (swipe-to-dismiss the screen itself, `androidx.wear:wear`):
+- Header: the notification's own image and the source app's icon side by side, centered as one group (each shows only its own picture, no falling back of one onto the other).
+- Title, then text/detail lines, in the system's own text appearance (`?android:attr/textAppearanceLarge`/`Medium`, unconditional — not a hardcoded size) and no background behind the text, same as a real system notification's body.
+- One full-width pill per notification action (single line, ellipsized if too long, system text size/font), always followed by an "Aff. sur tél." pill (never a "Bloquer notifications" one, unlike the real system menu), then a round grey delete button.
 
 For a messaging conversation or a Sofascore match, the body instead lists every line Android's own notification already bundles for that one notification — no separate history is built or persisted anywhere:
 - Sofascore groups several updates into one `InboxStyle` notification; `SofascoreNotificationListenerService.collectLines` reads its `EXTRA_TEXT_LINES` (`detailLines`), same lines Android's own notification shade would show, capped at 6 by Android itself.
 - A conversation notification carries its own message list via `NotificationCompat.MessagingStyle`; `MirrorNotificationListener.messageLinesFor` reads `.messages`/`.historicMessages` (capped at 10, newest first).
 
-`WatchNotificationSync.send` carries these lines plus the action labels and the entry's identity (`entryKey`/`entryPostTimeMillis`/`kind`) to the watch alongside the usual title/text/images (`NotificationInfo`, decoded by `NotificationDataCodec`). A `PendingIntent` can't cross devices, so only the labels travel — tapping an action button, or the delete button, sends a one-way message back to the phone (`PhoneRelay`, `MessageClient`, paths `/notifdetail/action` and `/notifdetail/dismiss`) identifying the entry; the phone's `WearActionRelayService` receives it and calls `NowBarWidgetProvider.fireAction` (fires the real `PendingIntent` from its live in-memory action cache) or `.dismissEntry` (routes to the right listener's own `ACTION_DISMISS_WIDGET`, Sofascore vs. generic, by `kind`).
+`WatchNotificationSync.send` carries these lines plus the action labels and the entry's identity (`entryKey`/`entryPostTimeMillis`/`kind`) to the watch alongside the usual title/text/images (`NotificationInfo`, decoded by `NotificationDataCodec`). A `PendingIntent` can't cross devices, so only the labels travel — tapping an action button, the delete button, or "Aff. sur tél." sends a one-way message back to the phone (`PhoneRelay`, `MessageClient`, paths `/notifdetail/action`, `/notifdetail/dismiss`, `/notifdetail/open`) identifying the entry; the phone's `WearActionRelayService` receives it and calls `NowBarWidgetProvider.fireAction` (fires the real `PendingIntent` from its live in-memory action cache), `.dismissEntry` (routes to the right listener's own `ACTION_DISMISS_WIDGET`, Sofascore vs. generic, by `kind`), or `.openEntry` for "Aff. sur tél.".
+
+`.openEntry` doesn't fire the entry's own `PendingIntent` directly: a plain background service reacting to a Bluetooth message from the watch (no visible window) is blocked by Android's background-activity-launch restrictions from starting an Activity that way — especially the app's own fallback `PendingIntent` (`launchAppPendingIntent`, used whenever the entry has no `contentIntent` of its own, which is the common case for a Sofascore match). Instead it posts an ordinary, dismissible notification (its own channel, `open_on_phone`) carrying the resolved open target as its `contentIntent`, reusing the same title/text/image resolution the widget's "Dernière notif" and the watch sync already compute (`resolveAllNotifEntryContent`) — a real user tap on that notification always works, the same mechanism this app's own mirror notification already relies on.
 
 `NotificationDetailActivity` applies the same always-re-read-the-persisted-item fix as the "Notification" complication above (Yann: "ça ne montre pas toujours la notification qui est affichée sur la complication [...] il faut vraiment que ça soit toujours la même"): it paints whatever's in `NotificationInfoStore.current` instantly, then immediately re-reads the persisted `/notification` DataItem in the background and overwrites with that once it resolves — so a tap always ends up showing exactly what a concurrent complication refresh would also compute, instead of two independently stale in-memory snapshots.
 
@@ -108,7 +113,7 @@ app/src/main/java/com/yann/nowbarmirror/
 ├── NotificationImageExtractor.kt      image extraction shared between both listeners
 ├── PackageUpdateReceiver.kt           forces both listeners to rebind right after an app update
 ├── WatchNotificationSync.kt           sends "Dernière notif" to the watch's "Notification" complication, incl. detail lines/actions/entry identity (Wear Data Layer API)
-├── WearActionRelayService.kt          receives action-button-tap/dismiss requests from the watch's detail screen (paths /notifdetail/action, /notifdetail/dismiss), relays to NowBarWidgetProvider.fireAction/dismissEntry
+├── WearActionRelayService.kt          receives action-button-tap/dismiss/"Aff. sur tél." requests from the watch's detail screen (paths /notifdetail/action, /notifdetail/dismiss, /notifdetail/open), relays to NowBarWidgetProvider.fireAction/dismissEntry/openEntry
 ├── settings/                          Accueil tab preferences and screen
 │   ├── MirrorMode.kt                  NONE / LATEST / ALL
 │   ├── AppMirrorPrefs.kt              per-package mode + invert-title/text storage
@@ -149,8 +154,8 @@ wear/src/main/kotlin/com/yann/nowbarmirror/wear/
 ├── NotificationDataListenerService.kt receives "Dernière notif" updates from the phone (path /notification)
 ├── NotificationDataCodec.kt           shared decode of the /notification DataMap (incl. detail lines/actions/entry identity)
 ├── NotificationInfo.kt                decoded payload + in-memory NotificationInfoStore
-├── NotificationDetailActivity.kt      full-screen Galaxy Watch-style detail screen opened by tapping "Notification" (image/logo, full text or detail lines, actions, delete) — see Notification detail screen
-└── PhoneRelay.kt                      sends action-tap/dismiss requests from the detail screen back to the phone (Wear Data Layer API messages)
+├── NotificationDetailActivity.kt      full-screen Galaxy Watch-style detail screen opened by tapping "Notification" (image/icon header, title/text or detail lines, action pills + "Aff. sur tél.", delete) — see Notification detail screen
+└── PhoneRelay.kt                      sends action-tap/dismiss/"Aff. sur tél." requests from the detail screen back to the phone (Wear Data Layer API messages)
 ```
 
 ## Limitations
