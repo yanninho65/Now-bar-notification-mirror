@@ -1,8 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- NEW 21/09/2026, écran de détail : bouton d'action de la notification (pilule arrondie, style
-     bouton Galaxy Watch). -->
+     bouton Galaxy Watch). UPDATED 22/09/2026 : rayon agrandi (18dp -> 26dp) pour rester une vraie
+     pilule (bouts semi-circulaires) maintenant que le bouton est pleine largeur/plus haut (~52dp)
+     au lieu d'un petit chip côte à côte — voir NotificationDetailActivity.actionChip. -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="rectangle">
     <solid android:color="@color/detail_chip_bg" />
-    <corners android:radius="18dp" />
+    <corners android:radius="26dp" />
 </shape>
