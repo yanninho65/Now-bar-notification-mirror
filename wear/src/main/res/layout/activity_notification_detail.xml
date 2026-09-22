@@ -103,24 +103,29 @@
                 android:visibility="gone"
                 android:layout_marginBottom="16dp" />
 
-            <!-- Boutons d'action de la notification -->
+            <!-- Boutons d'action de la notification, UPDATED 22/09/2026 : pilules pleine largeur
+                 empilées verticalement (style menu de notification Galaxy Watch natif), au lieu de
+                 chips côte à côte — voir NotificationDetailActivity.actionChip. Contient toujours
+                 les actions propres de la notification puis la pilule "Aff. sur tél." (jamais
+                 "Bloquer notifications", volontairement absente ici). -->
             <LinearLayout
                 android:id="@+id/detail_actions_container"
-                android:layout_width="wrap_content"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center"
+                android:orientation="vertical"
                 android:visibility="gone"
                 android:layout_marginBottom="18dp" />
 
-            <!-- Suppression -->
+            <!-- Suppression — UPDATED 22/09/2026 : agrandi (48dp -> 56dp) pour matcher la taille
+                 du rond de suppression du vrai menu de notification Galaxy Watch (capture à
+                 l'appui, Yann) ; couleurs désormais grises neutres (voir colors.xml). -->
             <ImageButton
                 android:id="@+id/detail_delete_button"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
+                android:layout_width="56dp"
+                android:layout_height="56dp"
                 android:background="@drawable/bg_delete_button"
                 android:src="@drawable/ic_delete"
-                android:padding="12dp"
+                android:padding="14dp"
                 android:contentDescription="@string/action_delete" />
 
         </LinearLayout>
