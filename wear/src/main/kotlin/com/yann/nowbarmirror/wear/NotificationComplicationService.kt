@@ -30,8 +30,32 @@ import java.util.concurrent.TimeUnit
  * hypothétique équivalent Wear OS de l'app source (contrairement à Score en direct, qui ouvre
  * Sofascore lui-même) — rien ne garantit qu'une app source quelconque en ait un installé sur la
  * montre, alors que la fenêtre de détail, elle, est toujours disponible.
+ *
+ * FIXED 21/09/2026 (Yann : "quand je clique sur la complication Notification, ça ne montre pas
+ * toujours la notification qui est affichée sur la complication [...] ça reste bloqué sur une
+ * ancienne et sans avoir l'exhaustivité (le match est terminé mais ça ne le montre pas dans la
+ * fenêtre)") : [onComplicationRequest] faisait confiance à [NotificationInfoStore.current] dès
+ * qu'il n'était pas `null`, sans jamais le revérifier contre l'item persistant de la Data Layer —
+ * un `onDataChanged` raté par CE process (mise à jour arrivée pendant que le process était tué, ou
+ * simplement pas encore redémarré) laissait ce cache en mémoire bloqué sur une valeur périmée
+ * indéfiniment, jusqu'au prochain redémarrage complet du process. Cette même incohérence existait
+ * séparément dans [NotificationDetailActivity], donc les deux pouvaient diverger l'un de l'autre
+ * selon lequel avait eu la chance de recevoir la dernière mise à jour en direct. Chaque requête
+ * relit désormais systématiquement l'item persistant (repli identique côté [NotificationDetailActivity]
+ * — voir sa doc) : un appel purement local (Play Services, pas de réseau), donc sans coût
+ * perceptible, qui garantit que les deux composants se resynchronisent sur la même vérité de
+ * référence à chaque fois plutôt que de dériver chacun de leur côté. Ne retombe sur le cache mémoire
+ * que si cette relecture locale échoue elle-même (cas rare).
  */
 class NotificationComplicationService : ComplicationDataSourceService() {
+
+    /** Résultat d'une relecture de l'item persistant "/notification" — voir [fetchPersistedNotification]. */
+    private sealed class FetchOutcome {
+        /** Relecture réussie : [info] est la notification actuelle, ou `null` si "aucune notification" (cleared, ou jamais rien envoyé). */
+        data class Success(val info: NotificationInfo?) : FetchOutcome()
+        /** La relecture locale elle-même a échoué/expiré — ne rien en conclure sur l'existence d'une notification. */
+        object Failed : FetchOutcome()
+    }
 
     private val notificationDetailTapAction: PendingIntent
         get() {
@@ -48,7 +72,10 @@ class NotificationComplicationService : ComplicationDataSourceService() {
         request: ComplicationRequest,
         listener: ComplicationRequestListener
     ) {
-        val notification = NotificationInfoStore.current ?: fetchPersistedNotification()
+        val notification = when (val outcome = fetchPersistedNotification()) {
+            is FetchOutcome.Success -> outcome.info
+            FetchOutcome.Failed -> NotificationInfoStore.current
+        }
 
         val data: ComplicationData = when (request.complicationType) {
             ComplicationType.SMALL_IMAGE -> buildSmallImage(notification)
@@ -77,21 +104,22 @@ class NotificationComplicationService : ComplicationDataSourceService() {
      * n'existe pas encore (aucune notif jamais envoyée), s'il indique "cleared", ou si l'appel
      * échoue/expire — repli identique à `NotificationInfoStore.current == null`.
      */
-    private fun fetchPersistedNotification(): NotificationInfo? {
+    private fun fetchPersistedNotification(): FetchOutcome {
         return try {
             val items: DataItemBuffer = Tasks.await(
                 Wearable.getDataClient(this).getDataItems(),
                 FETCH_TIMEOUT_SECONDS, TimeUnit.SECONDS
             )
             try {
-                val item = items.firstOrNull { it.uri.path == NOTIFICATION_PATH } ?: return null
-                val dataMap = DataMapItem.fromDataItem(item).dataMap
-                NotificationDataCodec.decode(this, dataMap)?.also { NotificationInfoStore.current = it }
+                val item = items.firstOrNull { it.uri.path == NOTIFICATION_PATH }
+                val info = item?.let { NotificationDataCodec.decode(this, DataMapItem.fromDataItem(it).dataMap) }
+                NotificationInfoStore.current = info
+                FetchOutcome.Success(info)
             } finally {
                 items.release()
             }
         } catch (e: Exception) {
-            null
+            FetchOutcome.Failed
         }
     }
 

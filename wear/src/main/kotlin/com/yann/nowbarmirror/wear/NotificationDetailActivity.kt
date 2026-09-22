@@ -66,24 +66,28 @@ class NotificationDetailActivity : Activity() {
         actionsContainer = findViewById(R.id.detail_actions_container)
         deleteButton = findViewById(R.id.detail_delete_button)
 
-        // NotificationInfoStore.current est déjà rempli à ce stade dans l'immense majorité des cas
-        // — il n'y a de tap possible sur la complication que si elle a déjà été rendue au moins
-        // une fois, ce qui alimente ce cache en mémoire au passage (voir
-        // NotificationComplicationService.onComplicationRequest). Le repli ci-dessous ne couvre
-        // que le cas rare où le processus watch a été tué entre-temps — même logique que
-        // NotificationComplicationService.fetchPersistedNotification, dupliquée ici plutôt que
-        // partagée (raison déjà documentée ailleurs dans ce module : composants Wear distincts).
-        val current = NotificationInfoStore.current
-        if (current != null) {
-            render(current)
-        } else {
-            Thread {
-                val fetched = fetchPersistedNotification()
-                runOnUiThread {
-                    if (fetched != null) render(fetched) else renderEmpty()
+        // FIXED 21/09/2026 (Yann : "ça ne montre pas toujours la notification qui est affichée sur
+        // la complication [...] il faut vraiment que ça soit toujours la même [...] ça reste
+        // bloqué sur une ancienne et sans avoir l'exhaustivité") : faire confiance à
+        // NotificationInfoStore.current sans jamais le revérifier laissait cette fenêtre bloquée
+        // sur une valeur périmée si CE process avait raté la dernière mise à jour en direct (même
+        // si la complication, elle, avait par ailleurs reçu la sienne) — voir
+        // NotificationComplicationService's doc, qui applique désormais la même correction.
+        // Peint immédiatement ce qui est déjà en cache (pour éviter un écran vide le temps de la
+        // relecture ci-dessous, souvent déjà correct) puis écrase avec le résultat de la relecture
+        // de l'item persistant — un appel purement local, quelques dizaines de ms — dès qu'il
+        // arrive, sauf si cette relecture échoue elle-même (repli sur ce qui est déjà affiché).
+        NotificationInfoStore.current?.let { render(it) } ?: renderEmpty()
+
+        Thread {
+            val outcome = fetchPersistedNotification()
+            runOnUiThread {
+                when (outcome) {
+                    is FetchOutcome.Success -> if (outcome.info != null) render(outcome.info) else renderEmpty()
+                    FetchOutcome.Failed -> Unit
                 }
-            }.start()
-        }
+            }
+        }.start()
     }
 
     private fun setupSwipeToDismiss() {
@@ -235,22 +239,29 @@ class NotificationDetailActivity : Activity() {
         return output
     }
 
-    /** Repli quand NotificationInfoStore est vide — voir la doc d'onCreate et NotificationComplicationService.fetchPersistedNotification (même logique). */
-    private fun fetchPersistedNotification(): NotificationInfo? {
+    /** Résultat d'une relecture de l'item persistant "/notification" — voir [fetchPersistedNotification] et NotificationComplicationService's identique. */
+    private sealed class FetchOutcome {
+        data class Success(val info: NotificationInfo?) : FetchOutcome()
+        object Failed : FetchOutcome()
+    }
+
+    /** Relit toujours l'item persistant plutôt que de faire confiance au cache mémoire — voir la doc d'onCreate et NotificationComplicationService.fetchPersistedNotification (même logique, dupliquée ici : composants Wear distincts). */
+    private fun fetchPersistedNotification(): FetchOutcome {
         return try {
             val items: DataItemBuffer = Tasks.await(
                 Wearable.getDataClient(this).getDataItems(),
                 FETCH_TIMEOUT_SECONDS, TimeUnit.SECONDS
             )
             try {
-                val item = items.firstOrNull { it.uri.path == NOTIFICATION_PATH } ?: return null
-                val dataMap = DataMapItem.fromDataItem(item).dataMap
-                NotificationDataCodec.decode(this, dataMap)?.also { NotificationInfoStore.current = it }
+                val item = items.firstOrNull { it.uri.path == NOTIFICATION_PATH }
+                val info = item?.let { NotificationDataCodec.decode(this, DataMapItem.fromDataItem(it).dataMap) }
+                NotificationInfoStore.current = info
+                FetchOutcome.Success(info)
             } finally {
                 items.release()
             }
         } catch (e: Exception) {
-            null
+            FetchOutcome.Failed
         }
     }
 
