@@ -2,6 +2,11 @@
     <string name="app_name">Now Bar Mirror</string>
     <string name="channel_name">Now Bar Mirror</string>
     <string name="channel_description">Mirrored notifications for the Now Bar</string>
+    <!-- NEW 22/09/2026, pill montre "Aff. sur tél." (voir NowBarWidgetProvider.openEntry) : canal
+         séparé du mirroring lui-même (IMPORTANCE_DEFAULT, pas ongoing) pour la notification que le
+         téléphone poste quand on demande à voir une entrée depuis la montre. -->
+    <string name="open_on_phone_channel_name">Ouvrir depuis la montre</string>
+    <string name="open_on_phone_channel_description">Notification posée quand la pilule \"Aff. sur tél.\" est utilisée depuis la montre</string>
     <string name="open_settings">Notification access</string>
     <string name="service_name">Now Bar Mirror notification listener</string>
     <string name="sport_service_name">Now Bar Mirror — Sport (Sofascore)</string>

@@ -36,21 +36,33 @@
             android:paddingTop="28dp"
             android:paddingBottom="20dp">
 
-            <!-- En-tête : icône de l'app source + nom -->
+            <!-- En-tête, UPDATED 22/09/2026 (Yann : "Mettre image notif et icone appli en haut sur
+                 même ligne (image à gauche, icone à droite). Taille des deux un peu plus grande
+                 que l'icône actuellement") : une seule ligne, l'image de la notif à GAUCHE et
+                 l'icône de l'app source à DROITE (avec son nom juste avant, pour Sofascore) —
+                 avant : deux blocs séparés (icône+nom au-dessus, grande image seule en dessous).
+                 Chacune des deux images ne montre plus que SA propre chose (fini le repli de
+                 l'image sur l'icône de l'app quand la notif n'a pas sa propre image — l'icône a
+                 désormais son propre emplacement dédié à droite). -->
             <LinearLayout
-                android:layout_width="wrap_content"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
                 android:gravity="center_vertical"
-                android:layout_marginBottom="10dp">
+                android:layout_marginBottom="12dp">
 
                 <ImageView
-                    android:id="@+id/detail_app_icon"
-                    android:layout_width="18dp"
-                    android:layout_height="18dp"
-                    android:layout_marginEnd="6dp"
+                    android:id="@+id/detail_image"
+                    android:layout_width="26dp"
+                    android:layout_height="26dp"
                     android:visibility="gone"
+                    android:scaleType="centerCrop"
                     android:contentDescription="@null" />
+
+                <View
+                    android:layout_width="0dp"
+                    android:layout_height="0dp"
+                    android:layout_weight="1" />
 
                 <TextView
                     android:id="@+id/detail_app_name"
@@ -59,18 +71,16 @@
                     android:textColor="@color/detail_text_secondary"
                     android:textSize="12sp"
                     android:maxLines="1"
-                    android:ellipsize="end" />
-            </LinearLayout>
+                    android:ellipsize="end"
+                    android:layout_marginEnd="6dp" />
 
-            <!-- Image/logo de la notif, en grand, en haut -->
-            <ImageView
-                android:id="@+id/detail_image"
-                android:layout_width="88dp"
-                android:layout_height="88dp"
-                android:layout_marginBottom="14dp"
-                android:visibility="gone"
-                android:scaleType="centerCrop"
-                android:contentDescription="@null" />
+                <ImageView
+                    android:id="@+id/detail_app_icon"
+                    android:layout_width="26dp"
+                    android:layout_height="26dp"
+                    android:visibility="gone"
+                    android:contentDescription="@null" />
+            </LinearLayout>
 
             <!-- Titre -->
             <TextView

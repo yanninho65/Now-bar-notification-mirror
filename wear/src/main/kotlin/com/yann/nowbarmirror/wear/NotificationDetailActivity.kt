@@ -45,6 +45,15 @@ import java.util.concurrent.TimeUnit
  * Explicitement PAS de pilule "Bloquer notifications" (présente dans le menu système natif mais
  * volontairement exclue ici, Yann : "Ne mets pas bloquer notifications").
  *
+ * UPDATED 22/09/2026, deuxième passe (Yann, après premier essai sur l'appareil) : "Aff. sur tél."
+ * FIXÉ — voir NowBarWidgetProvider.openEntry pour pourquoi un simple `.send()` direct ne marchait
+ * pas ("le bouton [...] ne fait rien"). Pilules d'action limitées à UNE ligne, taille/police reprises
+ * du thème système plutôt que codées en dur (voir [actionChip]). En-tête : image de la notif et
+ * icône de l'app sur la MÊME ligne (image à gauche, icône à droite), chacune un peu plus grande
+ * qu'avant et ne montrant plus que SA propre image (fini le repli de l'une sur l'autre). Le corps
+ * (texte simple ou historique) n'a plus de fond derrière chaque ligne, comme une notification
+ * système (voir [lineCard]).
+ *
  * `android.app.Activity` plutôt que ComponentActivity/AppCompatActivity : cet écran n'a besoin
  * d'aucune Fragment ni ActionBar, et ni androidx.activity ni androidx.appcompat ne sont déjà des
  * dépendances de ce module (voir wear/build.gradle.kts) — pas la peine d'en ajouter une pour ça.
@@ -124,8 +133,11 @@ class NotificationDetailActivity : Activity() {
         currentInfoForActions = info
         titleView.text = info.title.ifBlank { "Notification" }
 
-        // Logo (petite icône de l'app source, en-tête) — texte associé seulement pour Sofascore
-        // (seul cas où on connaît un nom d'app fiable sans dépendre d'un PackageManager côté
+        // En-tête, UPDATED 22/09/2026 (Yann : "Mettre image notif et icone appli en haut sur même
+        // ligne (image à gauche, icone à droite)") — chaque emplacement montre désormais SA propre
+        // image seulement : plus de repli de l'un sur l'autre (avant : l'image en grand retombait
+        // sur l'icône de l'app quand la notif n'avait pas sa propre image). Nom d'app affiché
+        // seulement pour Sofascore (seul cas où on connaît un nom fiable sans PackageManager côté
         // montre, qui n'a pas forcément l'app source installée — voir la doc de classe).
         if (info.appIcon != null) {
             appIconView.setImageBitmap(circularBitmap(info.appIcon))
@@ -140,11 +152,8 @@ class NotificationDetailActivity : Activity() {
             appNameView.visibility = View.GONE
         }
 
-        // Image en grand — l'image de la notif elle-même, ou à défaut le logo de l'app en plus
-        // grand (même repli que ComplicationImageComposer côté "petit rond" de la complication).
-        val bigImage = info.image ?: info.appIcon
-        if (bigImage != null) {
-            imageView.setImageBitmap(circularBitmap(bigImage))
+        if (info.image != null) {
+            imageView.setImageBitmap(circularBitmap(info.image))
             imageView.visibility = View.VISIBLE
         } else {
             imageView.visibility = View.GONE
@@ -201,39 +210,48 @@ class NotificationDetailActivity : Activity() {
         }
     }
 
+    /**
+     * UPDATED 22/09/2026 (Yann : "Ne pas mettre de fond sur le texte de la notif comme les
+     * notifications système") : simple texte empilé, sans carte/fond derrière chaque ligne — juste
+     * un espacement vertical entre les lignes, comme le corps d'une notification système.
+     */
     private fun lineCard(text: String): TextView {
         return TextView(this).apply {
             this.text = text
             setTextColor(resources.getColor(R.color.detail_text_primary, theme))
             textSize = 13f
-            setBackgroundResource(R.drawable.bg_line_card)
-            setPadding(dp(16), dp(12), dp(16), dp(12))
+            gravity = android.view.Gravity.CENTER
             val params = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
             )
-            params.bottomMargin = dp(8)
+            params.bottomMargin = dp(10)
             layoutParams = params
         }
     }
 
     /**
      * Une pilule d'action PLEINE LARGEUR, empilée verticalement avec les autres — style menu de
-     * notification Galaxy Watch natif (fond gris uni, coins très arrondis, texte gras centré),
-     * plutôt que les petits chips côte à côte d'avant. [onClick] laisse ce chip servir aussi bien
-     * une action propre de la notification (index -> PhoneRelay.sendAction) que la pilule "Aff.
-     * sur tél." (PhoneRelay.sendOpen) sans dupliquer la construction du bouton.
+     * notification Galaxy Watch natif (fond gris uni, coins très arrondis), plutôt que les petits
+     * chips côte à côte d'avant. [onClick] laisse ce chip servir aussi bien une action propre de
+     * la notification (index -> PhoneRelay.sendAction) que la pilule "Aff. sur tél."
+     * (PhoneRelay.sendOpen) sans dupliquer la construction du bouton.
+     *
+     * UPDATED 22/09/2026 (Yann : "limiter à une ligne les actions [...] reprendre la taille et la
+     * police du système") : taille/police du Button telles que fournies par le thème système (plus
+     * de textSize/typeface gras codés en dur ici), et le libellé est forcé sur UNE seule ligne
+     * (tronqué avec "…" s'il ne tient pas) plutôt que de pouvoir passer sur plusieurs lignes.
      */
     private fun actionChip(label: String, onClick: () -> Unit): Button {
         return Button(this).apply {
             text = label
             isAllCaps = false
             setTextColor(resources.getColor(R.color.detail_text_primary, theme))
-            textSize = 15f
-            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
             gravity = android.view.Gravity.CENTER
             setBackgroundResource(R.drawable.bg_action_chip)
-            setPadding(dp(20), dp(16), dp(20), dp(16))
+            setPadding(dp(20), dp(14), dp(20), dp(14))
             minWidth = 0
             minimumWidth = 0
             minHeight = 0

@@ -1,6 +1,8 @@
 package com.yann.nowbarmirror.widget
 
 import android.app.AlarmManager
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProvider
@@ -23,6 +25,8 @@ import android.os.SystemClock
 import android.view.View
 import android.widget.RemoteViews
 import android.widget.Toast
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import com.yann.nowbarmirror.MirrorNotificationListener
 import com.yann.nowbarmirror.R
 import com.yann.nowbarmirror.WatchNotificationSync
@@ -614,38 +618,76 @@ class NowBarWidgetProvider : AppWidgetProvider() {
             context.startService(intent)
         }
 
+        // NEW 22/09/2026 — canal dédié à la notification que [openEntry] poste (IMPORTANCE_DEFAULT,
+        // PAS ongoing — distinct du canal "mirror" de MirrorNotificationListener, IMPORTANCE_LOW).
+        private const val OPEN_ON_PHONE_CHANNEL_ID = "open_on_phone"
+        private const val OPEN_ON_PHONE_NOTIFICATION_ID = 916_001
+
         /**
-         * NEW 22/09/2026 — opens on the PHONE the entry currently shown by the watch's
-         * "Notification" detail screen (Yann: "je veux aussi qu'il y ait afficher sur téléphone
-         * pour ouvrir la notification sur le téléphone"), called by WearActionRelayService when
-         * its "Aff. sur tél." pill (wear/NotificationDetailActivity.kt) is tapped.
+         * NEW 22/09/2026 — ouvre côté TÉLÉPHONE l'entrée actuellement affichée sur l'écran de
+         * détail montre (Yann : "je veux aussi qu'il y ait afficher sur téléphone pour ouvrir la
+         * notification sur le téléphone"), appelée par WearActionRelayService quand la pilule
+         * "Aff. sur tél." (wear/NotificationDetailActivity.kt) est tapée.
          *
-         * Fires the exact same PendingIntent tapping the widget's own "Dernière notif" tile would
-         * ([liveAllNotifIntents], same map/identity [fireAction] reads), falling back — exactly
-         * like [resolveAllNotifEntryContent]'s own openIntent — to just launching the source app
-         * (or Sofascore for a match) when this process no longer holds a live one. Looks the entry
-         * up in [WidgetAllNotificationsStore] (not just the live maps) so that fallback has a
-         * package to launch even after a process restart, same "best effort" spirit as
-         * [dismissEntry]/[fireAction] above. Returns false (silently — caller has nothing useful
-         * to do with a failure, matches [PhoneRelay]'s own "fire and forget" reasoning) if the
-         * entry has aged out of the capped history, or if neither a live PendingIntent nor a
-         * launchable package was found.
+         * FIXED 22/09/2026 (Yann : "le bouton afficher sur téléphone ne fait rien") — la première
+         * version appelait `.send()` directement sur le PendingIntent (comme [fireAction] le fait
+         * déjà pour un bouton d'action) : ça ne marche PAS de façon fiable ici, parce que ce
+         * service tourne en arrière-plan pur (déclenché par un message Bluetooth de la montre,
+         * sans fenêtre visible) — Android bloque le démarrage direct d'une ACTIVITY depuis un tel
+         * contexte ("Background Activity Launch restrictions", en vigueur depuis Android 10) sauf
+         * pour un PendingIntent qui bénéficie ENCORE de l'autorisation temporaire accordée par le
+         * système au moment où sa notification source a été postée — une fenêtre courte, souvent
+         * déjà expirée. Le repli [launchAppPendingIntent] (créé par CETTE app, jamais rattaché à
+         * aucune notification) n'a lui JAMAIS cette autorisation — exactement le cas d'un match
+         * Sofascore, qui n'a souvent pas de contentIntent propre, d'où "ne fait rien".
+         *
+         * La seule chose qu'une app en arrière-plan peut TOUJOURS faire de façon fiable, c'est
+         * POSTER une notification. Donc au lieu d'essayer d'ouvrir quoi que ce soit directement,
+         * ceci poste une notification normale (pas ongoing, auto-annulée au tap) reprenant
+         * titre/texte/image déjà calculés par [resolveAllNotifEntryContent] pour cette même
+         * entrée (widget "Dernière notif" / synchro montre), avec le même openIntent (résolu ou de
+         * repli) comme cible de tap — un tap RÉEL de l'utilisateur sur cette notification, lui,
+         * profite bien de l'autorisation système normale, exactement comme l'app le fait déjà pour
+         * sa propre notification miroir (voir MirrorNotificationListener.mirror). Retourne false
+         * (silencieusement — même raisonnement "best effort" que [PhoneRelay]) si l'entrée est
+         * sortie de l'historique plafonné, ou si aucune cible d'ouverture n'a pu être résolue.
          */
         fun openEntry(context: Context, key: String, postTimeMillis: Long): Boolean {
-            val entryId = allNotifEntryId(key, postTimeMillis)
-            val target = liveAllNotifIntents[entryId] ?: run {
-                val entry = WidgetAllNotificationsStore.get(context)
-                    .firstOrNull { it.key == key && it.postTimeMillis == postTimeMillis } ?: return false
-                val isMatch = entry.kind == WidgetAllNotificationsStore.Kind.SOFASCORE_MATCH
-                val fallbackPackage = if (isMatch) SofascoreNotificationListenerService.SOFASCORE_PACKAGE else entry.packageName
-                fallbackPackage?.let { launchAppPendingIntent(context, it) }
-            } ?: return false
+            val entry = WidgetAllNotificationsStore.get(context)
+                .firstOrNull { it.key == key && it.postTimeMillis == postTimeMillis } ?: return false
+            val content = resolveAllNotifEntryContent(context, entry)
+            val openIntent = content.openIntent ?: return false
+
             return try {
-                target.send()
+                ensureOpenOnPhoneChannel(context)
+                val builder = NotificationCompat.Builder(context, OPEN_ON_PHONE_CHANNEL_ID)
+                    .setSmallIcon(R.drawable.ic_stat_mirror)
+                    .setContentTitle(content.title.ifBlank { context.getString(R.string.app_name) })
+                    .setContentText(content.text)
+                    .setStyle(NotificationCompat.BigTextStyle().bigText(content.text))
+                    .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                    .setCategory(NotificationCompat.CATEGORY_STATUS)
+                    .setAutoCancel(true)
+                    .setContentIntent(openIntent)
+                content.image?.let { builder.setLargeIcon(it) }
+                NotificationManagerCompat.from(context).notify(OPEN_ON_PHONE_NOTIFICATION_ID, builder.build())
                 true
             } catch (_: Throwable) {
                 false
             }
+        }
+
+        /** Crée (idempotent) le canal de [openEntry] — même schéma que MirrorNotificationListener.createChannel. */
+        private fun ensureOpenOnPhoneChannel(context: Context) {
+            if (Build.VERSION.SDK_INT < 26) return
+            val channel = NotificationChannel(
+                OPEN_ON_PHONE_CHANNEL_ID,
+                context.getString(R.string.open_on_phone_channel_name),
+                NotificationManager.IMPORTANCE_DEFAULT
+            ).apply {
+                description = context.getString(R.string.open_on_phone_channel_description)
+            }
+            context.getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
         }
 
         /**
