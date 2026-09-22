@@ -17,6 +17,8 @@ import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
+import android.app.Notification
+import android.os.Build
 import android.os.SystemClock
 import android.view.View
 import android.widget.RemoteViews
@@ -29,8 +31,48 @@ import com.yann.nowbarmirror.sport.SofascoreNotificationListenerService
 /** One notification action, rendered as a small text button (the action's own label) in the widget. */
 data class WidgetAction(
     val label: String,
-    val pendingIntent: PendingIntent
-)
+    val pendingIntent: PendingIntent,
+    // NEW 21/09/2026 (Yann: "les notifications dont une action est supprimer ou marquer comme lu,
+    // je clique dessus et rien ne se passe [...] ça marche très bien dans la Now Bar") — true for a
+    // "silent" action, one the source app itself never shows any UI for (getShowsUserInterface() ==
+    // false) whose role is one that normally makes the notification disappear once handled (mark as
+    // read / delete / archive / mute). Tapping such a button for real, in the Now Bar/shade, also
+    // has the SYSTEM auto-cancel that notification as part of that exact click-dispatch code path —
+    // that auto-cancel is what actually makes it disappear, not something the action's own
+    // PendingIntent does by itself. Replaying that same PendingIntent from anywhere else (our
+    // widget button, the watch relay) never goes through that dispatch path: the source app still
+    // does its real work (WhatsApp/Gmail do mark the item read/delete it), but nothing here ever
+    // reflects it, which is exactly what looked like "rien ne se passe". "Appeler"/"Répondre"-style
+    // actions (showsUserInterface == true) don't have this problem — they open their own screen, so
+    // this stays false for those and they're untouched. See [WidgetAction.from], [fireAction] and
+    // NowBarWidgetProvider.actionFirePendingIntent for how this flag is used to fix it.
+    val dismissesOnFire: Boolean = false
+) {
+    companion object {
+        private val DISMISSING_SEMANTIC_ACTIONS = setOf(
+            Notification.Action.SEMANTIC_ACTION_MARK_AS_READ,
+            Notification.Action.SEMANTIC_ACTION_DELETE,
+            Notification.Action.SEMANTIC_ACTION_ARCHIVE,
+            Notification.Action.SEMANTIC_ACTION_MUTE
+        )
+
+        /**
+         * Builds a [WidgetAction] from one of a notification's own [Notification.Action]s, or null
+         * if it has no usable label/PendingIntent — shared by MirrorNotificationListener's and
+         * SofascoreNotificationListenerService's own widgetActionsFor. getSemanticAction()/
+         * getShowsUserInterface() only exist from API 28 — below that [dismissesOnFire] is simply
+         * left false, no worse than before this fix.
+         */
+        fun from(action: Notification.Action): WidgetAction? {
+            val pi = action.actionIntent ?: return null
+            val label = action.title?.toString()?.takeIf { it.isNotBlank() } ?: return null
+            val dismissesOnFire = Build.VERSION.SDK_INT >= 28 &&
+                !action.showsUserInterface &&
+                action.semanticAction in DISMISSING_SEMANTIC_ACTIONS
+            return WidgetAction(label = label, pendingIntent = pi, dismissesOnFire = dismissesOnFire)
+        }
+    }
+}
 
 /**
  * One Sofascore match as pushed from SofascoreNotificationListenerService.pushWidgetMatches — see
@@ -261,6 +303,11 @@ class NowBarWidgetProvider : AppWidgetProvider() {
         // so no actual clash, but distinct ranges make this easier to reason about).
         private const val PEEK_REQUEST_CODE_SPORT_BASE = 4300
         private const val PEEK_REQUEST_CODE_ALL_NOTIFS_BASE = 4400
+
+        // Base request code for a "silent" action button's routed PendingIntent (see
+        // actionFirePendingIntent) — up to 3 of these (actionIndex 0..2) can be visible at once,
+        // unlike the single dismiss button that gets away with a fixed request code of 0.
+        private const val ACTION_FIRE_REQUEST_CODE_BASE = 4500
 
         // Same in-memory-only trick as liveAllNotifIntents/liveAllNotifActions below, for the Sofascore view: one live
         // PendingIntent/action-list per match key, refreshed on every pushSofascoreMatches call. A
@@ -500,23 +547,34 @@ class NowBarWidgetProvider : AppWidgetProvider() {
 
         /**
          * Fires the [actionIndex]-th action button of the entry identified by ([key],
-         * [postTimeMillis]) — called by WearActionRelayService when the watch's notification
-         * detail screen's own action chip is tapped (NEW 21/09/2026). Reuses the exact same live,
-         * in-memory [liveAllNotifActions] map the widget's own action buttons already read (see
-         * that field's doc) — same PendingIntent, so pressing an action on the watch does exactly
-         * what pressing it on the widget/phone notification itself would. `false` (silently) if
-         * this process was restarted since the entry was last pushed (the PendingIntent is gone,
-         * same already-accepted limitation as the widget's own action buttons — see README's
-         * Limitations) or the index is out of range.
+         * [postTimeMillis]) — called both by the widget's own "silent" action buttons (see
+         * [WidgetAction.dismissesOnFire]/[actionFirePendingIntent], routed through
+         * MirrorNotificationListener/SofascoreNotificationListenerService's ACTION_FIRE_WIDGET_ACTION
+         * so the caller can act on the result below) and by WearActionRelayService when the watch's
+         * notification detail screen's own action chip is tapped (NEW 21/09/2026). Reuses the exact
+         * same live, in-memory [liveAllNotifActions] map the widget's own action buttons already
+         * read (see that field's doc) — same PendingIntent, so firing it here does exactly what
+         * pressing it on the widget/phone notification itself would.
+         *
+         * [FireActionResult.FIRED_DISMISS] (NEW 21/09/2026) tells the caller to ALSO cancel the
+         * source notification right after, the same way the dismiss button already does — see
+         * [WidgetAction.dismissesOnFire]'s doc for why a "silent" action (mark as read/delete/
+         * archive/mute) needs that extra step to visibly reflect anything, unlike an action that
+         * opens its own UI. [FireActionResult.NOT_FOUND] (silently) if this process was restarted
+         * since the entry was last pushed (the PendingIntent is gone, same already-accepted
+         * limitation as the widget's own action buttons — see README's Limitations), the index is
+         * out of range, or sending it threw.
          */
-        fun fireAction(key: String, postTimeMillis: Long, actionIndex: Int): Boolean {
+        enum class FireActionResult { NOT_FOUND, FIRED, FIRED_DISMISS }
+
+        fun fireAction(key: String, postTimeMillis: Long, actionIndex: Int): FireActionResult {
             val action = liveAllNotifActions[allNotifEntryId(key, postTimeMillis)]?.getOrNull(actionIndex)
-                ?: return false
+                ?: return FireActionResult.NOT_FOUND
             return try {
                 action.pendingIntent.send()
-                true
+                if (action.dismissesOnFire) FireActionResult.FIRED_DISMISS else FireActionResult.FIRED
             } catch (_: Throwable) {
-                false
+                FireActionResult.NOT_FOUND
             }
         }
 
@@ -712,6 +770,7 @@ class NowBarWidgetProvider : AppWidgetProvider() {
                 views.setViewVisibility(R.id.widget_latest_content, View.VISIBLE)
 
                 renderLatestFormat(
+                    context,
                     views,
                     title = resolvedPeek.title,
                     text = resolvedPeek.text,
@@ -723,7 +782,10 @@ class NowBarWidgetProvider : AppWidgetProvider() {
                     // as a side effect of this tap, so this can just be the real target, exactly
                     // like Dernière notif's own tap-to-open above.
                     openIntent = resolvedPeek.openIntent,
-                    actions = resolvedPeek.actions
+                    actions = resolvedPeek.actions,
+                    entryKey = resolvedPeek.entryKey,
+                    entryPostTimeMillis = resolvedPeek.entryPostTimeMillis,
+                    isMatch = resolvedPeek.isMatch
                 )
                 applyPeekLeftColumn(context, views, resolvedPeek.iconPackageName)
                 views.setViewVisibility(R.id.widget_view_toggle_right, View.GONE)
@@ -779,6 +841,7 @@ class NowBarWidgetProvider : AppWidgetProvider() {
             if (entry == null) {
                 views.setImageViewResource(R.id.widget_app_icon, R.drawable.ic_notification_bell)
                 renderLatestFormat(
+                    context,
                     views,
                     title = context.getString(R.string.widget_empty_title),
                     text = "",
@@ -796,13 +859,17 @@ class NowBarWidgetProvider : AppWidgetProvider() {
             // widget_root also contains the left/right columns, shared with the other views,
             // which must NOT open this notification when tapped) inside renderLatestFormat.
             renderLatestFormat(
+                context,
                 views,
                 title = content.title,
                 text = content.text,
                 image = content.image,
                 dismissIntent = content.dismissIntent,
                 openIntent = content.openIntent,
-                actions = content.actions
+                actions = content.actions,
+                entryKey = content.entryKey,
+                entryPostTimeMillis = content.entryPostTimeMillis,
+                isMatch = content.isMatch
             )
         }
 
@@ -1176,13 +1243,17 @@ class NowBarWidgetProvider : AppWidgetProvider() {
          * state (applyLatestIcon / applySofascoreIcon / applyAllNotifsIcon / applyPeekLeftColumn).
          */
         private fun renderLatestFormat(
+            context: Context,
             views: RemoteViews,
             title: String,
             text: String,
             image: Bitmap?,
             dismissIntent: PendingIntent?,
             openIntent: PendingIntent?,
-            actions: List<WidgetAction>
+            actions: List<WidgetAction>,
+            entryKey: String? = null,
+            entryPostTimeMillis: Long = -1L,
+            isMatch: Boolean = false
         ) {
             views.setTextViewText(R.id.widget_title, title)
             views.setTextViewText(R.id.widget_text, text)
@@ -1201,7 +1272,7 @@ class NowBarWidgetProvider : AppWidgetProvider() {
                 views.setViewVisibility(R.id.widget_dismiss, View.GONE)
             }
 
-            applyActionButtons(views, actions)
+            applyActionButtons(context, views, entryKey, entryPostTimeMillis, isMatch, actions)
 
             if (openIntent != null) {
                 views.setOnClickPendingIntent(R.id.widget_latest_content, openIntent)
@@ -1215,20 +1286,39 @@ class NowBarWidgetProvider : AppWidgetProvider() {
          * was often unreadable. Shared by the TRUE LATEST view and any "peek" — see
          * renderLatestFormat.
          */
-        private fun applyActionButtons(views: RemoteViews, actions: List<WidgetAction>) {
+        private fun applyActionButtons(
+            context: Context,
+            views: RemoteViews,
+            entryKey: String?,
+            entryPostTimeMillis: Long,
+            isMatch: Boolean,
+            actions: List<WidgetAction>
+        ) {
             val slots = listOf(
                 R.id.widget_action_1 to actions.getOrNull(0),
                 R.id.widget_action_2 to actions.getOrNull(1),
                 R.id.widget_action_3 to actions.getOrNull(2)
             )
-            for ((viewId, action) in slots) {
+            for ((index, slot) in slots.withIndex()) {
+                val (viewId, action) = slot
                 if (action == null) {
                     views.setViewVisibility(viewId, View.GONE)
                     continue
                 }
                 views.setViewVisibility(viewId, View.VISIBLE)
                 views.setTextViewText(viewId, action.label)
-                views.setOnClickPendingIntent(viewId, action.pendingIntent)
+                // "Silent" actions (mark as read/delete/archive/mute — see
+                // WidgetAction.dismissesOnFire's doc) are routed through actionFirePendingIntent
+                // instead of the raw captured PendingIntent, so firing them can also cancel the
+                // source notification afterward. Every other action (e.g. "Répondre"/"Appeler") is
+                // bound exactly as before — untouched, since those already work fine as a direct
+                // replay.
+                val target = if (action.dismissesOnFire && entryKey != null) {
+                    actionFirePendingIntent(context, isMatch, entryKey, entryPostTimeMillis, index)
+                } else {
+                    action.pendingIntent
+                }
+                views.setOnClickPendingIntent(viewId, target)
             }
 
             views.setViewVisibility(
@@ -1257,7 +1347,14 @@ class NowBarWidgetProvider : AppWidgetProvider() {
             // ever non-empty for the ALL_NOTIFS resolution path (resolveAllNotifEntryContent);
             // a SPORT peek (resolvePeek) doesn't set it — the "Score en direct"/Sport tab's own
             // tap already opens Sofascore itself, this is only for the "Notification" complication.
-            val detailLines: List<String> = emptyList()
+            val detailLines: List<String> = emptyList(),
+            // NEW 21/09/2026 (fix for "silent" action buttons — see WidgetAction.dismissesOnFire's
+            // doc) — this entry's own identity/kind, passed down to renderLatestFormat so a
+            // dismissesOnFire action can be routed through actionFirePendingIntent instead of bound
+            // directly. null/false when there's nothing to act on (the "no entry yet" placeholder).
+            val entryKey: String? = null,
+            val entryPostTimeMillis: Long = -1L,
+            val isMatch: Boolean = false
         )
 
         /**
@@ -1289,7 +1386,10 @@ class NowBarWidgetProvider : AppWidgetProvider() {
                 openIntent = liveAllNotifIntents[entryId] ?: fallbackPackage?.let { launchAppPendingIntent(context, it) },
                 actions = liveAllNotifActions[entryId] ?: emptyList(),
                 iconPackageName = fallbackPackage,
-                detailLines = liveAllNotifDetailLines[entryId] ?: emptyList()
+                detailLines = liveAllNotifDetailLines[entryId] ?: emptyList(),
+                entryKey = entry.key,
+                entryPostTimeMillis = entry.postTimeMillis,
+                isMatch = isMatch
             )
         }
 
@@ -1312,7 +1412,10 @@ class NowBarWidgetProvider : AppWidgetProvider() {
                         openIntent = liveSofascoreIntents[match.key]
                             ?: launchAppPendingIntent(context, SofascoreNotificationListenerService.SOFASCORE_PACKAGE),
                         actions = liveSofascoreActions[match.key] ?: emptyList(),
-                        iconPackageName = SofascoreNotificationListenerService.SOFASCORE_PACKAGE
+                        iconPackageName = SofascoreNotificationListenerService.SOFASCORE_PACKAGE,
+                        entryKey = match.key,
+                        entryPostTimeMillis = match.postTimeMillis,
+                        isMatch = true
                     )
                 }
                 WidgetPeekPrefs.Source.ALL_NOTIFS -> {
@@ -1365,6 +1468,49 @@ class NowBarWidgetProvider : AppWidgetProvider() {
             return PendingIntent.getService(
                 context,
                 0,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+        }
+
+        /**
+         * Routed target for a "silent" widget action button (see [WidgetAction.dismissesOnFire]) —
+         * instead of binding the notification's own captured PendingIntent directly to the button
+         * (still what every OTHER action does, see [applyActionButtons]), this goes through the
+         * same MirrorNotificationListener/SofascoreNotificationListenerService the dismiss button
+         * already targets, so firing it can ALSO cancel the source notification afterward
+         * ([fireAction]'s FIRED_DISMISS result, handled in each listener's ACTION_FIRE_WIDGET_ACTION
+         * branch) — reproducing, for these actions, the same "the notification disappears" result
+         * tapping them for real in the Now Bar already has. Symmetric to [dismissPendingIntent]/
+         * [sofascoreDismissPendingIntent] above; kept in its own request-code range
+         * ([ACTION_FIRE_REQUEST_CODE_BASE]) since up to 3 of these can be visible at once, unlike
+         * the single dismiss button.
+         */
+        private fun actionFirePendingIntent(
+            context: Context,
+            isMatch: Boolean,
+            key: String,
+            postTimeMillis: Long,
+            actionIndex: Int
+        ): PendingIntent {
+            val intent = if (isMatch) {
+                Intent(context, SofascoreNotificationListenerService::class.java).apply {
+                    action = SofascoreNotificationListenerService.ACTION_FIRE_WIDGET_ACTION
+                    putExtra(SofascoreNotificationListenerService.EXTRA_ACTION_KEY, key)
+                    putExtra(SofascoreNotificationListenerService.EXTRA_ACTION_POST_TIME, postTimeMillis)
+                    putExtra(SofascoreNotificationListenerService.EXTRA_ACTION_INDEX, actionIndex)
+                }
+            } else {
+                Intent(context, MirrorNotificationListener::class.java).apply {
+                    action = MirrorNotificationListener.ACTION_FIRE_WIDGET_ACTION
+                    putExtra(MirrorNotificationListener.EXTRA_ACTION_KEY, key)
+                    putExtra(MirrorNotificationListener.EXTRA_ACTION_POST_TIME, postTimeMillis)
+                    putExtra(MirrorNotificationListener.EXTRA_ACTION_INDEX, actionIndex)
+                }
+            }
+            return PendingIntent.getService(
+                context,
+                ACTION_FIRE_REQUEST_CODE_BASE + actionIndex,
                 intent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
