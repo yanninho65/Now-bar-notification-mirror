@@ -18,9 +18,11 @@ import org.json.JSONObject
  * retrouve et déclenche le VRAI PendingIntent (ou la VRAIE suppression) — voir
  * NowBarWidgetProvider.fireAction/dismissEntry.
  *
- * Chemins dédiés "/notifdetail/action" et "/notifdetail/dismiss", séparés de "/match"/
- * "/notification" (qui vont dans l'autre sens, téléphone -> montre) — même principe de séparation
- * par chemin que le reste de cette app (voir README, section "Deux accès notifications séparés").
+ * Chemins dédiés "/notifdetail/action", "/notifdetail/dismiss" et "/notifdetail/open" (NEW
+ * 22/09/2026, bouton "Aff. sur tél." — voir wear/NotificationDetailActivity.kt et
+ * NowBarWidgetProvider.openEntry), séparés de "/match"/"/notification" (qui vont dans l'autre
+ * sens, téléphone -> montre) — même principe de séparation par chemin que le reste de cette app
+ * (voir README, section "Deux accès notifications séparés").
  *
  * Payload JSON plutôt qu'un format délimité par un séparateur simple ("|", "::"...) : une clé de
  * notification Android (StatusBarNotification.key) contient déjà elle-même des "|" ("0|pkg|id|tag|
@@ -61,6 +63,12 @@ class WearActionRelayService : WearableListenerService() {
                 DISMISS_PATH -> {
                     NowBarWidgetProvider.dismissEntry(applicationContext, kind, key, postTimeMillis)
                 }
+                // NEW 22/09/2026 — "Aff. sur tél." pill de l'écran de détail montre : ouvre cette
+                // entrée sur LE TÉLÉPHONE (voir NowBarWidgetProvider.openEntry) plutôt que de
+                // supprimer ou d'actionner un bouton de la notification elle-même.
+                OPEN_PATH -> {
+                    NowBarWidgetProvider.openEntry(applicationContext, key, postTimeMillis)
+                }
             }
         } catch (_: Throwable) {
             // Un relais raté ne doit jamais faire planter ce service — même logique que les
@@ -72,5 +80,6 @@ class WearActionRelayService : WearableListenerService() {
     companion object {
         const val ACTION_PATH = "/notifdetail/action"
         const val DISMISS_PATH = "/notifdetail/dismiss"
+        const val OPEN_PATH = "/notifdetail/open"
     }
 }
