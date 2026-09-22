@@ -34,18 +34,19 @@ data class WidgetAction(
     val pendingIntent: PendingIntent,
     // NEW 21/09/2026 (Yann: "les notifications dont une action est supprimer ou marquer comme lu,
     // je clique dessus et rien ne se passe [...] ça marche très bien dans la Now Bar") — true for a
-    // "silent" action, one the source app itself never shows any UI for (getShowsUserInterface() ==
-    // false) whose role is one that normally makes the notification disappear once handled (mark as
-    // read / delete / archive / mute). Tapping such a button for real, in the Now Bar/shade, also
-    // has the SYSTEM auto-cancel that notification as part of that exact click-dispatch code path —
-    // that auto-cancel is what actually makes it disappear, not something the action's own
-    // PendingIntent does by itself. Replaying that same PendingIntent from anywhere else (our
-    // widget button, the watch relay) never goes through that dispatch path: the source app still
-    // does its real work (WhatsApp/Gmail do mark the item read/delete it), but nothing here ever
-    // reflects it, which is exactly what looked like "rien ne se passe". "Appeler"/"Répondre"-style
-    // actions (showsUserInterface == true) don't have this problem — they open their own screen, so
-    // this stays false for those and they're untouched. See [WidgetAction.from], [fireAction] and
-    // NowBarWidgetProvider.actionFirePendingIntent for how this flag is used to fix it.
+    // "silent" action, one whose semantic role (getSemanticAction(), see WidgetAction.from) is one
+    // that normally makes the notification disappear once handled (mark as read / delete / archive
+    // / mute). Tapping such a button for real, in the Now Bar/shade, also has the SYSTEM auto-cancel
+    // that notification as part of that exact click-dispatch code path — that auto-cancel is what
+    // actually makes it disappear, not something the action's own PendingIntent does by itself.
+    // Replaying that same PendingIntent from anywhere else (our widget button, the watch relay)
+    // never goes through that dispatch path: the source app still does its real work (WhatsApp/
+    // Gmail do mark the item read/delete it), but nothing here ever reflects it, which is exactly
+    // what looked like "rien ne se passe". "Appeler"/"Répondre"-style actions don't have this
+    // problem — they open their own screen, so this stays false for those (no well-behaved app tags
+    // a UI-opening button with one of the above semantic actions) and they're left untouched. See
+    // [WidgetAction.from], [fireAction] and NowBarWidgetProvider.actionFirePendingIntent for how
+    // this flag is used to fix it.
     val dismissesOnFire: Boolean = false
 ) {
     companion object {
@@ -59,15 +60,18 @@ data class WidgetAction(
         /**
          * Builds a [WidgetAction] from one of a notification's own [Notification.Action]s, or null
          * if it has no usable label/PendingIntent — shared by MirrorNotificationListener's and
-         * SofascoreNotificationListenerService's own widgetActionsFor. getSemanticAction()/
-         * getShowsUserInterface() only exist from API 28 — below that [dismissesOnFire] is simply
-         * left false, no worse than before this fix.
+         * SofascoreNotificationListenerService's own widgetActionsFor. [dismissesOnFire] is based on
+         * getSemanticAction() alone (API 28+, false below that, no worse than before this fix) —
+         * there's no public getter for the platform Action's own "shows no UI" hint (that flag only
+         * exists as a hidden extra androidx.core.app.NotificationCompat.Action reads back out, not
+         * on the raw platform android.app.Notification.Action this reads from), but a semantic
+         * action of mark-as-read/delete/archive/mute is already a strong enough signal on its own:
+         * a well-behaved app doesn't tag a reply/call/UI-opening button with one of those.
          */
         fun from(action: Notification.Action): WidgetAction? {
             val pi = action.actionIntent ?: return null
             val label = action.title?.toString()?.takeIf { it.isNotBlank() } ?: return null
             val dismissesOnFire = Build.VERSION.SDK_INT >= 28 &&
-                !action.showsUserInterface &&
                 action.semanticAction in DISMISSING_SEMANTIC_ACTIONS
             return WidgetAction(label = label, pendingIntent = pi, dismissesOnFire = dismissesOnFire)
         }
@@ -258,6 +262,13 @@ private fun <T> List<T>.sortedForWidget(
  *   later WidgetPeekPrefs.open, so a stale alarm can never outlive the peek it was scheduled for).
  */
 class NowBarWidgetProvider : AppWidgetProvider() {
+
+    // NEW 21/09/2026 — result of [fireAction] below. Declared directly on the class (NOT inside
+    // companion object, where a nested type isn't reachable as NowBarWidgetProvider.FireActionResult
+    // the way a companion FUNCTION is — only NowBarWidgetProvider.Companion.FireActionResult would
+    // resolve there; every call site here uses the plain NowBarWidgetProvider.FireActionResult
+    // form, which needs it declared here instead).
+    enum class FireActionResult { NOT_FOUND, FIRED, FIRED_DISMISS }
 
     companion object {
 
@@ -565,8 +576,6 @@ class NowBarWidgetProvider : AppWidgetProvider() {
          * limitation as the widget's own action buttons — see README's Limitations), the index is
          * out of range, or sending it threw.
          */
-        enum class FireActionResult { NOT_FOUND, FIRED, FIRED_DISMISS }
-
         fun fireAction(key: String, postTimeMillis: Long, actionIndex: Int): FireActionResult {
             val action = liveAllNotifActions[allNotifEntryId(key, postTimeMillis)]?.getOrNull(actionIndex)
                 ?: return FireActionResult.NOT_FOUND
