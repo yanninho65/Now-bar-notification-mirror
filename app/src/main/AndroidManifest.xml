@@ -3,6 +3,19 @@
     <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
 
     <!--
+        NEW 22/09/2026 — "Aff. sur tél." (montre) ouvre maintenant sa notification relais en
+        plein écran (voir NowBarWidgetProvider.openEntry) plutôt que comme une notification à
+        taper manuellement. Sur Android 14+ (targetSdk 34+, notre cas), cette permission n'est
+        PAS auto-accordée pour une app qui n'est ni téléphonie ni alarme : Yann doit l'activer
+        lui-même une fois (bouton dédié dans MainActivity, écran système "Notifications plein
+        écran" — voir MainActivity.setupHomeTab). Sans cet accord, Android affiche simplement la
+        notification en heads-up normal (comportement identique à avant ce changement) au lieu de
+        l'ouvrir tout seul — aucune régression, juste pas le nouveau comportement tant que ce
+        n'est pas accordé.
+    -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+
+    <!--
         Pour le traitement Sofascore (onglet Sport, com.yann.nowbarmirror.sport) — voir
         README.md, section "Fusion avec Sport Watch Complication". FOREGROUND_SERVICE_DATA_SYNC
         est requis en plus de FOREGROUND_SERVICE depuis Android 14 (targetSdk 34+) pour déclarer

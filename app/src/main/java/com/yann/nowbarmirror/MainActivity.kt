@@ -1,8 +1,10 @@
 package com.yann.nowbarmirror
 
 import android.Manifest
+import android.app.NotificationManager
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
@@ -154,6 +156,23 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        // NEW 22/09/2026 (Yann : "Aff. sur tél." doit ouvrir directement, pas juste poser une
+        // notification à taper — voir NowBarWidgetProvider.openEntry) — n'existe que sur
+        // Android 14+ : avant ça, USE_FULL_SCREEN_INTENT est une permission normale accordée
+        // automatiquement à l'installation, ce bouton n'aurait alors aucun écran système à
+        // ouvrir. Sur 14+, seules les apps téléphonie/alarme l'ont par défaut ; toute autre app
+        // doit passer par cet écran dédié pour que Yann l'accorde lui-même.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            binding.fullScreenIntentButton.visibility = View.VISIBLE
+            binding.fullScreenIntentDivider.visibility = View.VISIBLE
+            binding.fullScreenIntentStatusText.visibility = View.VISIBLE
+            binding.fullScreenIntentButton.setOnClickListener {
+                startActivity(
+                    Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, Uri.parse("package:$packageName"))
+                )
+            }
+        }
+
         binding.appSelectionButton.setOnClickListener {
             startActivity(Intent(this, AppSelectionActivity::class.java))
         }
@@ -162,6 +181,15 @@ class MainActivity : AppCompatActivity() {
     private fun refreshStatus() {
         val enabled = NotificationManagerCompat.getEnabledListenerPackages(this).contains(packageName)
         binding.statusText.text = if (enabled) getString(R.string.status_enabled) else getString(R.string.status_disabled)
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            val fullScreenAllowed = getSystemService(NotificationManager::class.java).canUseFullScreenIntent()
+            binding.fullScreenIntentStatusText.text = if (fullScreenAllowed) {
+                getString(R.string.full_screen_intent_enabled)
+            } else {
+                getString(R.string.full_screen_intent_disabled)
+            }
+        }
     }
 
     // ---- Bascule d'onglet ---------------------------------------------------

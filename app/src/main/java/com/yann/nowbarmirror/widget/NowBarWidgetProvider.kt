@@ -660,6 +660,20 @@ class NowBarWidgetProvider : AppWidgetProvider() {
          * sa propre notification miroir (voir MirrorNotificationListener.mirror). Retourne false
          * (silencieusement — même raisonnement "best effort" que [PhoneRelay]) si l'entrée est
          * sortie de l'historique plafonné, ou si aucune cible d'ouverture n'a pu être résolue.
+         *
+         * NEW 22/09/2026 (Yann : "je veux que ça ouvre l'article/le message sur le téléphone sans
+         * la supprimer [l'originale, déjà le cas] ; là ça me crée une notification identique") —
+         * la notification relais restait quelque chose qu'il fallait taper manuellement, perçue
+         * comme un doublon de la notification source. Elle est maintenant aussi posée avec
+         * [NotificationCompat.Builder.setFullScreenIntent] (même [openIntent], voir
+         * ensureOpenOnPhoneChannel's doc pour le canal HIGH que ça nécessite) : sur Android 14+
+         * (notre cible), ceci ouvre automatiquement la cible — sans tap — SI Yann a accordé
+         * l'accès "Notifications plein écran" à l'app (bouton dédié dans MainActivity ; pas
+         * auto-accordé sur 14+ pour une app hors téléphonie/alarme). Tant que ce n'est pas
+         * accordé, ou si les conditions d'auto-lancement plein écran ne sont pas réunies (p. ex.
+         * téléphone déjà déverrouillé et à l'écran), le système se rabat de lui-même sur le
+         * heads-up normal — [content.openIntent] reste donc aussi posé via setContentIntent
+         * juste en dessous, pour que le tap manuel continue de marcher dans ce cas.
          */
         // UPDATED 22/09/2026, troisième passe (Yann : "je n'arrive toujours pas à faire marcher
         // afficher sur téléphone. Rien ne se passe quand je le fais.") : la version précédente
@@ -695,6 +709,10 @@ class NowBarWidgetProvider : AppWidgetProvider() {
                     .setCategory(NotificationCompat.CATEGORY_STATUS)
                     .setAutoCancel(true)
                     .setContentIntent(openIntent)
+                    // NEW 22/09/2026 — auto-ouvre sans tap si la permission plein écran est
+                    // accordée (voir doc juste au-dessus) ; se dégrade tout seul en heads-up
+                    // normal sinon, d'où setContentIntent conservé ci-dessus comme repli.
+                    .setFullScreenIntent(openIntent, /* highPriority = */ true)
                 content.image?.let { builder.setLargeIcon(it) }
                 NotificationManagerCompat.from(context).notify(OPEN_ON_PHONE_NOTIFICATION_ID, builder.build())
                 true
