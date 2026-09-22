@@ -615,6 +615,40 @@ class NowBarWidgetProvider : AppWidgetProvider() {
         }
 
         /**
+         * NEW 22/09/2026 — opens on the PHONE the entry currently shown by the watch's
+         * "Notification" detail screen (Yann: "je veux aussi qu'il y ait afficher sur téléphone
+         * pour ouvrir la notification sur le téléphone"), called by WearActionRelayService when
+         * its "Aff. sur tél." pill (wear/NotificationDetailActivity.kt) is tapped.
+         *
+         * Fires the exact same PendingIntent tapping the widget's own "Dernière notif" tile would
+         * ([liveAllNotifIntents], same map/identity [fireAction] reads), falling back — exactly
+         * like [resolveAllNotifEntryContent]'s own openIntent — to just launching the source app
+         * (or Sofascore for a match) when this process no longer holds a live one. Looks the entry
+         * up in [WidgetAllNotificationsStore] (not just the live maps) so that fallback has a
+         * package to launch even after a process restart, same "best effort" spirit as
+         * [dismissEntry]/[fireAction] above. Returns false (silently — caller has nothing useful
+         * to do with a failure, matches [PhoneRelay]'s own "fire and forget" reasoning) if the
+         * entry has aged out of the capped history, or if neither a live PendingIntent nor a
+         * launchable package was found.
+         */
+        fun openEntry(context: Context, key: String, postTimeMillis: Long): Boolean {
+            val entryId = allNotifEntryId(key, postTimeMillis)
+            val target = liveAllNotifIntents[entryId] ?: run {
+                val entry = WidgetAllNotificationsStore.get(context)
+                    .firstOrNull { it.key == key && it.postTimeMillis == postTimeMillis } ?: return false
+                val isMatch = entry.kind == WidgetAllNotificationsStore.Kind.SOFASCORE_MATCH
+                val fallbackPackage = if (isMatch) SofascoreNotificationListenerService.SOFASCORE_PACKAGE else entry.packageName
+                fallbackPackage?.let { launchAppPendingIntent(context, it) }
+            } ?: return false
+            return try {
+                target.send()
+                true
+            } catch (_: Throwable) {
+                false
+            }
+        }
+
+        /**
          * Closes an active "peek" (see WidgetPeekPrefs' class doc) if it's currently showing the
          * notification identified by [key] — called from both listener services'
          * onNotificationRemoved AND from both dismiss handlers (MirrorNotificationListener /
