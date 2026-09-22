@@ -54,6 +54,13 @@ import java.util.concurrent.TimeUnit
  * (texte simple ou historique) n'a plus de fond derrière chaque ligne, comme une notification
  * système (voir [lineCard]).
  *
+ * UPDATED 22/09/2026, troisième passe (Yann) : image de la notif et icône de l'app désormais côte
+ * à côte, groupe centré sur la ligne (avant : chacune poussée vers un bord opposé par un View à
+ * poids — voir activity_notification_detail.xml). Titre/texte/lignes d'historique reprennent
+ * INCONDITIONNELLEMENT la police et la taille du thème système
+ * (?android:attr/textAppearanceLarge / Medium — voir le layout XML et [lineCard]) au lieu de
+ * tailles codées en dur — "N'en fais pas une option, je voudrais que ça soit toujours le cas".
+ *
  * `android.app.Activity` plutôt que ComponentActivity/AppCompatActivity : cet écran n'a besoin
  * d'aucune Fragment ni ActionBar, et ni androidx.activity ni androidx.appcompat ne sont déjà des
  * dépendances de ce module (voir wear/build.gradle.kts) — pas la peine d'en ajouter une pour ça.
@@ -214,12 +221,20 @@ class NotificationDetailActivity : Activity() {
      * UPDATED 22/09/2026 (Yann : "Ne pas mettre de fond sur le texte de la notif comme les
      * notifications système") : simple texte empilé, sans carte/fond derrière chaque ligne — juste
      * un espacement vertical entre les lignes, comme le corps d'une notification système.
+     *
+     * UPDATED 22/09/2026 x2 (Yann : "Grossis les polices [...] taille système [...] toujours le
+     * cas") : même traitement que detail_text dans le layout XML
+     * (?android:attr/textAppearanceMedium), mais posé en code puisque ces TextViews sont
+     * construites dynamiquement — @Suppress("DEPRECATION") : la variante à un seul argument de
+     * setTextAppearance n'existe qu'à partir de l'API 23, celle-ci (Context, Int) fonctionne à
+     * toutes les API et évite d'ajouter androidx.core comme dépendance juste pour ça.
      */
+    @Suppress("DEPRECATION")
     private fun lineCard(text: String): TextView {
         return TextView(this).apply {
             this.text = text
+            setTextAppearance(context, android.R.style.TextAppearance_DeviceDefault_Medium)
             setTextColor(resources.getColor(R.color.detail_text_primary, theme))
-            textSize = 13f
             gravity = android.view.Gravity.CENTER
             val params = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
