@@ -54,4 +54,38 @@ object NotificationInfoStore {
 
     @Volatile
     var current: NotificationInfo? = null
+
+    /**
+     * UPDATED 22/09/2026 (Yann : "quand je clique sur la complication, ça m'ouvre la dernière
+     * notification que j'ai ouverte [...] je dois faire retour puis recliquer pour voir
+     * l'actuelle [...] ça devrait se mettre à jour quand j'ouvre") — point d'écriture UNIQUE pour
+     * [current], utilisé par NotificationComplicationService/NotificationDetailActivity chaque
+     * fois qu'ils relisent l'item persistant "/notification" en repli (voir leur
+     * `fetchPersistedNotification`'s doc). Ces deux relectures partaient du principe qu'une
+     * lecture directe de la Data Layer est TOUJOURS au moins aussi fraîche que ce qui est déjà en
+     * mémoire — vrai seulement juste après un redémarrage du process (le cas qu'elles visaient à
+     * couvrir). Si une notification venait tout juste d'arriver et que [current] avait déjà la
+     * bonne valeur EN DIRECT (NotificationDataListenerService.onDataChanged, qui décode
+     * l'événement lui-même, sans round-trip), une relecture lancée en parallèle pouvait courir
+     * contre une synchronisation Data Layer pas encore totalement propagée côté montre et
+     * renvoyer une version PLUS ANCIENNE — écrasant silencieusement un affichage déjà correct par
+     * du contenu périmé (exactement le symptôme de Yann : "revenir + recliquer" laissait le temps
+     * à cette synchronisation de rattraper son retard avant la relecture suivante).
+     *
+     * Comparaison par [NotificationInfo.entryPostTimeMillis] : n'applique [candidate] que s'il
+     * n'est pas plus ancien que [current] (jamais de retour en arrière). `null` (état "cleared"
+     * explicite, voir mobile/WatchNotificationSync.sendCleared) est toujours appliqué — ce n'est
+     * pas une notification concurrente plus ancienne, c'est un signal explicite qu'il n'y a plus
+     * rien à montrer. Renvoie ce qui est effectivement retenu (le candidat s'il a été appliqué,
+     * sinon ce qui était déjà là) : l'appelant peut afficher directement cette valeur sans avoir à
+     * connaître cette garde.
+     */
+    @Synchronized
+    fun updateIfNotOlder(candidate: NotificationInfo?): NotificationInfo? {
+        val previous = current
+        val shouldApply = candidate == null || previous == null ||
+            candidate.entryPostTimeMillis >= previous.entryPostTimeMillis
+        if (shouldApply) current = candidate
+        return if (shouldApply) candidate else previous
+    }
 }

@@ -46,6 +46,11 @@ import java.util.concurrent.TimeUnit
  * perceptible, qui garantit que les deux composants se resynchronisent sur la même vérité de
  * référence à chaque fois plutôt que de dériver chacun de leur côté. Ne retombe sur le cache mémoire
  * que si cette relecture locale échoue elle-même (cas rare).
+ *
+ * UPDATED 22/09/2026 : cette relecture elle-même pouvait, par une course avec une synchronisation
+ * Data Layer pas encore terminée, renvoyer une version PLUS ANCIENNE que ce que [NotificationInfoStore]
+ * avait déjà reçu en direct — voir [fetchPersistedNotification] et NotificationInfoStore.
+ * updateIfNotOlder's doc pour le correctif (jamais de retour en arrière).
  */
 class NotificationComplicationService : ComplicationDataSourceService() {
 
@@ -113,8 +118,11 @@ class NotificationComplicationService : ComplicationDataSourceService() {
             try {
                 val item = items.firstOrNull { it.uri.path == NOTIFICATION_PATH }
                 val info = item?.let { NotificationDataCodec.decode(this, DataMapItem.fromDataItem(it).dataMap) }
-                NotificationInfoStore.current = info
-                FetchOutcome.Success(info)
+                // UPDATED 22/09/2026 : passe par NotificationInfoStore.updateIfNotOlder plutôt
+                // qu'une affectation directe — voir sa doc pour le bug que ça corrige (cette
+                // relecture pouvait sinon écraser une valeur en direct déjà correcte par une
+                // version plus ancienne encore en cours de synchronisation).
+                FetchOutcome.Success(NotificationInfoStore.updateIfNotOlder(info))
             } finally {
                 items.release()
             }

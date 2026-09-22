@@ -16,4 +16,10 @@
          teinte que les pilules d'action (detail_chip_bg), icône blanche plutôt que rouge. -->
     <color name="detail_delete_bg">#3A3A3C</color>
     <color name="detail_delete_icon">#FFFFFF</color>
+    <!-- NEW 22/09/2026 (Yann : "il manque une animation [...] le bouton [...] devient un peu
+         blanc pour le signaler") : variantes éclaircies de detail_chip_bg/detail_delete_bg pour
+         l'état `state_pressed` des deux drawables (bg_action_chip.xml, bg_delete_button.xml) —
+         voir NotificationDetailActivity.addPressFeedback pour l'effet complet (fond + scale). -->
+    <color name="detail_chip_bg_pressed">#4A4A4D</color>
+    <color name="detail_delete_bg_pressed">#58585A</color>
 </resources>

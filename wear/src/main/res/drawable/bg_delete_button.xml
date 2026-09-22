@@ -1,7 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- NEW 21/09/2026, écran de détail : bouton rond de suppression, en bas de l'écran (style
-     bouton d'action circulaire Galaxy Watch). -->
-<shape xmlns:android="http://schemas.android.com/apk/res/android"
-    android:shape="oval">
-    <solid android:color="@color/detail_delete_bg" />
-</shape>
+     bouton d'action circulaire Galaxy Watch).
+
+     UPDATED 22/09/2026 (Yann : "il manque une animation pour montrer que j'ai appuyé [...] le
+     bouton [...] devient un peu blanc pour le signaler") : simple <shape> avant, sans state list,
+     donc sans aucun retour visuel au toucher — devient un <selector> avec un état `state_pressed`
+     plus clair (detail_delete_bg_pressed), même principe que bg_action_chip.xml. Le rétrécissement
+     (scale) est géré séparément, en code, par NotificationDetailActivity.addPressFeedback. -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_pressed="true">
+        <shape android:shape="oval">
+            <solid android:color="@color/detail_delete_bg_pressed" />
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="oval">
+            <solid android:color="@color/detail_delete_bg" />
+        </shape>
+    </item>
+</selector>

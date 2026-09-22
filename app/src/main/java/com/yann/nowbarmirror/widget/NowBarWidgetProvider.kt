@@ -618,9 +618,18 @@ class NowBarWidgetProvider : AppWidgetProvider() {
             context.startService(intent)
         }
 
-        // NEW 22/09/2026 — canal dédié à la notification que [openEntry] poste (IMPORTANCE_DEFAULT,
-        // PAS ongoing — distinct du canal "mirror" de MirrorNotificationListener, IMPORTANCE_LOW).
-        private const val OPEN_ON_PHONE_CHANNEL_ID = "open_on_phone"
+        // NEW 22/09/2026 — canal dédié à la notification que [openEntry] poste (PAS ongoing —
+        // distinct du canal "mirror" de MirrorNotificationListener, IMPORTANCE_LOW).
+        //
+        // UPDATED 22/09/2026, troisième passe : renommé "open_on_phone" -> "open_on_phone_v2" en
+        // passant son importance à HIGH (voir openEntry's et ensureOpenOnPhoneChannel's doc) —
+        // l'importance d'un canal Android est figée à sa création et n'est PLUS modifiable par le
+        // code une fois le canal créé une première fois (seul l'utilisateur peut la changer, dans
+        // les réglages système) ; comme ce canal existait déjà (IMPORTANCE_DEFAULT) sur tout
+        // appareil ayant déjà testé la passe précédente, ré-appeler createNotificationChannel avec
+        // une importance différente sur le MÊME id n'aurait silencieusement rien changé. Un
+        // nouvel id force la création d'un canal réellement neuf avec la bonne importance.
+        private const val OPEN_ON_PHONE_CHANNEL_ID = "open_on_phone_v2"
         private const val OPEN_ON_PHONE_NOTIFICATION_ID = 916_001
 
         /**
@@ -652,6 +661,23 @@ class NowBarWidgetProvider : AppWidgetProvider() {
          * (silencieusement — même raisonnement "best effort" que [PhoneRelay]) si l'entrée est
          * sortie de l'historique plafonné, ou si aucune cible d'ouverture n'a pu être résolue.
          */
+        // UPDATED 22/09/2026, troisième passe (Yann : "je n'arrive toujours pas à faire marcher
+        // afficher sur téléphone. Rien ne se passe quand je le fais.") : la version précédente
+        // (poster une notification normale plutôt que .send() le PendingIntent directement, seule
+        // façon fiable de démarrer une Activity depuis ce contexte pur arrière-plan — voir
+        // toujours la doc juste en dessous pour ce raisonnement, inchangé) était logiquement
+        // correcte, mais deux choses pouvaient la faire passer inaperçue :
+        // 1) [entry] n'est retrouvée que si elle est encore dans l'historique plafonné à 5 de
+        //    WidgetAllNotificationsStore — si l'écran de détail montre affichait une notification
+        //    déjà périmée/évincée (le bug corrigé ci-dessus, voir NotificationInfoStore.
+        //    updateIfNotOlder), "Aff. sur tél." visait alors une entrée qui n'existe déjà plus
+        //    côté téléphone : `return false` silencieux, rien à voir avec ce bouton lui-même.
+        // 2) IMPORTANCE_DEFAULT ne déclenche ni pop-up ("heads-up") ni son : la notification était
+        //    bel et bien postée, mais atterrissait silencieusement dans le volet, indiscernable
+        //    de "rien ne s'est passé" si l'écran du téléphone était éteint ou ailleurs.
+        // Le point 1) devrait déjà être largement résolu par le correctif de fraîcheur ci-dessus.
+        // Pour le point 2), IMPORTANCE_HIGH (+ vibration) donne une confirmation immédiate et
+        // indiscutable que l'appui a bien été relayé, même écran éteint.
         fun openEntry(context: Context, key: String, postTimeMillis: Long): Boolean {
             val entry = WidgetAllNotificationsStore.get(context)
                 .firstOrNull { it.key == key && it.postTimeMillis == postTimeMillis } ?: return false
@@ -665,7 +691,7 @@ class NowBarWidgetProvider : AppWidgetProvider() {
                     .setContentTitle(content.title.ifBlank { context.getString(R.string.app_name) })
                     .setContentText(content.text)
                     .setStyle(NotificationCompat.BigTextStyle().bigText(content.text))
-                    .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                    .setPriority(NotificationCompat.PRIORITY_HIGH)
                     .setCategory(NotificationCompat.CATEGORY_STATUS)
                     .setAutoCancel(true)
                     .setContentIntent(openIntent)
@@ -683,9 +709,13 @@ class NowBarWidgetProvider : AppWidgetProvider() {
             val channel = NotificationChannel(
                 OPEN_ON_PHONE_CHANNEL_ID,
                 context.getString(R.string.open_on_phone_channel_name),
-                NotificationManager.IMPORTANCE_DEFAULT
+                // UPDATED 22/09/2026 : IMPORTANCE_HIGH (au lieu de DEFAULT) — voir openEntry's doc
+                // juste au-dessus, point 2). IMPORTANCE_DEFAULT ne déclenche ni pop-up ni son,
+                // donc rien ne distinguait visuellement "ça a marché" de "rien ne s'est passé".
+                NotificationManager.IMPORTANCE_HIGH
             ).apply {
                 description = context.getString(R.string.open_on_phone_channel_description)
+                enableVibration(true)
             }
             context.getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
         }

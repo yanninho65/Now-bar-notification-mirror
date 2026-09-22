@@ -8,6 +8,7 @@ import android.graphics.PorterDuff
 import android.graphics.PorterDuffXfermode
 import android.graphics.RectF
 import android.os.Bundle
+import android.view.MotionEvent
 import android.view.View
 import android.widget.Button
 import android.widget.ImageButton
@@ -102,6 +103,12 @@ class NotificationDetailActivity : Activity() {
         // relecture ci-dessous, souvent déjà correct) puis écrase avec le résultat de la relecture
         // de l'item persistant — un appel purement local, quelques dizaines de ms — dès qu'il
         // arrive, sauf si cette relecture échoue elle-même (repli sur ce qui est déjà affiché).
+        //
+        // UPDATED 22/09/2026 : cette relecture passe maintenant par
+        // NotificationInfoStore.updateIfNotOlder (voir sa doc), qui peut renvoyer soit le résultat
+        // de la relecture soit ce qui était déjà affiché (jamais de retour en arrière vers une
+        // notification plus ancienne) — donc `render(outcome.info)` ci-dessous ne peut plus
+        // régresser visuellement, même si le round-trip Data Layer avait pris du retard.
         NotificationInfoStore.current?.let { render(it) } ?: renderEmpty()
 
         Thread {
@@ -143,21 +150,22 @@ class NotificationDetailActivity : Activity() {
         // En-tête, UPDATED 22/09/2026 (Yann : "Mettre image notif et icone appli en haut sur même
         // ligne (image à gauche, icone à droite)") — chaque emplacement montre désormais SA propre
         // image seulement : plus de repli de l'un sur l'autre (avant : l'image en grand retombait
-        // sur l'icône de l'app quand la notif n'avait pas sa propre image). Nom d'app affiché
-        // seulement pour Sofascore (seul cas où on connaît un nom fiable sans PackageManager côté
-        // montre, qui n'a pas forcément l'app source installée — voir la doc de classe).
+        // sur l'icône de l'app quand la notif n'avait pas sa propre image).
+        //
+        // UPDATED 22/09/2026 x2 (Yann : "le nom sofascore s'affiche en haut alors que je ne
+        // voulais que image et icône. C'est la seule appli pour laquelle ça arrive.") : le nom
+        // d'app n'est plus jamais affiché, pour aucune appli — [appNameView] reste dans le layout
+        // (au cas où un texte de repli redevienne utile un jour) mais n'est plus jamais rendu
+        // visible ; ce cas Sofascore était le SEUL endroit du code qui l'activait (seule appli
+        // pour laquelle un nom fiable est connu sans PackageManager côté montre, qui n'a pas
+        // forcément l'app source installée), d'où le fait que "ça n'arrivait que pour Sofascore".
         if (info.appIcon != null) {
             appIconView.setImageBitmap(circularBitmap(info.appIcon))
             appIconView.visibility = View.VISIBLE
         } else {
             appIconView.visibility = View.GONE
         }
-        if (info.kind == "SOFASCORE_MATCH") {
-            appNameView.text = "Sofascore"
-            appNameView.visibility = View.VISIBLE
-        } else {
-            appNameView.visibility = View.GONE
-        }
+        appNameView.visibility = View.GONE
 
         if (info.image != null) {
             imageView.setImageBitmap(circularBitmap(info.image))
@@ -209,11 +217,42 @@ class NotificationDetailActivity : Activity() {
         actionsContainer.visibility = View.VISIBLE
 
         deleteButton.visibility = View.VISIBLE
+        addPressFeedback(deleteButton)
         deleteButton.setOnClickListener {
             PhoneRelay.sendDismiss(applicationContext, info)
             // Retour immédiat, sans attendre la confirmation asynchrone du téléphone — même esprit
             // que le reste de cette app (voir PhoneRelay's doc).
             finish()
+        }
+    }
+
+    /**
+     * NEW 22/09/2026 (Yann : "quand je clique sur les boutons de la fenêtre, il manque une
+     * animation pour montrer que j'ai appuyé. Par exemple, sur les notifs système, le bouton se
+     * réduit légèrement et devient un peu blanc pour le signaler.") : les pilules d'action et le
+     * bouton de suppression n'avaient aucun retour tactile — leur fond est un simple `<shape>`
+     * sans state list (bg_action_chip.xml / bg_delete_button.xml), donc sans le retour visuel par
+     * défaut qu'un Button/ImageButton a normalement avec l'arrière-plan système. Reproduit les
+     * DEUX effets décrits : léger rétrécissement (scale 0.94, animé) ET éclaircissement du fond
+     * (via l'état `state_pressed` désormais présent dans ces deux drawables, voir
+     * detail_chip_bg_pressed/detail_delete_bg_pressed dans colors.xml).
+     *
+     * En OnTouchListener plutôt que dans OnClickListener pour réagir dès l'appui (ACTION_DOWN),
+     * pas seulement au relâchement — exactement comme le retour système. Revient à l'état normal
+     * aussi bien sur un relâchement (ACTION_UP) que sur un doigt qui glisse hors du bouton avant
+     * de le relâcher (ACTION_CANCEL). Renvoie toujours `false` : ce listener ne fait QUE l'anim,
+     * le clic normal (OnClickListener, posé séparément par l'appelant) continue de se déclencher
+     * comme avant.
+     */
+    private fun addPressFeedback(view: View) {
+        view.setOnTouchListener { v, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN ->
+                    v.animate().scaleX(0.94f).scaleY(0.94f).setDuration(80).start()
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL ->
+                    v.animate().scaleX(1f).scaleY(1f).setDuration(120).start()
+            }
+            false
         }
     }
 
@@ -278,6 +317,7 @@ class NotificationDetailActivity : Activity() {
             params.bottomMargin = dp(8)
             layoutParams = params
             setOnClickListener { onClick() }
+            addPressFeedback(this)
         }
     }
 
@@ -318,8 +358,11 @@ class NotificationDetailActivity : Activity() {
             try {
                 val item = items.firstOrNull { it.uri.path == NOTIFICATION_PATH }
                 val info = item?.let { NotificationDataCodec.decode(this, DataMapItem.fromDataItem(it).dataMap) }
-                NotificationInfoStore.current = info
-                FetchOutcome.Success(info)
+                // UPDATED 22/09/2026 : passe par NotificationInfoStore.updateIfNotOlder plutôt
+                // qu'une affectation directe — voir sa doc pour le bug corrigé (Yann : "ça m'ouvre
+                // la dernière notification que j'ai ouverte [...] je dois faire retour puis
+                // recliquer pour voir l'actuelle").
+                FetchOutcome.Success(NotificationInfoStore.updateIfNotOlder(info))
             } finally {
                 items.release()
             }
