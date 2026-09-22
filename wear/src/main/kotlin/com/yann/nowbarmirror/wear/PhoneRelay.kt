@@ -27,6 +27,7 @@ object PhoneRelay {
 
     private const val ACTION_PATH = "/notifdetail/action"
     private const val DISMISS_PATH = "/notifdetail/dismiss"
+    private const val OPEN_PATH = "/notifdetail/open"
     private const val NODE_FETCH_TIMEOUT_SECONDS = 3L
 
     fun sendAction(context: Context, info: NotificationInfo, actionIndex: Int) {
@@ -35,6 +36,12 @@ object PhoneRelay {
 
     fun sendDismiss(context: Context, info: NotificationInfo) {
         send(context, DISMISS_PATH, payload(info))
+    }
+
+    // NEW 22/09/2026 — pill "Aff. sur tél." de l'écran de détail : demande au téléphone d'ouvrir
+    // cette entrée là-bas (voir NowBarWidgetProvider.openEntry côté mobile/WearActionRelayService.kt).
+    fun sendOpen(context: Context, info: NotificationInfo) {
+        send(context, OPEN_PATH, payload(info))
     }
 
     private inline fun payload(info: NotificationInfo, extra: JSONObject.() -> Unit = {}): ByteArray {

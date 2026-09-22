@@ -36,6 +36,15 @@ import java.util.concurrent.TimeUnit
  * bas, et le geste de balayage standard Wear OS pour fermer l'écran ([setupSwipeToDismiss]) plutôt
  * qu'un bouton "retour" dédié.
  *
+ * UPDATED 22/09/2026 (Yann, capture à l'appui du vrai menu de notification Galaxy Watch) : les
+ * pilules d'action sont désormais PLEINE LARGEUR et empilées verticalement (voir [actionChip],
+ * detail_actions_container) plutôt que des petits chips côte à côte, pour coller exactement à ce
+ * style natif. Une pilule "Aff. sur tél." (`R.string.action_view_on_phone`) est TOUJOURS ajoutée
+ * après les actions propres de la notification — tape sur cette entrée sur le TÉLÉPHONE
+ * ([PhoneRelay.sendOpen] -> mobile/WearActionRelayService.kt -> NowBarWidgetProvider.openEntry).
+ * Explicitement PAS de pilule "Bloquer notifications" (présente dans le menu système natif mais
+ * volontairement exclue ici, Yann : "Ne mets pas bloquer notifications").
+ *
  * `android.app.Activity` plutôt que ComponentActivity/AppCompatActivity : cet écran n'a besoin
  * d'aucune Fragment ni ActionBar, et ni androidx.activity ni androidx.appcompat ne sont déjà des
  * dépendances de ce module (voir wear/build.gradle.kts) — pas la peine d'en ajouter une pour ça.
@@ -161,16 +170,27 @@ class NotificationDetailActivity : Activity() {
 
         // Boutons d'action — seuls les LIBELLÉS ont pu traverser jusqu'à la montre (voir
         // NotificationInfo's doc) ; le tap envoie juste "actionIndex=N" au téléphone, qui retrouve
-        // le vrai PendingIntent dans son propre cache (NowBarWidgetProvider.fireAction).
+        // le vrai PendingIntent dans son propre cache (NowBarWidgetProvider.fireAction). Style
+        // Galaxy Watch natif (Yann, 22/09/2026, capture à l'appui) : une pilule PLEINE LARGEUR par
+        // action, empilées verticalement, plutôt que les petits chips côte à côte d'avant — voir
+        // actionChip()/activity_notification_detail.xml (detail_actions_container désormais
+        // vertical/match_parent). La pilule "Aff. sur tél." (NEW 22/09/2026, Yann : "je veux aussi
+        // qu'il y ait afficher sur téléphone pour ouvrir la notification sur le téléphone") est
+        // TOUJOURS ajoutée après les actions propres de la notification, contrairement à
+        // "Bloquer notifications" du menu système natif que Yann a explicitement demandé de ne PAS
+        // reproduire ici.
         actionsContainer.removeAllViews()
-        if (info.actionLabels.isNotEmpty()) {
-            actionsContainer.visibility = View.VISIBLE
-            info.actionLabels.forEachIndexed { index, label ->
-                actionsContainer.addView(actionChip(label, index))
-            }
-        } else {
-            actionsContainer.visibility = View.GONE
+        info.actionLabels.forEachIndexed { index, label ->
+            actionsContainer.addView(
+                actionChip(label) { PhoneRelay.sendAction(applicationContext, currentInfoForActions, index) }
+            )
         }
+        actionsContainer.addView(
+            actionChip(getString(R.string.action_view_on_phone)) {
+                PhoneRelay.sendOpen(applicationContext, currentInfoForActions)
+            }
+        )
+        actionsContainer.visibility = View.VISIBLE
 
         deleteButton.visibility = View.VISIBLE
         deleteButton.setOnClickListener {
@@ -197,24 +217,34 @@ class NotificationDetailActivity : Activity() {
         }
     }
 
-    private fun actionChip(label: String, index: Int): Button {
+    /**
+     * Une pilule d'action PLEINE LARGEUR, empilée verticalement avec les autres — style menu de
+     * notification Galaxy Watch natif (fond gris uni, coins très arrondis, texte gras centré),
+     * plutôt que les petits chips côte à côte d'avant. [onClick] laisse ce chip servir aussi bien
+     * une action propre de la notification (index -> PhoneRelay.sendAction) que la pilule "Aff.
+     * sur tél." (PhoneRelay.sendOpen) sans dupliquer la construction du bouton.
+     */
+    private fun actionChip(label: String, onClick: () -> Unit): Button {
         return Button(this).apply {
             text = label
             isAllCaps = false
             setTextColor(resources.getColor(R.color.detail_text_primary, theme))
-            textSize = 12f
+            textSize = 15f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            gravity = android.view.Gravity.CENTER
             setBackgroundResource(R.drawable.bg_action_chip)
-            setPadding(dp(20), dp(8), dp(20), dp(8))
+            setPadding(dp(20), dp(16), dp(20), dp(16))
             minWidth = 0
             minimumWidth = 0
+            minHeight = 0
+            minimumHeight = 0
             val params = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
             )
-            params.marginStart = dp(6)
-            params.marginEnd = dp(6)
+            params.bottomMargin = dp(8)
             layoutParams = params
-            setOnClickListener { PhoneRelay.sendAction(applicationContext, currentInfoForActions, index) }
+            setOnClickListener { onClick() }
         }
     }
 
