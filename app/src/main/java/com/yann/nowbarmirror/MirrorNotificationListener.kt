@@ -44,6 +44,17 @@ class MirrorNotificationListener : NotificationListenerService() {
         // exact (key, postTime) identity precisely instead of falling back to a key-prefix match.
         const val EXTRA_DISMISS_POST_TIME = "mirror.widget.dismiss_post_time"
 
+        // NEW 21/09/2026, fix for "silent" widget action buttons (see
+        // widget.WidgetAction.dismissesOnFire's doc) — a mark-as-read/delete/archive/mute action
+        // button targets this service directly, same PendingIntent.getService reasoning as
+        // ACTION_DISMISS_WIDGET above (keeps working even if this process had been killed), but
+        // fires the real action FIRST (see widget.NowBarWidgetProvider.fireAction) and only then
+        // cancels the source notification, instead of just cancelling outright.
+        const val ACTION_FIRE_WIDGET_ACTION = "com.yann.nowbarmirror.widget.ACTION_FIRE_ACTION"
+        const val EXTRA_ACTION_KEY = "mirror.widget.action_key"
+        const val EXTRA_ACTION_POST_TIME = "mirror.widget.action_post_time"
+        const val EXTRA_ACTION_INDEX = "mirror.widget.action_index"
+
         // NEW 21/09/2026, watch detail screen — see [messageLinesFor]'s doc.
         private const val MAX_DETAIL_LINES = 10
     }
@@ -92,47 +103,67 @@ class MirrorNotificationListener : NotificationListenerService() {
      * service can also be started explicitly — that's how the widget's dismiss button reaches
      * it: its PendingIntent (PendingIntent.getService) targets this component directly with
      * ACTION_DISMISS_WIDGET, so the tap keeps working even if this process had been killed and
-     * needs the system to spin it back up first.
+     * needs the system to spin it back up first. ACTION_FIRE_WIDGET_ACTION (NEW 21/09/2026, same
+     * PendingIntent.getService reasoning) is a "silent" action button (mark as read/delete/
+     * archive/mute — see widget.WidgetAction.dismissesOnFire's doc): fires the real action first,
+     * then — only if [NowBarWidgetProvider.fireAction] says to — runs the exact same
+     * cancel-and-sync-the-widget tail as ACTION_DISMISS_WIDGET, via [cancelOriginalAndSyncWidget].
      */
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_DISMISS_WIDGET) {
             val key = intent.getStringExtra(EXTRA_DISMISS_KEY)
             val postTimeMillis = intent.getLongExtra(EXTRA_DISMISS_POST_TIME, -1L)
             if (key != null) {
-                if (ready.get()) cancelOriginal(key) else pendingDismissKey = key
+                cancelOriginalAndSyncWidget(key, postTimeMillis)
             }
-            // Clear the widget/watch right away instead of waiting for the onNotificationRemoved
-            // round-trip, so the tap always feels instant even if cancelOriginal() above is
-            // deferred (not yet connected) or silently no-ops (original already gone). "Dernière
-            // notif"/la montre n'ont plus d'état séparé à vider (MERGED 20/09/2026, voir
-            // WidgetAllNotificationsStore's class doc) — retirer directement l'entrée de l'historique
-            // partagé suffit : requestUpdate() la redérivera correctement, et repeuplera "Dernière
-            // notif" à partir de l'entrée suivante si elle existait déjà. No-op si [key] ne
-            // correspond à aucune entrée suivie ici (ex. app non mirorée dans "Toutes notifs").
-            try {
-                if (key != null) {
-                    WidgetAllNotificationsStore.remove(applicationContext, key, postTimeMillis)
-                    NowBarWidgetProvider.requestUpdate(applicationContext)
-                }
-            } catch (_: Throwable) {
-                // The widget is a nice-to-have on top of the core mirror — never let a failure
-                // here take down this service.
-            }
-            // Same instant feedback for a "peek" (see WidgetPeekPrefs' class doc): this dismiss
-            // button might be a peek's own rather than the true-LATEST one, in which case the
-            // remove() above may be a no-op (the peeked entry isn't "Dernière notif"'s own) —
-            // closePeekIfShowing covers that case independently (Yann: "Si je supprime la
-            // notification [...] revenir automatiquement aux icônes").
-            try {
-                if (key != null) {
-                    NowBarWidgetProvider.closePeekIfShowing(applicationContext, key, postTimeMillis)
-                }
-            } catch (_: Throwable) {
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
+        if (intent?.action == ACTION_FIRE_WIDGET_ACTION) {
+            val key = intent.getStringExtra(EXTRA_ACTION_KEY)
+            val postTimeMillis = intent.getLongExtra(EXTRA_ACTION_POST_TIME, -1L)
+            val actionIndex = intent.getIntExtra(EXTRA_ACTION_INDEX, -1)
+            if (key != null && actionIndex >= 0 &&
+                NowBarWidgetProvider.fireAction(key, postTimeMillis, actionIndex) ==
+                    NowBarWidgetProvider.FireActionResult.FIRED_DISMISS
+            ) {
+                cancelOriginalAndSyncWidget(key, postTimeMillis)
             }
             stopSelf(startId)
             return START_NOT_STICKY
         }
         return super.onStartCommand(intent, flags, startId)
+    }
+
+    /**
+     * Shared tail of ACTION_DISMISS_WIDGET and a FIRED_DISMISS result from ACTION_FIRE_WIDGET_ACTION
+     * (extracted 21/09/2026 so both share the exact same "make it disappear" behavior instead of
+     * two copies drifting apart) — cancels the real original notification (or defers it until
+     * onListenerConnected if this process isn't ready yet), then clears the widget/watch right
+     * away instead of waiting for the onNotificationRemoved round-trip, so the tap always feels
+     * instant even when cancelOriginal() above is deferred or silently no-ops (original already
+     * gone). "Dernière notif"/la montre n'ont plus d'état séparé à vider (MERGED 20/09/2026, voir
+     * WidgetAllNotificationsStore's class doc) — retirer directement l'entrée de l'historique
+     * partagé suffit : requestUpdate() la redérivera correctement, et repeuplera "Dernière notif"
+     * à partir de l'entrée suivante si elle existait déjà. No-op si [key] ne correspond à aucune
+     * entrée suivie ici (ex. app non mirorée dans "Toutes notifs"). Also closes a "peek" (see
+     * WidgetPeekPrefs' class doc) showing this same entry, independently — Yann: "Si je supprime
+     * la notification ou la fais disparaitre en marquant lu ou supprimer avec les boutons
+     * d'actions, revenir automatiquement aux icônes."
+     */
+    private fun cancelOriginalAndSyncWidget(key: String, postTimeMillis: Long) {
+        if (ready.get()) cancelOriginal(key) else pendingDismissKey = key
+        try {
+            WidgetAllNotificationsStore.remove(applicationContext, key, postTimeMillis)
+            NowBarWidgetProvider.requestUpdate(applicationContext)
+        } catch (_: Throwable) {
+            // The widget is a nice-to-have on top of the core mirror — never let a failure here
+            // take down this service.
+        }
+        try {
+            NowBarWidgetProvider.closePeekIfShowing(applicationContext, key, postTimeMillis)
+        } catch (_: Throwable) {
+        }
     }
 
     private fun rebuildStateFromActiveNotifications() {
@@ -554,11 +585,7 @@ class MirrorNotificationListener : NotificationListenerService() {
         if (!WidgetActionsPrefs.isEnabled(applicationContext)) return emptyList()
         return notification.actions
             ?.take(3)
-            ?.mapNotNull { action ->
-                val pi = action.actionIntent ?: return@mapNotNull null
-                val label = action.title?.toString()?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
-                WidgetAction(label = label, pendingIntent = pi)
-            }
+            ?.mapNotNull { WidgetAction.from(it) }
             ?: emptyList()
     }
 

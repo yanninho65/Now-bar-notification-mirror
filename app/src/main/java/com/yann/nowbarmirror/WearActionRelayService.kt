@@ -47,7 +47,15 @@ class WearActionRelayService : WearableListenerService() {
                 ACTION_PATH -> {
                     val actionIndex = json.optInt("actionIndex", -1)
                     if (actionIndex >= 0) {
-                        NowBarWidgetProvider.fireAction(key, postTimeMillis, actionIndex)
+                        // NEW 21/09/2026, même correctif que côté widget (voir
+                        // widget.WidgetAction.dismissesOnFire) : une action "silencieuse" (marquer
+                        // comme lu/supprimer/archiver/muet) doit aussi faire disparaître l'entrée
+                        // ici, sans quoi l'écran de détail montre resterait affiché comme si de
+                        // rien n'était après l'appui, exactement le même symptôme que sur le widget.
+                        val result = NowBarWidgetProvider.fireAction(key, postTimeMillis, actionIndex)
+                        if (result == NowBarWidgetProvider.FireActionResult.FIRED_DISMISS) {
+                            NowBarWidgetProvider.dismissEntry(applicationContext, kind, key, postTimeMillis)
+                        }
                     }
                 }
                 DISMISS_PATH -> {
