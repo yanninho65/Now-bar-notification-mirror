@@ -155,6 +155,29 @@ class SofascoreNotificationListenerService : NotificationListenerService() {
             stopSelf(startId)
             return START_NOT_STICKY
         }
+        // NEW 21/09/2026, fix for "silent" widget action buttons (mark as read/delete/archive/
+        // mute — see widget.WidgetAction.dismissesOnFire's doc): fires the real action first, then
+        // — only if NowBarWidgetProvider.fireAction says to — dismiss() this entry exactly like
+        // ACTION_DISMISS_WIDGET above does. Actions on a Sofascore match are almost never present
+        // in practice (see widgetActionsFor's doc) but handled here for parity/consistency.
+        if (intent?.action == ACTION_FIRE_WIDGET_ACTION) {
+            val key = intent.getStringExtra(EXTRA_ACTION_KEY)
+            val postTimeMillis = intent.getLongExtra(EXTRA_ACTION_POST_TIME, -1L)
+            val actionIndex = intent.getIntExtra(EXTRA_ACTION_INDEX, -1)
+            if (key != null && actionIndex >= 0 &&
+                NowBarWidgetProvider.fireAction(key, postTimeMillis, actionIndex) ==
+                    NowBarWidgetProvider.FireActionResult.FIRED_DISMISS
+            ) {
+                if (ready.get()) {
+                    dismiss(key, postTimeMillis)
+                } else {
+                    pendingDismissKey = key
+                    pendingDismissPostTime = postTimeMillis
+                }
+            }
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
         return super.onStartCommand(intent, flags, startId)
     }
 
@@ -328,11 +351,7 @@ class SofascoreNotificationListenerService : NotificationListenerService() {
         if (!WidgetActionsPrefs.isEnabled(applicationContext)) return emptyList()
         return notification.actions
             ?.take(3)
-            ?.mapNotNull { action ->
-                val pi = action.actionIntent ?: return@mapNotNull null
-                val label = action.title?.toString()?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
-                WidgetAction(label = label, pendingIntent = pi)
-            }
+            ?.mapNotNull { WidgetAction.from(it) }
             ?: emptyList()
     }
 
@@ -682,6 +701,15 @@ class SofascoreNotificationListenerService : NotificationListenerService() {
         const val ACTION_DISMISS_WIDGET = "com.yann.nowbarmirror.widget.ACTION_DISMISS_SOFASCORE"
         const val EXTRA_DISMISS_KEY = "mirror.widget.sofascore_dismiss_key"
         const val EXTRA_DISMISS_POST_TIME = "mirror.widget.sofascore_dismiss_post_time"
+
+        // NEW 21/09/2026, fix for "silent" widget action buttons — symmetric to
+        // MirrorNotificationListener's own ACTION_FIRE_WIDGET_ACTION/EXTRA_ACTION_*, routed through
+        // THIS service for the same reason ACTION_DISMISS_WIDGET above is. See
+        // NowBarWidgetProvider.actionFirePendingIntent for the sender side.
+        const val ACTION_FIRE_WIDGET_ACTION = "com.yann.nowbarmirror.widget.ACTION_FIRE_ACTION_SOFASCORE"
+        const val EXTRA_ACTION_KEY = "mirror.widget.sofascore_action_key"
+        const val EXTRA_ACTION_POST_TIME = "mirror.widget.sofascore_action_post_time"
+        const val EXTRA_ACTION_INDEX = "mirror.widget.sofascore_action_index"
 
         private var instance: SofascoreNotificationListenerService? = null
 
