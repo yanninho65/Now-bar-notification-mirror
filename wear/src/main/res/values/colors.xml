@@ -11,6 +11,9 @@
     <color name="detail_accent">#0B69FF</color>
     <color name="detail_card_bg">#1C1C1E</color>
     <color name="detail_chip_bg">#2C2C2E</color>
-    <color name="detail_delete_bg">#3A1414</color>
-    <color name="detail_delete_icon">#FF6B6B</color>
+    <!-- UPDATED 22/09/2026 : gris neutre (au lieu du rouge d'avant) pour matcher le rond de
+         suppression du VRAI menu de notification Galaxy Watch (capture à l'appui, Yann) — même
+         teinte que les pilules d'action (detail_chip_bg), icône blanche plutôt que rouge. -->
+    <color name="detail_delete_bg">#3A3A3C</color>
+    <color name="detail_delete_icon">#FFFFFF</color>
 </resources>
