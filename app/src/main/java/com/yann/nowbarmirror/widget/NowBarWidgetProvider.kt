@@ -1,6 +1,7 @@
 package com.yann.nowbarmirror.widget
 
 import android.app.AlarmManager
+import android.app.KeyguardManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -323,6 +324,21 @@ class NowBarWidgetProvider : AppWidgetProvider() {
         // actionFirePendingIntent) — up to 3 of these (actionIndex 0..2) can be visible at once,
         // unlike the single dismiss button that gets away with a fixed request code of 0.
         private const val ACTION_FIRE_REQUEST_CODE_BASE = 4500
+
+        // NEW 22/09/2026 (Yann, écran verrouillé : "ça marche à peu près [...] mais ça affiche la
+        // notification créée par toi. On pourrait s'en passer ?") — voir openEntry's doc : la
+        // notification "Aff. sur tél." reste nécessaire pour déclencher le plein écran (l'API
+        // Android l'exige), mais une fois le tap montre déjà résolu en plein écran automatique
+        // (téléphone verrouillé, voir isDeviceLocked), elle n'a plus aucune utilité — contrairement
+        // au cas téléphone déverrouillé, où elle DOIT rester (repli tap manuel, voir openEntry).
+        // Elle s'auto-annule donc après un court délai, mais SEULEMENT si le téléphone était
+        // verrouillé au moment de l'ouverture : ce délai (au lieu d'une annulation immédiate) laisse
+        // le temps au système de déclencher le plein écran avant de faire disparaître la
+        // notification qui le porte — l'annuler trop tôt risquerait de supprimer le déclencheur
+        // avant qu'Android ait eu l'occasion de l'utiliser.
+        private const val ACTION_AUTO_CANCEL_OPEN_ON_PHONE = "com.yann.nowbarmirror.widget.ACTION_AUTO_CANCEL_OPEN_ON_PHONE"
+        private const val AUTO_CANCEL_OPEN_ON_PHONE_DELAY_MILLIS = 2_500L
+        private const val AUTO_CANCEL_OPEN_ON_PHONE_REQUEST_CODE = 4600
 
         // Same in-memory-only trick as liveAllNotifIntents/liveAllNotifActions below, for the Sofascore view: one live
         // PendingIntent/action-list per match key, refreshed on every pushSofascoreMatches call. A
@@ -674,6 +690,15 @@ class NowBarWidgetProvider : AppWidgetProvider() {
          * téléphone déjà déverrouillé et à l'écran), le système se rabat de lui-même sur le
          * heads-up normal — [content.openIntent] reste donc aussi posé via setContentIntent
          * juste en dessous, pour que le tap manuel continue de marcher dans ce cas.
+         *
+         * NEW 22/09/2026, deuxième passe (Yann, téléphone verrouillé : "ça marche à peu près [...]
+         * mais ça affiche la notification créée par toi. On pourrait s'en passer ?") — quand le
+         * téléphone est verrouillé (voir [isDeviceLocked]), le plein écran fait déjà tout le
+         * travail : la notification qui le porte n'a plus besoin de rester visible ensuite, donc
+         * [scheduleAutoCancelOpenOnPhone] la fait disparaître d'elle-même peu après. Quand il ne
+         * l'est PAS, elle reste (comme avant) : c'est le seul moyen d'ouvrir la cible dans ce cas
+         * (voir la doc juste au-dessus), l'auto-annuler la ferait disparaître avant que Yann ait pu
+         * taper dessus.
          */
         // UPDATED 22/09/2026, troisième passe (Yann : "je n'arrive toujours pas à faire marcher
         // afficher sur téléphone. Rien ne se passe quand je le fais.") : la version précédente
@@ -715,6 +740,7 @@ class NowBarWidgetProvider : AppWidgetProvider() {
                     .setFullScreenIntent(openIntent, /* highPriority = */ true)
                 content.image?.let { builder.setLargeIcon(it) }
                 NotificationManagerCompat.from(context).notify(OPEN_ON_PHONE_NOTIFICATION_ID, builder.build())
+                if (isDeviceLocked(context)) scheduleAutoCancelOpenOnPhone(context)
                 true
             } catch (_: Throwable) {
                 false
@@ -736,6 +762,29 @@ class NowBarWidgetProvider : AppWidgetProvider() {
                 enableVibration(true)
             }
             context.getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+        }
+
+        /** True while the lock screen is showing — see [openEntry]'s "deuxième passe" doc. */
+        private fun isDeviceLocked(context: Context): Boolean =
+            context.getSystemService(KeyguardManager::class.java)?.isKeyguardLocked == true
+
+        /** Schedules [ACTION_AUTO_CANCEL_OPEN_ON_PHONE] — see its own doc and [openEntry]'s "deuxième passe". */
+        private fun scheduleAutoCancelOpenOnPhone(context: Context) {
+            val alarmManager = context.getSystemService(AlarmManager::class.java) ?: return
+            val intent = Intent(context, NowBarWidgetProvider::class.java).apply {
+                action = ACTION_AUTO_CANCEL_OPEN_ON_PHONE
+            }
+            val pendingIntent = PendingIntent.getBroadcast(
+                context,
+                AUTO_CANCEL_OPEN_ON_PHONE_REQUEST_CODE,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            alarmManager.set(
+                AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                SystemClock.elapsedRealtime() + AUTO_CANCEL_OPEN_ON_PHONE_DELAY_MILLIS,
+                pendingIntent
+            )
         }
 
         /**
@@ -1773,6 +1822,16 @@ class NowBarWidgetProvider : AppWidgetProvider() {
                     WidgetPeekPrefs.close(context)
                     pushToAllWidgets(context, buildViews(context))
                 }
+                return
+            }
+            // See ACTION_AUTO_CANCEL_OPEN_ON_PHONE's own doc and openEntry's "deuxième passe" one —
+            // no entry/state to check here unlike ACTION_AUTO_CLOSE_PEEK above: a single fixed
+            // notification id (OPEN_ON_PHONE_NOTIFICATION_ID) and request code mean a fresh
+            // openEntry call always supersedes whatever cancel was previously scheduled (same
+            // reasoning as AUTO_CLOSE_PEEK_REQUEST_CODE's own doc), so this can only ever be
+            // cancelling the entry that scheduled it.
+            ACTION_AUTO_CANCEL_OPEN_ON_PHONE -> {
+                NotificationManagerCompat.from(context).cancel(OPEN_ON_PHONE_NOTIFICATION_ID)
                 return
             }
             // ACTION_OPEN_PEEK_CONTENT (a same-day attempt at closing the peek on tap-to-open by
