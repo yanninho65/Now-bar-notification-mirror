@@ -314,7 +314,11 @@ class SofascoreNotificationListenerService : NotificationListenerService() {
                 lastScorer = match.lastScorer,
                 status = match.status,
                 apiSource = match.source.name,
-                image = extractNotificationImage(sbn),
+                // Lazy (AUDIT 23/09/2026, see WidgetImageFiles): only extracted when this exact
+                // posting has no image on disk yet — a refill/bootstrap re-pushing every active
+                // match no longer re-extracts (and re-encodes) all their images.
+                image = null,
+                imageLoader = { extractNotificationImage(sbn) },
                 contentIntent = sbn.notification.contentIntent,
                 actions = widgetActionsFor(sbn.notification),
                 // NEW 21/09/2026, watch "Notification" complication detail screen (Yann: "pour
@@ -457,7 +461,10 @@ class SofascoreNotificationListenerService : NotificationListenerService() {
     fun refresh() {
         val notifications = activeSofascoreNotifications() ?: return
         if (notifications.isEmpty()) {
-            WatchSync.sendCleared(this)
+            if (lastWatchSignature != WATCH_CLEARED) {
+                WatchSync.sendCleared(this)
+                lastWatchSignature = WATCH_CLEARED
+            }
             ApiOverrideFollowService.sync(this, null, null)
             pushWidgetMatches(emptyList())
             return
@@ -484,8 +491,18 @@ class SofascoreNotificationListenerService : NotificationListenerService() {
         // (homeTeam/awayTeam ci-dessus) et cette image sont TOUJOURS ceux
         // de Sofascore, même quand un override API est actif : seuls
         // score/statut peuvent venir de l'API (voir [applyOverride]).
-        val targetImage = extractNotificationImage(target)
-        WatchSync.sendMatch(this, match, notifImage = targetImage?.let { WatchSync.bitmapToAsset(it) })
+        // AUDIT 23/09/2026 — only extract/encode the image and wake the watch over Bluetooth when
+        // something it displays actually changed: refresh() also runs on every API-override poll
+        // (every 60 s while one is active), on MainActivity interactions, and after any other
+        // Sofascore match's update, all of which usually leave the watched match untouched.
+        // Same posting (key + postTime) = same image; MatchResult is a data class, so its
+        // toString covers every displayed field.
+        val watchSignature = "${target.key}|${target.postTime}|$match"
+        if (watchSignature != lastWatchSignature) {
+            val targetImage = extractNotificationImage(target)
+            WatchSync.sendMatch(this, match, notifImage = targetImage?.let { WatchSync.bitmapToAsset(it) })
+            lastWatchSignature = watchSignature
+        }
 
         pushWidgetMatches(notifications)
     }
@@ -561,6 +578,9 @@ class SofascoreNotificationListenerService : NotificationListenerService() {
      */
     private fun pushWidgetMatches(notifications: List<StatusBarNotification>) {
         try {
+            // Images are lazy (AUDIT 23/09/2026): with many active matches (17 on a busy
+            // evening), every Sofascore event used to extract every match's image, even though
+            // at most SofascoreWidgetStore.MAX_SLOTS are kept, and those were already on disk.
             val matches = notifications.mapNotNull { sbn ->
                 val match = toMatchResult(sbn) ?: return@mapNotNull null
                 val (rawTitle, rawText) = rawTitleAndText(sbn, match)
@@ -576,7 +596,8 @@ class SofascoreNotificationListenerService : NotificationListenerService() {
                     postTimeMillis = sbn.postTime,
                     title = rawTitle,
                     text = rawText,
-                    image = extractNotificationImage(sbn),
+                    image = null,
+                    imageLoader = { extractNotificationImage(sbn) },
                     contentIntent = sbn.notification.contentIntent,
                     actions = widgetActionsFor(sbn.notification)
                 )
@@ -774,6 +795,12 @@ class SofascoreNotificationListenerService : NotificationListenerService() {
         const val EXTRA_ACTION_INDEX = "mirror.widget.sofascore_action_index"
 
         private var instance: SofascoreNotificationListenerService? = null
+
+        // AUDIT 23/09/2026 — what was last sent to the watch on "/match" (see refresh()), so an
+        // unchanged match isn't re-encoded and re-sent over Bluetooth. Process-lifetime only: the
+        // first refresh after a restart always re-sends once (idempotent on the watch side).
+        private const val WATCH_CLEARED = "cleared"
+        private var lastWatchSignature: String? = null
 
         /**
          * Appelé quand Yann change son choix de repli, sauvegarde/retire un

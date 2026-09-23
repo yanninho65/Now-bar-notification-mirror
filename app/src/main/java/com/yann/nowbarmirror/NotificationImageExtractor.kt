@@ -3,9 +3,6 @@ package com.yann.nowbarmirror
 import android.app.Notification
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.Canvas
-import android.graphics.drawable.BitmapDrawable
-import android.graphics.drawable.Drawable
 import android.graphics.drawable.Icon
 import android.os.Build
 import android.service.notification.StatusBarNotification
@@ -73,17 +70,6 @@ object NotificationImageExtractor {
 
     private fun drawableFromIcon(context: Context, icon: Icon): Bitmap? {
         val drawable = try { icon.loadDrawable(context) } catch (_: Throwable) { null } ?: return null
-        return drawableToBitmap(drawable)
-    }
-
-    private fun drawableToBitmap(drawable: Drawable): Bitmap {
-        if (drawable is BitmapDrawable && drawable.bitmap != null) return drawable.bitmap
-        val width = drawable.intrinsicWidth.coerceAtLeast(1)
-        val height = drawable.intrinsicHeight.coerceAtLeast(1)
-        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(bitmap)
-        drawable.setBounds(0, 0, canvas.width, canvas.height)
-        drawable.draw(canvas)
-        return bitmap
+        return BitmapUtils.drawableToBitmap(drawable)
     }
 }

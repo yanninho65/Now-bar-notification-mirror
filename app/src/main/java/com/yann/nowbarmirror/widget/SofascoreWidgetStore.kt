@@ -5,7 +5,6 @@ import android.graphics.Bitmap
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
-import java.io.FileOutputStream
 
 /**
  * Persists the up-to-[MAX_SLOTS] Sofascore matches shown in the widget's "Sport" view (see
@@ -15,9 +14,10 @@ import java.io.FileOutputStream
  * for the fields, PNG files on disk for the images — a Bitmap can't just go in SharedPreferences),
  * using org.json like SettingsBackup.kt already does elsewhere in this app.
  *
- * Images are saved by SLOT INDEX (0 until [MAX_SLOTS]), not by notification key: the whole list
- * is rewritten on every [save] (see SofascoreNotificationListenerService.pushWidgetMatches), so
- * there's nothing to reconcile — old slot files are simply deleted first.
+ * Images are saved per notification POSTING (key + postTime — see WidgetImageFiles, AUDIT
+ * 23/09/2026), no longer by slot index: the list is still rewritten on every [save], but a match
+ * whose notification didn't change keeps its image file untouched instead of being re-encoded, and
+ * its image isn't even re-extracted from the notification ([PersistableMatch.imageLoader]).
  *
  * [title]/[text] (NEW 18/09/2026, "peek" feature — see WidgetPeekPrefs' class doc) are the raw
  * Android notification title/text for this match (title is literally "$homeTeam - $awayTeam",
@@ -32,6 +32,9 @@ object SofascoreWidgetStore {
     private const val PREFS_NAME = "sofascore_widget_prefs"
     private const val KEY_MATCHES = "matches"
     private const val KEY_ACTIVE_COUNT = "active_count"
+    private const val IMAGE_PREFIX = "sofascore_widget_match_"
+
+    private val parsed = ParsedCache<List<Data>>()
 
     /**
      * The main 4x1 widget's own fixed widget_match_1..5 layout slots only ever render the first 5
@@ -60,7 +63,10 @@ object SofascoreWidgetStore {
         val postTimeMillis: Long,
         val title: String,
         val text: String,
-        val image: Bitmap?
+        val image: Bitmap?,
+        // AUDIT 23/09/2026 — lazy alternative to [image], only invoked when this posting has no
+        // image file on disk yet (see WidgetImageFiles).
+        val imageLoader: (() -> Bitmap?)? = null
     )
 
     data class Data(
@@ -81,8 +87,9 @@ object SofascoreWidgetStore {
     private fun prefs(context: Context) =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
-    private fun imageFile(context: Context, slot: Int) =
-        File(context.filesDir, "sofascore_widget_match_$slot.png")
+    /** Pre-audit slot-indexed file name — only read back for data saved by an older version. */
+    private fun legacyImageFile(context: Context, slot: Int) =
+        File(context.filesDir, "$IMAGE_PREFIX$slot.png")
 
     /**
      * [matches] beyond [MAX_SLOTS] are silently dropped here as a safety net — the caller
@@ -96,11 +103,22 @@ object SofascoreWidgetStore {
      * how many matches were actually active beyond that — this is what lets the badge reflect
      * reality (e.g. "+12" for 17 active matches, 5 shown) instead of the storage cap.
      */
+    // Synchronized (AUDIT 23/09/2026): saves can come from the main thread and from
+    // ApiOverrideFollowService's background polling; WidgetImageFiles.commit() must never delete
+    // a file another concurrent save just wrote.
+    @Synchronized
     fun save(context: Context, matches: List<PersistableMatch>, activeCount: Int = matches.size) {
-        for (slot in 0 until MAX_SLOTS) imageFile(context, slot).delete()
-
+        val existing = get(context).associateBy { "${it.key}::${it.postTimeMillis}" }
+        val files = WidgetImageFiles(context, IMAGE_PREFIX)
         val array = JSONArray()
-        matches.take(MAX_SLOTS).forEachIndexed { slot, match ->
+        matches.take(MAX_SLOTS).forEach { match ->
+            val imageName = files.persist(
+                match.key,
+                match.postTimeMillis,
+                existing["${match.key}::${match.postTimeMillis}"]?.imageFile,
+                match.image,
+                match.imageLoader
+            )
             array.put(
                 JSONObject().apply {
                     put("key", match.key)
@@ -114,18 +132,9 @@ object SofascoreWidgetStore {
                     put("postTimeMillis", match.postTimeMillis)
                     put("title", match.title)
                     put("text", match.text)
+                    put("image", imageName ?: JSONObject.NULL)
                 }
             )
-
-            if (match.image != null) {
-                try {
-                    FileOutputStream(imageFile(context, slot)).use { out ->
-                        match.image.compress(Bitmap.CompressFormat.PNG, 100, out)
-                    }
-                } catch (_: Throwable) {
-                    imageFile(context, slot).delete()
-                }
-            }
         }
 
         prefs(context)
@@ -133,6 +142,7 @@ object SofascoreWidgetStore {
             .putString(KEY_MATCHES, array.toString())
             .putInt(KEY_ACTIVE_COUNT, activeCount)
             .apply()
+        files.commit()
     }
 
     /** See [save]'s own doc (its `activeCount` param) — the true number of currently active matches, independent of [MAX_SLOTS]. 0 if never saved yet. */
@@ -140,6 +150,10 @@ object SofascoreWidgetStore {
 
     fun get(context: Context): List<Data> {
         val raw = prefs(context).getString(KEY_MATCHES, null) ?: return emptyList()
+        return parsed.getOrParse(raw) { parse(context, it) }
+    }
+
+    private fun parse(context: Context, raw: String): List<Data> {
         val array = try { JSONArray(raw) } catch (_: Throwable) { return emptyList() }
 
         return (0 until array.length()).mapNotNull { slot ->
@@ -161,7 +175,11 @@ object SofascoreWidgetStore {
                 // ("$homeTeam - $awayTeam") for anything persisted before this field existed.
                 title = obj.optNullableString("title") ?: "$homeTeam - $awayTeam",
                 text = obj.optNullableString("text") ?: "",
-                imageFile = imageFile(context, slot).takeIf { it.exists() }
+                imageFile = if (obj.has("image")) {
+                    WidgetImageFiles.resolve(context, obj.optNullableString("image"))
+                } else {
+                    legacyImageFile(context, slot).takeIf { it.exists() }
+                }
             )
         }
     }

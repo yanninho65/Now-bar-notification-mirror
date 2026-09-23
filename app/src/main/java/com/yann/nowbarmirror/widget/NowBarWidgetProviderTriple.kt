@@ -65,11 +65,8 @@ class NowBarWidgetProviderTriple : AppWidgetProvider() {
 
         /** Called from NowBarWidgetProvider.pushToAllWidgets — see the class doc. No-op if this widget isn't currently placed. */
         fun refreshAll(context: Context) {
-            val manager = AppWidgetManager.getInstance(context)
-            val ids = manager.getAppWidgetIds(ComponentName(context, NowBarWidgetProviderTriple::class.java))
-            if (ids.isEmpty()) return
-            val views = buildViews(context)
-            ids.forEach { id -> manager.updateAppWidget(id, views) }
+            // Shared with the other 4x2 widget (AUDIT 23/09/2026) — see NowBarWidgetProvider.refreshProvider.
+            NowBarWidgetProvider.refreshProvider(context, NowBarWidgetProviderTriple::class.java, ::buildViews)
         }
 
         private fun buildViews(context: Context): RemoteViews {
@@ -113,30 +110,10 @@ class NowBarWidgetProviderTriple : AppWidgetProvider() {
             // LATEST view (see the class doc). widget_view_toggle only has a job here while
             // peeking (closing it), same as NowBarWidgetProviderCompact's own row 2 — no other
             // row-3 "view" to switch to otherwise, so it stays GONE the rest of the time.
-            val peek = WidgetPeekPrefs.current(context)
-            val resolvedPeek = peek?.let { NowBarWidgetProvider.resolvePeek(context, it) }
-            if (peek != null && resolvedPeek == null) {
-                NowBarWidgetProvider.closePeekAndCancelAlarm(context)
-            }
-            if (resolvedPeek != null) {
-                NowBarWidgetProvider.renderLatestFormat(
-                    context,
-                    views,
-                    title = resolvedPeek.title,
-                    text = resolvedPeek.text,
-                    image = resolvedPeek.image,
-                    dismissIntent = resolvedPeek.dismissIntent,
-                    openIntent = resolvedPeek.openIntent,
-                    actions = resolvedPeek.actions,
-                    entryKey = resolvedPeek.entryKey,
-                    entryPostTimeMillis = resolvedPeek.entryPostTimeMillis,
-                    isMatch = resolvedPeek.isMatch
-                )
-                NowBarWidgetProvider.applyPeekLeftColumn(context, views, resolvedPeek.iconPackageName)
-            } else {
-                NowBarWidgetProvider.applyLatestContent(context, views)
-                views.setViewVisibility(R.id.widget_view_toggle, View.GONE)
-            }
+            // Bottom "Dernière notif"/peek row — shared with the other 4x2 widget (AUDIT
+            // 23/09/2026, used to be the same block copy-pasted in both), see
+            // NowBarWidgetProvider.renderPeekOrLatestRow.
+            NowBarWidgetProvider.renderPeekOrLatestRow(context, views)
 
             // Rows 1 & 2 — icon strips, independent of whether row 3 is currently peeking.
             applyRows(context, views)

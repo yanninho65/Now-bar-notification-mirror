@@ -5,11 +5,6 @@ import android.graphics.drawable.Icon
 import androidx.wear.watchface.complications.data.*
 import androidx.wear.watchface.complications.datasource.ComplicationDataSourceService
 import androidx.wear.watchface.complications.datasource.ComplicationRequest
-import com.google.android.gms.tasks.Tasks
-import com.google.android.gms.wearable.DataItemBuffer
-import com.google.android.gms.wearable.DataMapItem
-import com.google.android.gms.wearable.Wearable
-import java.util.concurrent.TimeUnit
 
 /**
  * Fournit les données de score pour les emplacements de complication de
@@ -34,7 +29,7 @@ import java.util.concurrent.TimeUnit
  * football, de Live Tennis API en tennis).
  *
  * AJOUTÉ (repli sur un changement de cadran/redémarrage du processus watch) : comme
- * NotificationComplicationService.fetchPersistedNotification, [fetchPersistedMatch] relit
+ * NotificationComplicationService, PhoneDataLayer.readMatch relit
  * directement le DataItem "/match" déjà persistant côté Wear Data Layer API quand
  * MatchScoreStore est vide — MatchScoreStore étant un simple cache en mémoire, il repart de
  * `null` à chaque fois que le système tue le processus watch entre deux requêtes de
@@ -72,15 +67,30 @@ class ScoreComplicationService : ComplicationDataSourceService() {
 
     companion object {
         private const val SOFASCORE_PACKAGE = "com.sofascore.results"
-        private const val MATCH_PATH = "/match"
-        private const val FETCH_TIMEOUT_SECONDS = 2L
+
+        // AUDIT 23/09/2026 — see ComposedImageCache: the SMALL_IMAGE bitmap is only recomposed
+        // when the match value actually changed since the last request.
+        private val smallImageCache = ComposedImageCache()
     }
 
+    /**
+     * HARMONIZED 23/09/2026 (audit) with NotificationComplicationService — this used to be
+     * `MatchScoreStore.current ?: fetchPersistedMatch()`: the persisted "/match" item was only
+     * re-read when the in-memory cache was EMPTY, and written back without any freshness guard,
+     * so a missed live push left "Score en direct" stuck on an old score until the next event
+     * (README "Known issue"). Now, like "Notification": every request re-reads the persisted item
+     * (a local Play Services call, no network, and no image decoding when it hasn't changed —
+     * see MatchDataCodec's `reuse`), applied through MatchScoreStore.updateIfNotOlder so it can
+     * never regress to an older value; the in-memory value is only used if that read fails.
+     */
     override fun onComplicationRequest(
         request: ComplicationRequest,
         listener: ComplicationRequestListener
     ) {
-        val match = MatchScoreStore.current ?: fetchPersistedMatch()
+        val match = when (val read = PhoneDataLayer.readMatch(this)) {
+            is PhoneDataLayer.Read.Success -> read.value
+            PhoneDataLayer.Read.Failed -> MatchScoreStore.current
+        }
 
         val data: ComplicationData = when (request.complicationType) {
             ComplicationType.LONG_TEXT -> buildLongText(match)
@@ -89,38 +99,6 @@ class ScoreComplicationService : ComplicationDataSourceService() {
         }
 
         listener.onComplicationData(data)
-    }
-
-    /**
-     * Repli quand MatchScoreStore est vide (processus watch relancé depuis le dernier envoi du
-     * téléphone — voir le commentaire de tête de fichier). Relit directement le DataItem "/match"
-     * déjà persistant côté Wear Data Layer API plutôt que d'attendre passivement le prochain
-     * onDataChanged (qui ne se redéclenche PAS pour un DataItem déjà synchronisé avant le
-     * redémarrage — seul un vrai changement le fait) — même logique que
-     * NotificationComplicationService.fetchPersistedNotification.
-     *
-     * Appel bloquant, mais purement local (Play Services, pas de réseau — la Data Layer API
-     * synchronise déjà en tâche de fond) : sans risque ici pour les quelques dizaines/centaines de
-     * ms que ça prend, borné à FETCH_TIMEOUT_SECONDS par précaution. `null` si le DataItem n'existe
-     * pas encore (aucun match jamais envoyé), s'il indique "cleared", ou si l'appel échoue/expire —
-     * repli identique à MatchScoreStore.current == null.
-     */
-    private fun fetchPersistedMatch(): MatchScore? {
-        return try {
-            val items: DataItemBuffer = Tasks.await(
-                Wearable.getDataClient(this).getDataItems(),
-                FETCH_TIMEOUT_SECONDS, TimeUnit.SECONDS
-            )
-            try {
-                val item = items.firstOrNull { it.uri.path == MATCH_PATH } ?: return null
-                val dataMap = DataMapItem.fromDataItem(item).dataMap
-                MatchDataCodec.decode(this, dataMap)?.also { MatchScoreStore.current = it }
-            } finally {
-                items.release()
-            }
-        } catch (e: Exception) {
-            null
-        }
     }
 
     override fun getPreviewData(type: ComplicationType): ComplicationData? {
@@ -194,6 +172,14 @@ class ScoreComplicationService : ComplicationDataSourceService() {
      * Depuis le retrait de SHORT_TEXT (16/09/2026), c'est le SEUL format
      * avec icône/image de ce projet.
      */
+    /** Cached for real data; a preview (syncTimestamp 0, never from the phone) is always composed fresh. */
+    private fun composeRound(match: MatchScore?): android.graphics.Bitmap =
+        if (match != null && match.syncTimestamp == 0L) {
+            ComplicationImageComposer.composeRoundImage(match)
+        } else {
+            smallImageCache.get(match) { ComplicationImageComposer.composeRoundImage(match) }
+        }
+
     private fun buildSmallImage(match: MatchScore?): ComplicationData {
         val scoreText = match?.scoreText() ?: "vs"
 
@@ -201,7 +187,7 @@ class ScoreComplicationService : ComplicationDataSourceService() {
             "${it.homeTeam} $scoreText ${it.awayTeam}"
         } ?: "Aucun match sélectionné"
 
-        val icon = Icon.createWithBitmap(ComplicationImageComposer.composeRoundImage(match))
+        val icon = Icon.createWithBitmap(composeRound(match))
 
         return SmallImageComplicationData.Builder(
             smallImage = SmallImage.Builder(icon, SmallImageType.PHOTO).build(),

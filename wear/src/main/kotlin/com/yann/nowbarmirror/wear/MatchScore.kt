@@ -57,7 +57,11 @@ data class MatchScore(
     val status: String,
     val kickoffEpochMillis: Long?,
     val notifImage: Bitmap? = null,
-    val apiSource: String = "SPORTS_DB"
+    val apiSource: String = "SPORTS_DB",
+    // AUDIT 23/09/2026 — the phone's send timestamp for this value (DataMap "timestamp"): lets the
+    // codec reuse this instance (and skip re-decoding its image) when the persisted item hasn't
+    // changed. 0 for preview data.
+    val syncTimestamp: Long = 0L
 )
 
 /**
@@ -78,19 +82,14 @@ fun MatchScore.scoreText(): String {
 }
 
 /**
- * Cache en mémoire du dernier score reçu.
+ * Cache en mémoire du dernier score reçu — alimenté en direct par PhoneDataListenerService
+ * ([FreshStore.setLive]) et par la relecture de l'item persistant (PhoneDataLayer.readMatch,
+ * [FreshStore.updateIfNotOlder]).
  *
- * ATTENTION : ce cache est volatile — il est perdu si le système tue le
- * processus de l'app entre deux requêtes de complication. Si le
- * processus watch redémarre, on revient à `null` ("aucun match") jusqu'à
- * la prochaine mise à jour envoyée par le téléphone. À corriger plus tard
- * en persistant la dernière valeur connue.
- *
- * Alimenté par MatchListenerService, qui reçoit les mises à jour du
- * téléphone via la Wear Data Layer API.
+ * AUDIT 23/09/2026 : même garde de fraîcheur que NotificationInfoStore (voir [FreshStore]) — avant,
+ * ScoreComplicationService ne relisait l'item persistant que si ce cache était vide et l'écrasait
+ * sans garde (voir le "Known issue" du README), d'où un affichage qui pouvait rester figé ou
+ * régresser. Toujours volatile : perdu si le processus montre est tué, reconstruit par la relecture
+ * suivante.
  */
-object MatchScoreStore {
-
-    @Volatile
-    var current: MatchScore? = null
-}
+object MatchScoreStore : FreshStore<MatchScore>()

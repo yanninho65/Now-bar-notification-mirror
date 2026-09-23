@@ -1,11 +1,7 @@
 package com.yann.nowbarmirror
 
 import android.content.Context
-import android.content.pm.PackageManager
 import android.graphics.Bitmap
-import android.graphics.Canvas
-import android.graphics.drawable.BitmapDrawable
-import android.graphics.drawable.Drawable
 import com.google.android.gms.wearable.Asset
 import com.google.android.gms.wearable.PutDataMapRequest
 import com.google.android.gms.wearable.Wearable
@@ -77,6 +73,7 @@ object WatchNotificationSync {
             dataMap.putString("title", title)
             dataMap.putString("text", text)
             dataMap.putString("packageName", packageName)
+            // Downscaled inside bitmapToAsset (AUDIT 23/09/2026).
             image?.let { dataMap.putAsset("notifImage", WatchSync.bitmapToAsset(it)) }
             appIconAsset(context, packageName)?.let { dataMap.putAsset("appIcon", it) }
             dataMap.putStringArrayList("detailLines", ArrayList(detailLines))
@@ -109,25 +106,10 @@ object WatchNotificationSync {
         Wearable.getDataClient(context).putDataItem(request)
     }
 
+    /** Source-app icon, from the shared per-package cache (AUDIT 23/09/2026 — BitmapUtils.AppIcons), downscaled like the image. */
     private fun appIconAsset(context: Context, packageName: String): Asset? {
-        val drawable: Drawable = try {
-            context.packageManager.getApplicationIcon(packageName)
-        } catch (_: PackageManager.NameNotFoundException) {
-            return null
-        } catch (_: Throwable) {
-            return null
-        }
-        return WatchSync.bitmapToAsset(drawableToBitmap(drawable))
-    }
-
-    private fun drawableToBitmap(drawable: Drawable): Bitmap {
-        if (drawable is BitmapDrawable && drawable.bitmap != null) return drawable.bitmap
-        val width = drawable.intrinsicWidth.coerceAtLeast(1)
-        val height = drawable.intrinsicHeight.coerceAtLeast(1)
-        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(bitmap)
-        drawable.setBounds(0, 0, canvas.width, canvas.height)
-        drawable.draw(canvas)
-        return bitmap
+        if (packageName.isBlank()) return null
+        val icon = BitmapUtils.AppIcons.get(context, packageName) ?: return null
+        return WatchSync.bitmapToAsset(icon)
     }
 }

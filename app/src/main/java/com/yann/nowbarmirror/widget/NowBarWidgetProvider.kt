@@ -11,27 +11,22 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.graphics.Canvas
-import android.graphics.Paint
-import android.graphics.PorterDuff
-import android.graphics.PorterDuffXfermode
-import android.graphics.Rect
-import android.graphics.RectF
-import android.graphics.drawable.BitmapDrawable
-import android.graphics.drawable.Drawable
 import android.app.Notification
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import android.view.View
 import android.widget.RemoteViews
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import com.yann.nowbarmirror.BitmapUtils
 import com.yann.nowbarmirror.MirrorNotificationListener
 import com.yann.nowbarmirror.R
 import com.yann.nowbarmirror.WatchNotificationSync
 import com.yann.nowbarmirror.sport.SofascoreNotificationListenerService
+import java.util.concurrent.atomic.AtomicBoolean
 
 /** One notification action, rendered as a small text button (the action's own label) in the widget. */
 data class WidgetAction(
@@ -115,7 +110,11 @@ data class SofascoreWidgetMatch(
     val text: String,
     val image: Bitmap?,
     val contentIntent: PendingIntent?,
-    val actions: List<WidgetAction> = emptyList()
+    val actions: List<WidgetAction> = emptyList(),
+    // AUDIT 23/09/2026 — lazy alternative to [image] (see WidgetImageFiles): only invoked for the
+    // matches actually kept after sorting/capping, and only when that posting's image isn't
+    // already on disk — instead of extracting every active match's image on every event.
+    val imageLoader: (() -> Bitmap?)? = null
 )
 
 /**
@@ -165,7 +164,9 @@ data class AllNotifEntryPush(
     //   style, already capped at 6 by Android, already most-recent-first — see its collectLines).
     // Same in-memory-only rule as [contentIntent]/[actions] above (see liveAllNotifDetailLines) —
     // lost across a process restart, same already-accepted limitation as those two.
-    val detailLines: List<String> = emptyList()
+    val detailLines: List<String> = emptyList(),
+    // AUDIT 23/09/2026 — same lazy-image idea as SofascoreWidgetMatch.imageLoader.
+    val imageLoader: (() -> Bitmap?)? = null
 )
 
 /**
@@ -383,6 +384,20 @@ class NowBarWidgetProvider : AppWidgetProvider() {
         // restart always (re)syncs once, same self-healing spirit as the rest of this file.
         private var lastSyncedWatchIdentity: String? = null
 
+        // AUDIT 23/09/2026 — coalesced widget refresh, see [requestUpdate].
+        private const val REFRESH_COALESCE_MILLIS = 300L
+        private val mainHandler by lazy { Handler(Looper.getMainLooper()) }
+        @Volatile private var refreshContext: Context? = null
+        private val refreshPending = AtomicBoolean(false)
+        private val coalescedRefresh = Runnable {
+            refreshContext?.let { refreshAllNow(it) }
+        }
+
+        // AUDIT 23/09/2026 — see [pushSofascoreMatches]: what was last saved, to skip identical
+        // re-saves (every ApiOverrideFollowService poll ends up here without the widget content
+        // having changed, since the widget never shows API overrides).
+        private var lastSofascoreSignature: String? = null
+
         /**
          * Keeps the watch complication "Notification" aligned on whatever the widget's "Dernière
          * notif" view itself shows — both now read the exact SAME thing
@@ -449,7 +464,7 @@ class NowBarWidgetProvider : AppWidgetProvider() {
          * badge can reflect the real total instead of just [SofascoreWidgetStore.MAX_SLOTS] (see
          * that param's own doc for the "+1 alors qu'il y a 17 matchs" bug this fixes).
          */
-        fun pushSofascoreMatches(context: Context, matches: List<SofascoreWidgetMatch>) {
+        fun pushSofascoreMatches(context: Context, matches: List<SofascoreWidgetMatch>, activeCount: Int = matches.size) {
             val kept = matches.sortedForWidget(
                 nowMillis = System.currentTimeMillis(),
                 statusOf = { it.status },
@@ -459,6 +474,14 @@ class NowBarWidgetProvider : AppWidgetProvider() {
 
             liveSofascoreIntents = kept.mapNotNull { m -> m.contentIntent?.let { m.key to it } }.toMap()
             liveSofascoreActions = kept.associate { m -> m.key to m.actions }
+
+            // AUDIT 23/09/2026 — nothing the widget renders changed (same matches, same postings,
+            // same score/status, same count): skip the store write and the 3-widget rebuild.
+            val signature = kept.joinToString("|") { m ->
+                "${m.key}/${m.postTimeMillis}/${m.homeScore}/${m.awayScore}/${m.lastScorer}/${m.status}/${m.apiSource}/${m.text}"
+            } + "#$activeCount"
+            if (signature == lastSofascoreSignature) return
+            lastSofascoreSignature = signature
 
             SofascoreWidgetStore.save(
                 context,
@@ -475,13 +498,14 @@ class NowBarWidgetProvider : AppWidgetProvider() {
                         postTimeMillis = m.postTimeMillis,
                         title = m.title,
                         text = m.text,
-                        image = m.image
+                        image = m.image,
+                        imageLoader = m.imageLoader
                     )
                 },
-                activeCount = matches.size
+                activeCount = activeCount
             )
 
-            pushToAllWidgets(context, buildViews(context))
+            requestUpdate(context)
         }
 
         /**
@@ -542,7 +566,8 @@ class NowBarWidgetProvider : AppWidgetProvider() {
                         lastScorer = entry.lastScorer,
                         status = entry.status,
                         apiSource = entry.apiSource,
-                        image = entry.image
+                        image = entry.image,
+                        imageLoader = entry.imageLoader
                     )
                 }
             )
@@ -580,7 +605,7 @@ class NowBarWidgetProvider : AppWidgetProvider() {
                 }
             }
 
-            pushToAllWidgets(context, buildViews(context))
+            requestUpdate(context)
         }
 
         /**
@@ -787,8 +812,11 @@ class NowBarWidgetProvider : AppWidgetProvider() {
                 intent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
+            // AUDIT 23/09/2026: non-wakeup — never worth waking a sleeping phone just to remove a
+            // notification; delivered as soon as the device is awake anyway (and it is, right
+            // after a full-screen launch).
             alarmManager.set(
-                AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                AlarmManager.ELAPSED_REALTIME,
                 SystemClock.elapsedRealtime() + AUTO_CANCEL_OPEN_ON_PHONE_DELAY_MILLIS,
                 pendingIntent
             )
@@ -826,7 +854,7 @@ class NowBarWidgetProvider : AppWidgetProvider() {
             }
             if (matches) {
                 closePeekAndCancelAlarm(context)
-                pushToAllWidgets(context, buildViews(context))
+                requestUpdate(context)
             }
         }
 
@@ -846,8 +874,10 @@ class NowBarWidgetProvider : AppWidgetProvider() {
         /** Schedules [ACTION_AUTO_CLOSE_PEEK] [AUTO_CLOSE_PEEK_DELAY_MILLIS] from now for the entry just peeked — see the class doc's "REWORKED 20/09/2026" section. Replaces any previously scheduled auto-close (same requestCode/action/component — android.app.AlarmManager.set() always supersedes an equivalent pending alarm), so re-peeking the same or a different tile always gets a fresh 15s window. An inexact alarm is deliberate: this is a UI nicety, not something that needs to survive Doze/App Standby down to the second, and inexact alarms need no special permission. */
         private fun scheduleAutoClosePeek(context: Context, source: WidgetPeekPrefs.Source, entryId: String) {
             val alarmManager = context.getSystemService(AlarmManager::class.java) ?: return
+            // AUDIT 23/09/2026: non-wakeup — a peek is only visible while the screen is on, so
+            // there's no point waking the device to close it; it closes at the next wake-up.
             alarmManager.set(
-                AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                AlarmManager.ELAPSED_REALTIME,
                 SystemClock.elapsedRealtime() + AUTO_CLOSE_PEEK_DELAY_MILLIS,
                 autoClosePeekPendingIntent(context, source, entryId)
             )
@@ -889,23 +919,50 @@ class NowBarWidgetProvider : AppWidgetProvider() {
          * source app, and the actions row — which has no such fallback — simply stays hidden;
          * in the other two views/the peek state, a tile/the open target falls back the same way
          * (see resolvePeek / applySofascoreMatches / applyAllNotifs).
+         *
+         * COALESCED (AUDIT 23/09/2026 — battery): every listener-driven change goes through here
+         * and is applied [REFRESH_COALESCE_MILLIS] later, in ONE refresh. A single notification
+         * event used to rebuild all three widgets 2-3 times (store push, refill after a removal,
+         * closePeekIfShowing, the Sofascore listener's own pushes for the same event…), each
+         * rebuild re-decoding every tile image and re-sending to the watch. The stores are
+         * written synchronously as before, so the one refresh that runs always renders the final
+         * state. Direct user taps on the widget (onReceive) still refresh immediately
+         * ([refreshAllNow]).
          */
         fun requestUpdate(context: Context) {
-            pushToAllWidgets(context, buildViews(context))
+            refreshContext = context.applicationContext
+            // Throttle rather than debounce: a refresh already scheduled absorbs this request
+            // (it reads the stores when it runs), so a continuous burst can't postpone the redraw
+            // indefinitely — at most REFRESH_COALESCE_MILLIS of latency. Safe from any thread
+            // (ApiOverrideFollowService's polling ends up here from a background thread).
+            if (refreshPending.compareAndSet(false, true)) {
+                mainHandler.postDelayed(coalescedRefresh, REFRESH_COALESCE_MILLIS)
+            }
         }
 
         /**
-         * The one choke point every state-changing action in this file goes through (see e.g.
-         * [pushSofascoreMatches]/[pushToAllNotificationsBatch]/onReceive's various branches) —
-         * ALSO refreshes the compact 4x2 widget (NEW 22/09/2026, NowBarWidgetProviderCompact) and
-         * the third, double-icon-row widget (NEW 23/09/2026, NowBarWidgetProviderTriple) here, so
-         * every one of those existing call sites picks both up for free instead of each needing its
-         * own extra call. No-op on either side if that widget isn't currently placed.
+         * The one choke point every widget redraw goes through — the 4x1 itself plus the compact
+         * 4x2 (NowBarWidgetProviderCompact) and the double-icon-row 4x2 (NowBarWidgetProviderTriple),
+         * each a no-op when that widget isn't currently placed (AUDIT 23/09/2026: the 4x1's own
+         * views used to be built even when no 4x1 was placed). Also keeps the watch's
+         * "Notification" complication aligned ([syncWatchToLatest]) — moved here from
+         * buildViewsUnsafe so it still runs when only the 4x2 widgets (or none) are placed.
          */
-        private fun pushToAllWidgets(context: Context, views: RemoteViews) {
+        internal fun refreshAllNow(context: Context) {
+            mainHandler.removeCallbacks(coalescedRefresh)
+            refreshPending.set(false)
+            try {
+                syncWatchToLatest(context)
+            } catch (_: Throwable) {
+                // The watch sync is a nice-to-have on top of the widgets — never let it take the
+                // caller (a listener service or this receiver) down.
+            }
             val manager = AppWidgetManager.getInstance(context)
             val ids = manager.getAppWidgetIds(ComponentName(context, NowBarWidgetProvider::class.java))
-            if (ids.isNotEmpty()) ids.forEach { id -> manager.updateAppWidget(id, views) }
+            if (ids.isNotEmpty()) {
+                val views = buildViews(context)
+                ids.forEach { id -> manager.updateAppWidget(id, views) }
+            }
             NowBarWidgetProviderCompact.refreshAll(context)
             NowBarWidgetProviderTriple.refreshAll(context)
         }
@@ -945,12 +1002,8 @@ class NowBarWidgetProvider : AppWidgetProvider() {
         }
 
         private fun buildViewsUnsafe(context: Context): RemoteViews {
-            // Keeps the watch complication aligned with whatever "Dernière notif" derives below,
-            // on every rebuild — see [syncWatchToLatest]'s own doc. Runs unconditionally, before
-            // the peek early-return, so a store change is never missed just because a peek
-            // happens to be showing at the moment.
-            syncWatchToLatest(context)
-
+            // syncWatchToLatest used to be called here — moved to [refreshAllNow] (AUDIT
+            // 23/09/2026) so it runs once per refresh whichever widgets are placed.
             val views = RemoteViews(context.packageName, R.layout.widget_now_bar)
 
             // "Peek" takes priority over the three normal views when active — see the class doc
@@ -1081,9 +1134,9 @@ class NowBarWidgetProvider : AppWidgetProvider() {
          * [resolveAllNotifEntryContent]).
          */
         private fun applyLatestIcon(context: Context, views: RemoteViews, iconPackageName: String?) {
-            val appIcon = iconPackageName?.let { appIconBitmap(context, it) }
+            val appIcon = iconPackageName?.let { BitmapUtils.AppIcons.getCircular(context, it) }
             if (appIcon != null) {
-                views.setImageViewBitmap(R.id.widget_app_icon, circularBitmap(appIcon))
+                views.setImageViewBitmap(R.id.widget_app_icon, appIcon)
             } else {
                 views.setImageViewResource(R.id.widget_app_icon, R.drawable.ic_stat_mirror)
             }
@@ -1154,7 +1207,7 @@ class NowBarWidgetProvider : AppWidgetProvider() {
                 }
                 views.setViewVisibility(slotId, View.VISIBLE)
 
-                val imageBitmap = match.imageFile?.let { BitmapFactory.decodeFile(it.path) }
+                val imageBitmap = BitmapUtils.ImageFiles.decode(match.imageFile)
                 if (imageBitmap != null) {
                     views.setImageViewBitmap(SOFASCORE_SLOT_IMAGE_IDS[i], imageBitmap)
                 } else {
@@ -1248,7 +1301,7 @@ class NowBarWidgetProvider : AppWidgetProvider() {
             views.setViewVisibility(ids.score, View.VISIBLE)
             views.setViewVisibility(ids.period, View.VISIBLE)
 
-            val imageBitmap = entry.imageFile?.let { BitmapFactory.decodeFile(it.path) }
+            val imageBitmap = BitmapUtils.ImageFiles.decode(entry.imageFile)
             if (imageBitmap != null) {
                 views.setImageViewBitmap(ids.matchImage, imageBitmap)
             } else {
@@ -1279,12 +1332,12 @@ class NowBarWidgetProvider : AppWidgetProvider() {
 
             views.setTextViewText(ids.title, entry.title.orEmpty())
 
-            val imageBitmap = entry.imageFile?.let { BitmapFactory.decodeFile(it.path) }
-            val appIcon = entry.packageName?.let { appIconBitmap(context, it) }
-            if (imageBitmap != null) {
-                views.setImageViewBitmap(ids.photo, circularBitmap(imageBitmap))
+            val roundImage = BitmapUtils.ImageFiles.decodeCircular(entry.imageFile)
+            val appIcon = entry.packageName?.let { BitmapUtils.AppIcons.getCircular(context, it) }
+            if (roundImage != null) {
+                views.setImageViewBitmap(ids.photo, roundImage)
                 if (appIcon != null) {
-                    views.setImageViewBitmap(ids.badge, circularBitmap(appIcon))
+                    views.setImageViewBitmap(ids.badge, appIcon)
                     views.setViewVisibility(ids.badge, View.VISIBLE)
                 } else {
                     views.setViewVisibility(ids.badge, View.GONE)
@@ -1294,7 +1347,7 @@ class NowBarWidgetProvider : AppWidgetProvider() {
                 // never both at once, so no badge here either.
                 views.setViewVisibility(ids.badge, View.GONE)
                 if (appIcon != null) {
-                    views.setImageViewBitmap(ids.photo, circularBitmap(appIcon))
+                    views.setImageViewBitmap(ids.photo, appIcon)
                 } else {
                     views.setImageViewResource(ids.photo, R.drawable.ic_stat_mirror)
                 }
@@ -1387,9 +1440,9 @@ class NowBarWidgetProvider : AppWidgetProvider() {
          * changes, not what tapping it does.
          */
         internal fun applyPeekLeftColumn(context: Context, views: RemoteViews, iconPackageName: String?) {
-            val appIcon = iconPackageName?.let { appIconBitmap(context, it) }
+            val appIcon = iconPackageName?.let { BitmapUtils.AppIcons.getCircular(context, it) }
             if (appIcon != null) {
-                views.setImageViewBitmap(R.id.widget_app_icon, circularBitmap(appIcon))
+                views.setImageViewBitmap(R.id.widget_app_icon, appIcon)
             } else {
                 views.setImageViewResource(R.id.widget_app_icon, R.drawable.ic_stat_mirror)
             }
@@ -1611,7 +1664,7 @@ class NowBarWidgetProvider : AppWidgetProvider() {
             return ResolvedNotifContent(
                 title = title,
                 text = entry.text.orEmpty(),
-                image = entry.imageFile?.let { BitmapFactory.decodeFile(it.path) },
+                image = BitmapUtils.ImageFiles.decode(entry.imageFile),
                 dismissIntent = dismissIntent,
                 openIntent = liveAllNotifIntents[entryId] ?: fallbackPackage?.let { launchAppPendingIntent(context, it) },
                 actions = liveAllNotifActions[entryId] ?: emptyList(),
@@ -1637,7 +1690,7 @@ class NowBarWidgetProvider : AppWidgetProvider() {
                     ResolvedNotifContent(
                         title = match.title,
                         text = match.text,
-                        image = match.imageFile?.let { BitmapFactory.decodeFile(it.path) },
+                        image = BitmapUtils.ImageFiles.decode(match.imageFile),
                         dismissIntent = sofascoreDismissPendingIntent(context, match.key, match.postTimeMillis),
                         openIntent = liveSofascoreIntents[match.key]
                             ?: launchAppPendingIntent(context, SofascoreNotificationListenerService.SOFASCORE_PACKAGE),
@@ -1763,37 +1816,52 @@ class NowBarWidgetProvider : AppWidgetProvider() {
             )
         }
 
-        internal fun appIconBitmap(context: Context, packageName: String): Bitmap? {
-            return try {
-                drawableToBitmap(context.packageManager.getApplicationIcon(packageName))
-            } catch (_: Throwable) {
-                null
+        /** Cached (see BitmapUtils.AppIcons) — AUDIT 23/09/2026. */
+        internal fun appIconBitmap(context: Context, packageName: String): Bitmap? =
+            BitmapUtils.AppIcons.get(context, packageName)
+
+        /** Crops [source] into a circle — see BitmapUtils.circular (single shared implementation, AUDIT 23/09/2026). */
+        internal fun circularBitmap(source: Bitmap): Bitmap = BitmapUtils.circular(source)
+
+        /**
+         * Shared by NowBarWidgetProviderCompact and NowBarWidgetProviderTriple (AUDIT 23/09/2026 —
+         * this block used to be copy-pasted in both): renders their bottom "Dernière notif"/peek
+         * row, exactly like the 4x1's own LATEST view / peek.
+         */
+        internal fun renderPeekOrLatestRow(context: Context, views: RemoteViews) {
+            val peek = WidgetPeekPrefs.current(context)
+            val resolvedPeek = peek?.let { resolvePeek(context, it) }
+            if (peek != null && resolvedPeek == null) {
+                closePeekAndCancelAlarm(context)
+            }
+            if (resolvedPeek != null) {
+                renderLatestFormat(
+                    context,
+                    views,
+                    title = resolvedPeek.title,
+                    text = resolvedPeek.text,
+                    image = resolvedPeek.image,
+                    dismissIntent = resolvedPeek.dismissIntent,
+                    openIntent = resolvedPeek.openIntent,
+                    actions = resolvedPeek.actions,
+                    entryKey = resolvedPeek.entryKey,
+                    entryPostTimeMillis = resolvedPeek.entryPostTimeMillis,
+                    isMatch = resolvedPeek.isMatch
+                )
+                applyPeekLeftColumn(context, views, resolvedPeek.iconPackageName)
+            } else {
+                applyLatestContent(context, views)
+                views.setViewVisibility(R.id.widget_view_toggle, View.GONE)
             }
         }
 
-        private fun drawableToBitmap(drawable: Drawable): Bitmap {
-            if (drawable is BitmapDrawable && drawable.bitmap != null) return drawable.bitmap
-            val width = drawable.intrinsicWidth.coerceAtLeast(1)
-            val height = drawable.intrinsicHeight.coerceAtLeast(1)
-            val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-            val canvas = Canvas(bitmap)
-            drawable.setBounds(0, 0, canvas.width, canvas.height)
-            drawable.draw(canvas)
-            return bitmap
-        }
-
-        /** Crops [source] into a circle, matching the round chips in the reference design. */
-        internal fun circularBitmap(source: Bitmap): Bitmap {
-            val size = minOf(source.width, source.height).coerceAtLeast(1)
-            val output = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-            val canvas = Canvas(output)
-            val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-            canvas.drawOval(RectF(Rect(0, 0, size, size)), paint)
-            paint.xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_IN)
-            val left = (source.width - size) / 2f
-            val top = (source.height - size) / 2f
-            canvas.drawBitmap(source, -left, -top, paint)
-            return output
+        /** Shared refreshAll body of the two 4x2 widgets (AUDIT 23/09/2026) — no-op when [providerClass] isn't placed. */
+        internal fun refreshProvider(context: Context, providerClass: Class<*>, build: (Context) -> RemoteViews) {
+            val manager = AppWidgetManager.getInstance(context)
+            val ids = manager.getAppWidgetIds(ComponentName(context, providerClass))
+            if (ids.isEmpty()) return
+            val views = build(context)
+            ids.forEach { id -> manager.updateAppWidget(id, views) }
         }
 
         // whiteSilhouette/sofascoreToggleIconBitmap (composited the rotating-arrows glyph with a
@@ -1803,6 +1871,10 @@ class NowBarWidgetProvider : AppWidgetProvider() {
     }
 
     override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
+        try {
+            syncWatchToLatest(context)
+        } catch (_: Throwable) {
+        }
         val views = buildViews(context)
         appWidgetIds.forEach { id -> appWidgetManager.updateAppWidget(id, views) }
     }
@@ -1823,7 +1895,7 @@ class NowBarWidgetProvider : AppWidgetProvider() {
                 // closed here anyway as cheap insurance against any stale binding.
                 closePeekAndCancelAlarm(context)
                 WidgetViewModePrefs.toggleLatest(context)
-                pushToAllWidgets(context, buildViews(context))
+                refreshAllNow(context)
                 return
             }
             ACTION_TOGGLE_SPORT_NOTIFS -> {
@@ -1835,12 +1907,12 @@ class NowBarWidgetProvider : AppWidgetProvider() {
                 // function's doc.
                 closePeekAndCancelAlarm(context)
                 WidgetViewModePrefs.toggleSportOrAllNotifsView(context)
-                pushToAllWidgets(context, buildViews(context))
+                refreshAllNow(context)
                 return
             }
             ACTION_CLOSE_PEEK -> {
                 closePeekAndCancelAlarm(context)
-                pushToAllWidgets(context, buildViews(context))
+                refreshAllNow(context)
                 return
             }
             // Opens a peek for one tile (a tile's icon tap) — see openPeekPendingIntent's doc for
@@ -1858,7 +1930,7 @@ class NowBarWidgetProvider : AppWidgetProvider() {
                 if (source != null && entryId != null) {
                     WidgetPeekPrefs.open(context, source, entryId)
                     scheduleAutoClosePeek(context, source, entryId)
-                    pushToAllWidgets(context, buildViews(context))
+                    refreshAllNow(context)
                 }
                 return
             }
@@ -1874,7 +1946,7 @@ class NowBarWidgetProvider : AppWidgetProvider() {
                 val current = WidgetPeekPrefs.current(context)
                 if (current != null && current.source.name == sourceName && current.entryId == entryId) {
                     WidgetPeekPrefs.close(context)
-                    pushToAllWidgets(context, buildViews(context))
+                    refreshAllNow(context)
                 }
                 return
             }

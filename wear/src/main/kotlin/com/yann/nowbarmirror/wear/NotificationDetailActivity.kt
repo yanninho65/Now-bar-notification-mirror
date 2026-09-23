@@ -16,11 +16,6 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.wear.widget.SwipeDismissFrameLayout
-import com.google.android.gms.tasks.Tasks
-import com.google.android.gms.wearable.DataItemBuffer
-import com.google.android.gms.wearable.DataMapItem
-import com.google.android.gms.wearable.Wearable
-import java.util.concurrent.TimeUnit
 
 /**
  * NEW 21/09/2026 — écran plein écran ouvert par un tap sur la complication "Notification" (Yann :
@@ -111,12 +106,15 @@ class NotificationDetailActivity : Activity() {
         // régresser visuellement, même si le round-trip Data Layer avait pris du retard.
         NotificationInfoStore.current?.let { render(it) } ?: renderEmpty()
 
+        // Shared re-read (AUDIT 23/09/2026 — PhoneDataLayer.readNotification, same one the
+        // "Notification" complication uses, instead of a third private copy of it here).
         Thread {
-            val outcome = fetchPersistedNotification()
+            val read = PhoneDataLayer.readNotification(this)
             runOnUiThread {
-                when (outcome) {
-                    is FetchOutcome.Success -> if (outcome.info != null) render(outcome.info) else renderEmpty()
-                    FetchOutcome.Failed -> Unit
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                when (read) {
+                    is PhoneDataLayer.Read.Success -> read.value?.let { render(it) } ?: renderEmpty()
+                    PhoneDataLayer.Read.Failed -> Unit
                 }
             }
         }.start()
@@ -340,39 +338,5 @@ class NotificationDetailActivity : Activity() {
         val top = (source.height - size) / 2f
         canvas.drawBitmap(source, -left, -top, paint)
         return output
-    }
-
-    /** Résultat d'une relecture de l'item persistant "/notification" — voir [fetchPersistedNotification] et NotificationComplicationService's identique. */
-    private sealed class FetchOutcome {
-        data class Success(val info: NotificationInfo?) : FetchOutcome()
-        object Failed : FetchOutcome()
-    }
-
-    /** Relit toujours l'item persistant plutôt que de faire confiance au cache mémoire — voir la doc d'onCreate et NotificationComplicationService.fetchPersistedNotification (même logique, dupliquée ici : composants Wear distincts). */
-    private fun fetchPersistedNotification(): FetchOutcome {
-        return try {
-            val items: DataItemBuffer = Tasks.await(
-                Wearable.getDataClient(this).getDataItems(),
-                FETCH_TIMEOUT_SECONDS, TimeUnit.SECONDS
-            )
-            try {
-                val item = items.firstOrNull { it.uri.path == NOTIFICATION_PATH }
-                val info = item?.let { NotificationDataCodec.decode(this, DataMapItem.fromDataItem(it).dataMap) }
-                // UPDATED 22/09/2026 : passe par NotificationInfoStore.updateIfNotOlder plutôt
-                // qu'une affectation directe — voir sa doc pour le bug corrigé (Yann : "ça m'ouvre
-                // la dernière notification que j'ai ouverte [...] je dois faire retour puis
-                // recliquer pour voir l'actuelle").
-                FetchOutcome.Success(NotificationInfoStore.updateIfNotOlder(info))
-            } finally {
-                items.release()
-            }
-        } catch (e: Exception) {
-            FetchOutcome.Failed
-        }
-    }
-
-    companion object {
-        private const val NOTIFICATION_PATH = "/notification"
-        private const val FETCH_TIMEOUT_SECONDS = 2L
     }
 }

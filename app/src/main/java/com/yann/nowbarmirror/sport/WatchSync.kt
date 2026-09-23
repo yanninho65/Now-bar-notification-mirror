@@ -3,6 +3,7 @@ package com.yann.nowbarmirror.sport
 import android.content.Context
 import android.graphics.Bitmap
 import com.google.android.gms.wearable.Asset
+import com.yann.nowbarmirror.BitmapUtils
 import com.google.android.gms.wearable.PutDataMapRequest
 import com.google.android.gms.wearable.Wearable
 import java.io.ByteArrayOutputStream
@@ -32,7 +33,10 @@ object WatchSync {
      */
     fun bitmapToAsset(bitmap: Bitmap): Asset {
         val stream = ByteArrayOutputStream()
-        bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)
+        // Downscaled first (AUDIT 23/09/2026 — see BitmapUtils.MAX_STORED_IMAGE_PX): shared by
+        // "/match" and "/notification", so neither ever sends a full-size image over Bluetooth
+        // for a complication composed at 320 px.
+        BitmapUtils.downscale(bitmap).compress(Bitmap.CompressFormat.PNG, 100, stream)
         return Asset.createFromBytes(stream.toByteArray())
     }
 

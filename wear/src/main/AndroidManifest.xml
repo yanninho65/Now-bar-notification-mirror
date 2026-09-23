@@ -38,17 +38,25 @@
                 android:name="android.support.wearable.complications.SUPPORTED_TYPES"
                 android:value="LONG_TEXT,SMALL_IMAGE" />
             
+            <!-- AUDIT 23/09/2026 : 600 s au lieu de 60 s. Les mises à jour sont poussées par le
+                 téléphone (PhoneDataListenerService -> requestUpdateAll) ; le rappel périodique
+                 ne sert que de filet de sécurité, et à 60 s il réveillait la montre chaque minute,
+                 jour et nuit, pour relire l'item Data Layer et recomposer l'image. -->
             <meta-data
                 android:name="android.support.wearable.complications.UPDATE_PERIOD_SECONDS"
-                android:value="60" />
+                android:value="600" />
         </service>
 
+        <!-- AUDIT 23/09/2026 : un seul WearableListenerService pour les deux chemins poussés par le
+             téléphone ("/match" et "/notification"), fusion de MatchListenerService et
+             NotificationDataListenerService — voir PhoneDataListenerService.kt. -->
         <service
-            android:name=".MatchListenerService"
+            android:name=".PhoneDataListenerService"
             android:exported="true">
             <intent-filter>
                 <action android:name="com.google.android.gms.wearable.DATA_CHANGED" />
                 <data android:scheme="wear" android:host="*" android:pathPrefix="/match" />
+                <data android:scheme="wear" android:host="*" android:pathPrefix="/notification" />
             </intent-filter>
         </service>
 
@@ -69,18 +77,13 @@
                 android:name="android.support.wearable.complications.SUPPORTED_TYPES"
                 android:value="SMALL_IMAGE" />
 
+            <!-- AUDIT 23/09/2026 : 600 s au lieu de 60 s. Les mises à jour sont poussées par le
+                 téléphone (PhoneDataListenerService -> requestUpdateAll) ; le rappel périodique
+                 ne sert que de filet de sécurité, et à 60 s il réveillait la montre chaque minute,
+                 jour et nuit, pour relire l'item Data Layer et recomposer l'image. -->
             <meta-data
                 android:name="android.support.wearable.complications.UPDATE_PERIOD_SECONDS"
-                android:value="60" />
-        </service>
-
-        <service
-            android:name=".NotificationDataListenerService"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="com.google.android.gms.wearable.DATA_CHANGED" />
-                <data android:scheme="wear" android:host="*" android:pathPrefix="/notification" />
-            </intent-filter>
+                android:value="600" />
         </service>
 
     </application>

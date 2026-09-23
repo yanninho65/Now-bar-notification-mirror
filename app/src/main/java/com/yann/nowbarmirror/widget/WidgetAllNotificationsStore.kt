@@ -2,12 +2,10 @@ package com.yann.nowbarmirror.widget
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.service.notification.StatusBarNotification
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
-import java.io.FileOutputStream
 
 /**
  * Persists the widget's "Toutes notifs" view (see NowBarWidgetProvider.pushToAllNotifications /
@@ -75,17 +73,20 @@ import java.io.FileOutputStream
  * one tile in place rather than duplicating it).
  *
  * Storage mirrors SofascoreWidgetStore (JSON in SharedPreferences for the fields, one PNG file per
- * SLOT INDEX for images) but, being a history rather than a full-replace-every-time set, [push]
- * has to merge the new entry into whatever's already persisted rather than just being handed the
- * complete list already computed by the caller — so on every call it decodes the currently kept
- * images back to Bitmaps, merges/dedupes/caps in memory, then rewrites everything, same as
- * SofascoreWidgetStore.save() always does.
+ * notification POSTING for images — see WidgetImageFiles, AUDIT 23/09/2026: files used to be named
+ * by slot index, which forced every save to decode and re-encode every kept image; an image already
+ * on disk is now simply kept, only a genuinely new posting costs one PNG encode). Being a history
+ * rather than a full-replace-every-time set, [push] merges the new entry into whatever's already
+ * persisted, in memory, then saves once.
  */
 object WidgetAllNotificationsStore {
 
     private const val PREFS_NAME = "widget_all_notifs_prefs"
     private const val KEY_ENTRIES = "entries"
     private const val KEY_ACTIVE_GENERIC_COUNT = "active_generic_count"
+    private const val IMAGE_PREFIX = "widget_all_notif_"
+
+    private val parsed = ParsedCache<List<Data>>()
 
     enum class Kind { GENERIC, SOFASCORE_MATCH }
 
@@ -137,7 +138,13 @@ object WidgetAllNotificationsStore {
         val lastScorer: String? = null,
         val status: String? = null,
         val apiSource: String? = null,
-        val image: Bitmap?
+        val image: Bitmap?,
+        // AUDIT 23/09/2026 — see WidgetImageFiles: the file this entry already had on disk (an
+        // entry carried over from a previous save), and a lazy alternative to [image] that's only
+        // invoked when this posting has no file on disk yet (lets a refill skip image extraction
+        // for postings already stored).
+        val existingImageFile: File? = null,
+        val imageLoader: (() -> Bitmap?)? = null
     )
 
     data class Data(
@@ -163,7 +170,8 @@ object WidgetAllNotificationsStore {
         kind == Kind.SOFASCORE_MATCH || isConversation
 
     /**
-     * [Data] -> [PersistableEntry], decoding its image file back to a Bitmap — the same
+     * [Data] -> [PersistableEntry], carrying its image FILE over as-is (AUDIT 23/09/2026: no
+     * longer decoded back to a Bitmap, see WidgetImageFiles) — the same
      * field-by-field copy [push]/[remove]/[pruneAgainstActive] each used to write out inline
      * (three copies of the same 15-field constructor call). Harmonized 20/09/2026 into this one
      * place so a future field addition only needs updating here instead of in three places that
@@ -184,7 +192,8 @@ object WidgetAllNotificationsStore {
         lastScorer = lastScorer,
         status = status,
         apiSource = apiSource,
-        image = imageFile?.let { BitmapFactory.decodeFile(it.path) }
+        image = null,
+        existingImageFile = imageFile
     )
 
     /**
@@ -226,8 +235,9 @@ object WidgetAllNotificationsStore {
     private fun prefs(context: Context) =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
-    private fun imageFile(context: Context, slot: Int) =
-        File(context.filesDir, "widget_all_notif_$slot.png")
+    /** Pre-audit slot-indexed file name — only read back for entries saved by an older version (migrated on the next save). */
+    private fun legacyImageFile(context: Context, slot: Int) =
+        File(context.filesDir, "$IMAGE_PREFIX$slot.png")
 
     /**
      * Merges [entry] into the currently persisted history: the SAME (key, postTimeMillis) PAIR as
@@ -276,11 +286,15 @@ object WidgetAllNotificationsStore {
         return get(context)
     }
 
+    // Synchronized (AUDIT 23/09/2026): saves can come from the main thread and from
+    // ApiOverrideFollowService's background polling; WidgetImageFiles.commit() must never delete
+    // a file another concurrent save just wrote.
+    @Synchronized
     private fun save(context: Context, entries: List<PersistableEntry>) {
-        for (slot in 0 until MAX_SLOTS) imageFile(context, slot).delete()
-
+        val files = WidgetImageFiles(context, IMAGE_PREFIX)
         val array = JSONArray()
-        entries.take(MAX_SLOTS).forEachIndexed { slot, entry ->
+        entries.take(MAX_SLOTS).forEach { entry ->
+            val imageName = files.persist(entry.key, entry.postTimeMillis, entry.existingImageFile, entry.image, entry.imageLoader)
             array.put(
                 JSONObject().apply {
                     put("key", entry.key)
@@ -297,21 +311,13 @@ object WidgetAllNotificationsStore {
                     put("lastScorer", entry.lastScorer ?: JSONObject.NULL)
                     put("status", entry.status ?: JSONObject.NULL)
                     put("apiSource", entry.apiSource ?: JSONObject.NULL)
+                    put("image", imageName ?: JSONObject.NULL)
                 }
             )
-
-            if (entry.image != null) {
-                try {
-                    FileOutputStream(imageFile(context, slot)).use { out ->
-                        entry.image.compress(Bitmap.CompressFormat.PNG, 100, out)
-                    }
-                } catch (_: Throwable) {
-                    imageFile(context, slot).delete()
-                }
-            }
         }
 
         prefs(context).edit().putString(KEY_ENTRIES, array.toString()).apply()
+        files.commit()
     }
 
     /**
@@ -324,8 +330,12 @@ object WidgetAllNotificationsStore {
      * entries do. No-op if no entry matches both (never mirrored, or already pushed out by newer
      * entries), so callers can call this unconditionally on every onNotificationRemoved without
      * checking first.
+     *
+     * Returns true when an entry was actually dropped (AUDIT 23/09/2026) — lets
+     * MirrorNotificationListener skip the whole refill/widget-rebuild path for removals that never
+     * concerned this history (the vast majority: every other app's notifications).
      */
-    fun remove(context: Context, key: String, postTimeMillis: Long) {
+    fun remove(context: Context, key: String, postTimeMillis: Long): Boolean {
         val existing = get(context)
         // For a collapsed tile (Sofascore match, or a conversation) there is only ever ONE entry
         // per key, so the removal of ANY one of its postings must drop that single tile — matching
@@ -335,9 +345,10 @@ object WidgetAllNotificationsStore {
         fun matches(data: Data) = data.key == key &&
             (collapsesByKeyAlone(data.kind, data.isConversation) || data.postTimeMillis == postTimeMillis)
 
-        if (existing.none(::matches)) return
+        if (existing.none(::matches)) return false
 
         save(context, existing.filterNot(::matches).map { it.toPersistableEntry() })
+        return true
     }
 
     /**
@@ -385,6 +396,10 @@ object WidgetAllNotificationsStore {
 
     fun get(context: Context): List<Data> {
         val raw = prefs(context).getString(KEY_ENTRIES, null) ?: return emptyList()
+        return parsed.getOrParse(raw) { parse(context, it) }
+    }
+
+    private fun parse(context: Context, raw: String): List<Data> {
         val array = try { JSONArray(raw) } catch (_: Throwable) { return emptyList() }
 
         return (0 until array.length()).mapNotNull { slot ->
@@ -410,7 +425,11 @@ object WidgetAllNotificationsStore {
                 lastScorer = obj.optNullableString("lastScorer"),
                 status = obj.optNullableString("status"),
                 apiSource = obj.optNullableString("apiSource"),
-                imageFile = imageFile(context, slot).takeIf { it.exists() }
+                imageFile = if (obj.has("image")) {
+                    WidgetImageFiles.resolve(context, obj.optNullableString("image"))
+                } else {
+                    legacyImageFile(context, slot).takeIf { it.exists() }
+                }
             )
         }
     }

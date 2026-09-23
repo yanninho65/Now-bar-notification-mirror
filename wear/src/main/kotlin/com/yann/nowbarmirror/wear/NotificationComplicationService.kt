@@ -6,11 +6,6 @@ import android.graphics.drawable.Icon
 import androidx.wear.watchface.complications.data.*
 import androidx.wear.watchface.complications.datasource.ComplicationDataSourceService
 import androidx.wear.watchface.complications.datasource.ComplicationRequest
-import com.google.android.gms.tasks.Tasks
-import com.google.android.gms.wearable.DataItemBuffer
-import com.google.android.gms.wearable.DataMapItem
-import com.google.android.gms.wearable.Wearable
-import java.util.concurrent.TimeUnit
 
 /**
  * Fournit la dernière notification reçue (toutes apps mirorées confondues, voir NotificationInfo)
@@ -49,18 +44,10 @@ import java.util.concurrent.TimeUnit
  *
  * UPDATED 22/09/2026 : cette relecture elle-même pouvait, par une course avec une synchronisation
  * Data Layer pas encore terminée, renvoyer une version PLUS ANCIENNE que ce que [NotificationInfoStore]
- * avait déjà reçu en direct — voir [fetchPersistedNotification] et NotificationInfoStore.
+ * avait déjà reçu en direct — voir PhoneDataLayer.readNotification et NotificationInfoStore.
  * updateIfNotOlder's doc pour le correctif (jamais de retour en arrière).
  */
 class NotificationComplicationService : ComplicationDataSourceService() {
-
-    /** Résultat d'une relecture de l'item persistant "/notification" — voir [fetchPersistedNotification]. */
-    private sealed class FetchOutcome {
-        /** Relecture réussie : [info] est la notification actuelle, ou `null` si "aucune notification" (cleared, ou jamais rien envoyé). */
-        data class Success(val info: NotificationInfo?) : FetchOutcome()
-        /** La relecture locale elle-même a échoué/expiré — ne rien en conclure sur l'existence d'une notification. */
-        object Failed : FetchOutcome()
-    }
 
     private val notificationDetailTapAction: PendingIntent
         get() {
@@ -77,9 +64,13 @@ class NotificationComplicationService : ComplicationDataSourceService() {
         request: ComplicationRequest,
         listener: ComplicationRequestListener
     ) {
-        val notification = when (val outcome = fetchPersistedNotification()) {
-            is FetchOutcome.Success -> outcome.info
-            FetchOutcome.Failed -> NotificationInfoStore.current
+        // Re-read on every request (see the class doc, FIXED 21/09 / UPDATED 22/09/2026), now
+        // through the shared PhoneDataLayer.readNotification (AUDIT 23/09/2026): path-specific
+        // query instead of listing every DataItem, and no image decoding when the item hasn't
+        // changed (NotificationDataCodec's `reuse`).
+        val notification = when (val read = PhoneDataLayer.readNotification(this)) {
+            is PhoneDataLayer.Read.Success -> read.value
+            PhoneDataLayer.Read.Failed -> NotificationInfoStore.current
         }
 
         val data: ComplicationData = when (request.complicationType) {
@@ -88,47 +79,6 @@ class NotificationComplicationService : ComplicationDataSourceService() {
         }
 
         listener.onComplicationData(data)
-    }
-
-    /**
-     * Repli quand NotificationInfoStore est vide (processus watch relancé depuis le dernier
-     * envoi du téléphone — fréquent sur Wear OS, voir NotificationInfoStore.current). Au lieu
-     * d'attendre passivement le prochain onDataChanged (qui ne se redéclenche PAS pour un
-     * DataItem déjà synchronisé avant le redémarrage — seul un vrai changement le fait), va
-     * relire directement le DataItem "/notification" déjà persistant côté Wear Data Layer API :
-     * même logique que le rattrapage déjà en place côté téléphone
-     * (MirrorNotificationListener.rebuildStateFromActiveNotifications, qui relit
-     * activeNotifications() plutôt que d'attendre un nouvel événement) transposée côté montre —
-     * Yann, 20/09/2026 : "comme pour le widget, il ne faut pas afficher que les dernières
-     * notifications reçues depuis l'installation [...] c'est rare de se retrouver sans rien à
-     * afficher".
-     *
-     * Appel bloquant, mais purement local (Play Services, pas de réseau — la Data Layer API
-     * synchronise déjà en tâche de fond) : sans risque ici pour les quelques dizaines/centaines
-     * de ms que ça prend, borné à [FETCH_TIMEOUT_SECONDS] par précaution. `null` si le DataItem
-     * n'existe pas encore (aucune notif jamais envoyée), s'il indique "cleared", ou si l'appel
-     * échoue/expire — repli identique à `NotificationInfoStore.current == null`.
-     */
-    private fun fetchPersistedNotification(): FetchOutcome {
-        return try {
-            val items: DataItemBuffer = Tasks.await(
-                Wearable.getDataClient(this).getDataItems(),
-                FETCH_TIMEOUT_SECONDS, TimeUnit.SECONDS
-            )
-            try {
-                val item = items.firstOrNull { it.uri.path == NOTIFICATION_PATH }
-                val info = item?.let { NotificationDataCodec.decode(this, DataMapItem.fromDataItem(it).dataMap) }
-                // UPDATED 22/09/2026 : passe par NotificationInfoStore.updateIfNotOlder plutôt
-                // qu'une affectation directe — voir sa doc pour le bug que ça corrige (cette
-                // relecture pouvait sinon écraser une valeur en direct déjà correcte par une
-                // version plus ancienne encore en cours de synchronisation).
-                FetchOutcome.Success(NotificationInfoStore.updateIfNotOlder(info))
-            } finally {
-                items.release()
-            }
-        } catch (e: Exception) {
-            FetchOutcome.Failed
-        }
     }
 
     override fun getPreviewData(type: ComplicationType): ComplicationData? {
@@ -153,7 +103,14 @@ class NotificationComplicationService : ComplicationDataSourceService() {
             if (it.text.isNotBlank()) "${it.title} : ${it.text}" else it.title
         } ?: "Aucune notification"
 
-        val icon = Icon.createWithBitmap(ComplicationImageComposer.composeNotificationImage(notification))
+        // Cached for real data (AUDIT 23/09/2026, see ComposedImageCache); a preview
+        // (syncTimestamp 0, never from the phone) is always composed fresh.
+        val bitmap = if (notification != null && notification.syncTimestamp == 0L) {
+            ComplicationImageComposer.composeNotificationImage(notification)
+        } else {
+            smallImageCache.get(notification) { ComplicationImageComposer.composeNotificationImage(notification) }
+        }
+        val icon = Icon.createWithBitmap(bitmap)
 
         return SmallImageComplicationData.Builder(
             smallImage = SmallImage.Builder(icon, SmallImageType.PHOTO).build(),
@@ -162,7 +119,6 @@ class NotificationComplicationService : ComplicationDataSourceService() {
     }
 
     companion object {
-        private const val NOTIFICATION_PATH = "/notification"
-        private const val FETCH_TIMEOUT_SECONDS = 2L
+        private val smallImageCache = ComposedImageCache()
     }
 }

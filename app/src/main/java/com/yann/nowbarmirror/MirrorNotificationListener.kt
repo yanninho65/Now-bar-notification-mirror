@@ -5,10 +5,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Intent
 import android.graphics.Bitmap
-import android.graphics.Canvas
 import android.graphics.drawable.AdaptiveIconDrawable
-import android.graphics.drawable.BitmapDrawable
-import android.graphics.drawable.Drawable
 import android.graphics.drawable.Icon
 import android.os.Build
 import android.os.Bundle
@@ -183,9 +180,7 @@ class MirrorNotificationListener : NotificationListenerService() {
         // still has the right candidate to promote.
         all.asSequence()
             .filter { it.packageName != packageName }
-            .filter { !it.isOngoing }
-            .filter { it.notification.flags and Notification.FLAG_GROUP_SUMMARY == 0 }
-            .filter { !isMediaPlaybackNotification(it) }
+            .filter { isMirrorableShape(it) }
             .filter { AppMirrorPrefs.getMode(applicationContext, it.packageName) == MirrorMode.LATEST }
             .sortedBy { it.postTime }
             .forEach { latestModeActive[it.key] = it }
@@ -254,13 +249,14 @@ class MirrorNotificationListener : NotificationListenerService() {
         // their push by (key, postTime) — see WidgetAllNotificationsStore's IDENTITY section — so
         // pushing the same sbn twice just updates that one tile in place rather than duplicating
         // it.
-        latestModeActive.values.forEach { sbn -> pushAllNotifsHistoryOnly(sbn) }
+        // AUDIT 23/09/2026: no separate one-by-one push here any more — the batched
+        // refillAllNotifsHistory() at the end of this function already pushes every eligible
+        // active notification (LATEST-mode ones included), capped to what the history can hold,
+        // in a single store write/widget refresh.
 
         all.asSequence()
             .filter { it.packageName != packageName }
-            .filter { !it.isOngoing }
-            .filter { it.notification.flags and Notification.FLAG_GROUP_SUMMARY == 0 }
-            .filter { !isMediaPlaybackNotification(it) }
+            .filter { isMirrorableShape(it) }
             .filter { AppMirrorPrefs.getMode(applicationContext, it.packageName) == MirrorMode.ALL }
             .filter { it.key !in allModeMirrors }
             .sortedBy { it.postTime }
@@ -337,7 +333,7 @@ class MirrorNotificationListener : NotificationListenerService() {
         }
 
         val eligible = all.asSequence()
-            .filter { it.packageName != packageName }
+            // AUDIT 23/09/2026: filters factored into isEligibleGeneric (same six conditions).
             // Sofascore's own package is excluded here too, not just inside buildAllNotifEntryPush
             // below — FIXED 23/09/2026 (Yann: "le compteur des notifications ne doit pas compter
             // celles de sofascore sinon ça fait doublon"): eligible.size now feeds the "+X" overflow
@@ -348,12 +344,7 @@ class MirrorNotificationListener : NotificationListenerService() {
             // the first place (buildAllNotifEntryPush already drops it for that exact reason, see
             // its own doc). No behavior change to [entries] below: buildAllNotifEntryPush already
             // returned null for these, so they were never actually part of the pushed batch either.
-            .filter { it.packageName != SofascoreNotificationListenerService.SOFASCORE_PACKAGE }
-            .filter { !it.isOngoing }
-            .filter { it.notification.flags and Notification.FLAG_GROUP_SUMMARY == 0 }
-            .filter { !isMediaPlaybackNotification(it) }
-            .filter { AppMirrorPrefs.getMode(applicationContext, it.packageName) != MirrorMode.NONE }
-            .sortedBy { it.postTime }
+            .filter { isEligibleGeneric(it) }
             .toList()
 
         // See WidgetAllNotificationsStore.saveActiveGenericCount's doc — eligible.size (before the
@@ -362,7 +353,15 @@ class MirrorNotificationListener : NotificationListenerService() {
         // independent of the 6-slot cap [entries] below is about to be capped to.
         WidgetAllNotificationsStore.saveActiveGenericCount(applicationContext, eligible.size)
 
-        val entries = eligible.mapNotNull { sbn -> buildAllNotifEntryPush(sbn) }
+        // AUDIT 23/09/2026: only the most recent MAX_SLOTS_PER_KIND can survive the store's own
+        // per-kind cap anyway (every GENERIC notification still active is unique by key, so
+        // nothing older can outrank them) — building entries (and extracting images) for every
+        // eligible notification in the shade was wasted work on every removal. Images are also
+        // passed lazily (imageLoader): extracted only for a posting not already on disk.
+        val entries = eligible
+            .sortedByDescending { it.postTime }
+            .take(WidgetAllNotificationsStore.MAX_SLOTS_PER_KIND)
+            .mapNotNull { sbn -> buildAllNotifEntryPush(sbn, lazyImage = true) }
 
         try {
             NowBarWidgetProvider.pushToAllNotificationsBatch(applicationContext, entries)
@@ -400,14 +399,7 @@ class MirrorNotificationListener : NotificationListenerService() {
     private fun refreshActiveGenericCount() {
         try {
             val all = activeNotifications ?: return
-            val count = all.asSequence()
-                .filter { it.packageName != packageName }
-                .filter { it.packageName != SofascoreNotificationListenerService.SOFASCORE_PACKAGE }
-                .filter { !it.isOngoing }
-                .filter { it.notification.flags and Notification.FLAG_GROUP_SUMMARY == 0 }
-                .filter { !isMediaPlaybackNotification(it) }
-                .filter { AppMirrorPrefs.getMode(applicationContext, it.packageName) != MirrorMode.NONE }
-                .count()
+            val count = all.count { isEligibleGeneric(it) }
             WidgetAllNotificationsStore.saveActiveGenericCount(applicationContext, count)
         } catch (_: Throwable) {
             // Same reasoning as refillAllNotifsHistory's own try/catch: never let this widget
@@ -429,13 +421,23 @@ class MirrorNotificationListener : NotificationListenerService() {
         // notification ongoing, so isOngoing() above can't be relied on alone.
         if (isMediaPlaybackNotification(sbn)) return
 
+        // AUDIT 23/09/2026 — the app's mode is read FIRST now: a notification from an app that
+        // isn't mirrored (the vast majority of what this listener sees) used to still trigger
+        // refreshActiveGenericCount() below, i.e. a full getActiveNotifications() binder call
+        // copying every notification in the shade, for nothing.
+        val mode = AppMirrorPrefs.getMode(applicationContext, sbn.packageName)
+        if (mode == MirrorMode.NONE) return
+
         // See refreshActiveGenericCount's own doc — BEFORE the mirror() call below, which is what
         // actually triggers the widget rebuild for this event: saving the fresh count first means
         // that rebuild picks up THIS notification's effect on the count, instead of the rebuild
-        // running against whatever count was last saved before this event arrived.
-        refreshActiveGenericCount()
+        // running against whatever count was last saved before this event arrived. Skipped for
+        // Sofascore, which never counts toward this (generic) badge.
+        if (sbn.packageName != SofascoreNotificationListenerService.SOFASCORE_PACKAGE) {
+            refreshActiveGenericCount()
+        }
 
-        when (AppMirrorPrefs.getMode(applicationContext, sbn.packageName)) {
+        when (mode) {
             MirrorMode.ALL -> {
                 val mirrorId = allModeMirrors.getOrPut(sbn.key) { nextAllModeMirrorId++ }
                 mirror(sbn, mirrorId)
@@ -502,13 +504,25 @@ class MirrorNotificationListener : NotificationListenerService() {
         // rest stay until they age out of the capped history. remove() is a no-op if this exact
         // (key, postTime) pair was never in there (app not mirrored, or already pushed out by
         // newer entries).
+        //
+        // GATED (AUDIT 23/09/2026 — battery): this whole block used to run for EVERY removal of
+        // ANY app's notification (download progress, system, apps that aren't mirrored at all…):
+        // a getActiveNotifications() binder call, a full history refill with image extraction,
+        // and a rebuild of all three widgets. It now only runs when the removal can actually
+        // change something shown: the entry was in the history, or it belongs to an app counted
+        // in "Toutes notifs" (its '+X' badge changes). Sofascore removals are left to its own
+        // listener (SofascoreNotificationListenerService.onNotificationRemoved), which already
+        // does the exact same removal + refill for its match tiles.
+        val isSofascore = sbn.packageName == SofascoreNotificationListenerService.SOFASCORE_PACKAGE
         try {
-            WidgetAllNotificationsStore.remove(applicationContext, sbn.key, sbn.postTime)
+            val wasTracked = !isSofascore &&
+                WidgetAllNotificationsStore.remove(applicationContext, sbn.key, sbn.postTime)
+            val concernsHistory = wasTracked || (!isSofascore && isEligibleGeneric(sbn))
             // Removing a tracked entry just shrinks the widget's "Toutes notifs" list unless
             // something re-derives it from what's actually still posted — refill the freed slot
             // (if any) from the notification center right now, instead of only catching up the
             // next time this listener reconnects. See refillAllNotifsHistory's doc, 18/09/2026.
-            activeNotifications?.let { all ->
+            if (concernsHistory) activeNotifications?.let { all ->
                 val allList = all.toList()
                 WidgetAllNotificationsStore.pruneAgainstActive(applicationContext, allList)
                 refillAllNotifsHistory(allList)
@@ -519,8 +533,8 @@ class MirrorNotificationListener : NotificationListenerService() {
             // swiping it from the shade directly) — Yann: "Si je supprime la notification ou la
             // fais disparaitre en marquant lu ou supprimer avec les boutons d'actions, revenir
             // automatiquement aux icônes."
-            NowBarWidgetProvider.closePeekIfShowing(applicationContext, sbn.key, sbn.postTime)
-            NowBarWidgetProvider.requestUpdate(applicationContext)
+            if (!isSofascore) NowBarWidgetProvider.closePeekIfShowing(applicationContext, sbn.key, sbn.postTime)
+            if (concernsHistory) NowBarWidgetProvider.requestUpdate(applicationContext)
         } catch (_: Throwable) {
             // Same reasoning as above: never let this widget nice-to-have take the service down.
         }
@@ -591,7 +605,7 @@ class MirrorNotificationListener : NotificationListenerService() {
      * package, or if anything about building the entry throws — same "never let this widget
      * nice-to-have crash the listener" reasoning the old inline try/catch had.
      */
-    private fun buildAllNotifEntryPush(sbn: StatusBarNotification): AllNotifEntryPush? {
+    private fun buildAllNotifEntryPush(sbn: StatusBarNotification, lazyImage: Boolean = false): AllNotifEntryPush? {
         if (sbn.packageName == SofascoreNotificationListenerService.SOFASCORE_PACKAGE) return null
         return try {
             val extras = sbn.notification.extras
@@ -604,7 +618,10 @@ class MirrorNotificationListener : NotificationListenerService() {
             val rawText = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()
                 ?: extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()
                 ?: ""
-            val image = NotificationImageExtractor.extract(applicationContext, sbn)
+            // lazyImage (AUDIT 23/09/2026, refill path): extraction deferred to the store, which
+            // only runs it when this exact posting has no image file on disk yet.
+            val image = if (lazyImage) null else NotificationImageExtractor.extract(applicationContext, sbn)
+            val appContext = applicationContext
             val actions = widgetActionsFor(sbn.notification)
             val isConversation = isConversationNotification(sbn)
 
@@ -625,23 +642,21 @@ class MirrorNotificationListener : NotificationListenerService() {
                 image = image,
                 contentIntent = sbn.notification.contentIntent,
                 actions = actions,
-                detailLines = if (isConversation) messageLinesFor(sbn, rawTitle) else emptyList()
+                detailLines = if (isConversation) messageLinesFor(sbn, rawTitle) else emptyList(),
+                imageLoader = if (lazyImage) {
+                    { NotificationImageExtractor.extract(appContext, sbn) }
+                } else {
+                    null
+                }
             )
         } catch (_: Throwable) {
             null
         }
     }
 
-    /** Pushes [sbn] into "Toutes notifs" on its own — see [buildAllNotifEntryPush]. Used where a single, standalone push is enough (the LATEST-mode bootstrap loop below); [refillAllNotifsHistory] builds and pushes a whole batch instead. */
-    private fun pushAllNotifsHistoryOnly(sbn: StatusBarNotification) {
-        val entry = buildAllNotifEntryPush(sbn) ?: return
-        try {
-            NowBarWidgetProvider.pushToAllNotifications(applicationContext, entry)
-        } catch (_: Throwable) {
-            // Same reasoning as mirror()'s own push block: never let this widget nice-to-have
-            // crash the listener during catch-up.
-        }
-    }
+    // pushAllNotifsHistoryOnly() (single-entry push) was REMOVED 23/09/2026 (audit): its last
+    // caller, the LATEST-mode catch-up loop in rebuildStateFromActiveNotifications, is now covered
+    // by the batched refillAllNotifsHistory() at the end of that same function.
 
     /**
      * Up to three of [notification]'s own action buttons, as [WidgetAction]s — shared by mirror()
@@ -894,6 +909,30 @@ class MirrorNotificationListener : NotificationListenerService() {
         return n.extras.containsKey(Notification.EXTRA_MEDIA_SESSION)
     }
 
+    /**
+     * The shared "can this notification appear in 'Toutes notifs' as a GENERIC entry / count
+     * toward its '+X' badge" filter (AUDIT 23/09/2026 — the same six filters used to be written
+     * out four times: refillAllNotifsHistory, refreshActiveGenericCount, and the two bootstrap
+     * loops). Not this app's own mirrors, not Sofascore (its own listener pushes its own match
+     * tiles), not ongoing, not a group summary, not media playback, and an app with a mirror mode.
+     * [mode] lets a caller that already read the app's mode skip reading it again.
+     */
+    private fun isEligibleGeneric(
+        sbn: StatusBarNotification,
+        mode: MirrorMode = AppMirrorPrefs.getMode(applicationContext, sbn.packageName)
+    ): Boolean {
+        if (sbn.packageName == packageName) return false
+        if (sbn.packageName == SofascoreNotificationListenerService.SOFASCORE_PACKAGE) return false
+        return isMirrorableShape(sbn) && mode != MirrorMode.NONE
+    }
+
+    /** Structural filters shared by every path (not ongoing, not a group summary, not media playback). */
+    private fun isMirrorableShape(sbn: StatusBarNotification): Boolean {
+        if (sbn.isOngoing) return false
+        if (sbn.notification.flags and Notification.FLAG_GROUP_SUMMARY != 0) return false
+        return !isMediaPlaybackNotification(sbn)
+    }
+
     private fun cancelMirror(mirrorId: Int) {
         getSystemService(NotificationManager::class.java).cancel(mirrorId)
     }
@@ -922,11 +961,8 @@ class MirrorNotificationListener : NotificationListenerService() {
         }
     }
 
-    private fun appIconBitmap(pkg: String): Bitmap? {
-        return try {
-            drawableToBitmap(packageManager.getApplicationIcon(pkg))
-        } catch (_: Throwable) { null }
-    }
+    /** Cached per package (AUDIT 23/09/2026 — see BitmapUtils.AppIcons, shared with the widget). */
+    private fun appIconBitmap(pkg: String): Bitmap? = BitmapUtils.AppIcons.get(applicationContext, pkg)
 
     /**
      * The source app's real icon, used for the small-icon slot (left side, next to the title).
@@ -939,7 +975,9 @@ class MirrorNotificationListener : NotificationListenerService() {
     private fun appIcon(pkg: String): Icon? {
         return try {
             val drawable = packageManager.getApplicationIcon(pkg)
-            val bitmap = drawableToBitmap(drawable)
+            // Bitmap from the shared cache (AUDIT 23/09/2026) — the drawable itself is still
+            // looked up, only to know whether it's adaptive (cheap, no rendering).
+            val bitmap = BitmapUtils.AppIcons.get(applicationContext, pkg) ?: return null
             if (Build.VERSION.SDK_INT >= 26 && drawable is AdaptiveIconDrawable) {
                 Icon.createWithAdaptiveBitmap(bitmap)
             } else {
@@ -974,19 +1012,7 @@ class MirrorNotificationListener : NotificationListenerService() {
      *    most real-world notifications).
      */
     // extractImageBitmap()/drawableFromIcon() ont été retirées lors de la fusion avec Sport
-    // Watch Complication : cette logique vit maintenant dans NotificationImageExtractor,
-    // partagée avec com.yann.nowbarmirror.sport.SofascoreNotificationListenerService (voir
-    // README.md, section "Fusion avec Sport Watch Complication"). drawableToBitmap() reste ici
-    // : encore utilisée par appIconBitmap()/appIcon() ci-dessous, sans rapport avec
-    // l'extraction d'image de notification.
-    private fun drawableToBitmap(drawable: Drawable): Bitmap {
-        if (drawable is BitmapDrawable && drawable.bitmap != null) return drawable.bitmap
-        val width = drawable.intrinsicWidth.coerceAtLeast(1)
-        val height = drawable.intrinsicHeight.coerceAtLeast(1)
-        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(bitmap)
-        drawable.setBounds(0, 0, canvas.width, canvas.height)
-        drawable.draw(canvas)
-        return bitmap
-    }
+    // Watch Complication : cette logique vit maintenant dans NotificationImageExtractor.
+    // drawableToBitmap() a été retirée le 23/09/2026 (audit) : implémentation unique dans
+    // BitmapUtils, partagée avec le widget, l'extracteur d'image et la synchro montre.
 }

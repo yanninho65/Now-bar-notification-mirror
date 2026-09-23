@@ -1,18 +1,13 @@
 package com.yann.nowbarmirror.wear
 
 import android.content.Context
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import com.google.android.gms.tasks.Tasks
-import com.google.android.gms.wearable.Asset
 import com.google.android.gms.wearable.DataMap
-import com.google.android.gms.wearable.Wearable
 
 /**
  * Décodage partagé du DataMap envoyé par le téléphone sur le chemin "/notification" (voir
- * mobile/WatchNotificationSync.kt) — utilisé à la fois par NotificationDataListenerService
+ * mobile/WatchNotificationSync.kt) — utilisé à la fois par PhoneDataListenerService
  * (réception en direct via onDataChanged) et par NotificationComplicationService.
- * fetchPersistedNotification (repli quand NotificationInfoStore est vide juste après un
+ * via PhoneDataLayer.readNotification (relecture de l'item persistant, quand NotificationInfoStore est vide ou périmé après un
  * redémarrage du processus watch, voir sa doc), pour ne décoder ce format qu'à un seul endroit.
  *
  * [decode] renvoie `null` pour un DataMap "cleared=true" (voir mobile/
@@ -21,31 +16,29 @@ import com.google.android.gms.wearable.Wearable
  */
 object NotificationDataCodec {
 
-    fun decode(context: Context, dataMap: DataMap): NotificationInfo? {
+    /**
+     * [reuse] (AUDIT 23/09/2026): the value already in memory — returned as-is, without decoding
+     * any image asset again, when it was built from this exact send (same phone timestamp). That's
+     * the common case for the complication's re-read of the persisted item on every request.
+     */
+    fun decode(context: Context, dataMap: DataMap, reuse: NotificationInfo? = null): NotificationInfo? {
         if (dataMap.getBoolean("cleared", false)) return null
+        val syncTimestamp = PhoneDataLayer.timestampOf(dataMap)
+        if (reuse != null && syncTimestamp != 0L && reuse.syncTimestamp == syncTimestamp) return reuse
 
         return NotificationInfo(
             title = dataMap.getString("title").orEmpty(),
             text = dataMap.getString("text").orEmpty(),
             packageName = dataMap.getString("packageName").orEmpty(),
-            image = decodeImageAsset(context, dataMap, "notifImage"),
-            appIcon = decodeImageAsset(context, dataMap, "appIcon"),
+            image = PhoneDataLayer.decodeImageAsset(context, dataMap, "notifImage"),
+            appIcon = PhoneDataLayer.decodeImageAsset(context, dataMap, "appIcon"),
             // NEW 21/09/2026, écran de détail — voir NotificationInfo's doc.
             detailLines = dataMap.getStringArrayList("detailLines") ?: emptyList(),
             actionLabels = dataMap.getStringArrayList("actionLabels") ?: emptyList(),
             entryKey = dataMap.getString("entryKey").orEmpty(),
             entryPostTimeMillis = dataMap.getLong("entryPostTimeMillis", -1L),
-            kind = dataMap.getString("kind").orEmpty()
+            kind = dataMap.getString("kind").orEmpty(),
+            syncTimestamp = syncTimestamp
         )
-    }
-
-    private fun decodeImageAsset(context: Context, dataMap: DataMap, key: String): Bitmap? {
-        val asset: Asset = dataMap.getAsset(key) ?: return null
-        return try {
-            val response = Tasks.await(Wearable.getDataClient(context).getFdForAsset(asset))
-            response.inputStream.use { BitmapFactory.decodeStream(it) }
-        } catch (e: Exception) {
-            null
-        }
     }
 }
