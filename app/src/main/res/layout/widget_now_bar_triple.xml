@@ -61,22 +61,31 @@
 
         <!-- NEW 23/09/2026 (Yann: "à droite des lignes d'icônes, indiquer le nombre d'autres
              notifications non montrées [...] le +X aligné avec la croix pour supprimer la
-             dernière notif") — wrapped in a RelativeLayout so the tile strip ends exactly where
-             ligne 3's own text ends: widget_triple_notifs_end_cluster below reserves the exact
-             same width as ligne 3's image+dismiss cluster (32dp + 10dp margin + 22dp), and the
-             "+X" badge sits in that cluster's own 22dp slot — same box as ligne 3's dismiss
-             cross, so the two land in the same column.
+             dernière notif") — wrapped in a RelativeLayout so the "+X" badge can sit in its own
+             fixed-width, right-aligned slot next to the tile strip.
 
-             FIXED 23/09/2026 (Yann: "les icones de sofascore ne sont plus alignés avec celles des
-             notifications [...] quand il y a +1, ça décale les icones sur la gauche et les
-             resserre") — the cluster's width is now a FIXED 64dp, not wrap_content: with
+             FIXED 23/09/2026 #1 (Yann: "les icones de sofascore ne sont plus alignés avec celles
+             des notifications [...] quand il y a +1, ça décale les icones sur la gauche et les
+             resserre") — widget_triple_notifs_end_cluster's width is FIXED, not wrap_content: with
              wrap_content, hiding the "+X" TextView (visibility=gone, no active overflow) shrank
-             this cluster down to just its 42dp spacer, which pulled the tile strip's own
-             layout_toStartOf boundary further right than when the badge is showing (64dp) —
-             misaligning ligne 1 against ligne 2 the moment only one of them has an overflow badge,
-             and visibly shifting/compressing a row's own tiles the moment its badge appears or
-             disappears. Fixed at 64dp always, the tile strip's right edge — and so every tile's
-             center — never moves regardless of whether the badge is shown. -->
+             this cluster down to nothing, which pulled the tile strip's own layout_toStartOf
+             boundary further right than when the badge is showing — misaligning ligne 1 against
+             ligne 2 the moment only one of them has an overflow badge, and visibly
+             shifting/compressing a row's own tiles the moment its badge appears or disappears.
+             Fixed always, the tile strip's right edge — and so every tile's center — never moves
+             regardless of whether the badge is shown.
+
+             FIXED 23/09/2026 #2 (Yann: "il y a beaucoup d'espace entre la dernière icône et le
+             plus [...] le centre du plus doit être aligné avec le centre de la croix") — an
+             earlier version of this cluster was 64dp wide (an invisible spacer + the badge) so the
+             tile strip would end exactly where ligne 3's own text ends, but that left most of the
+             64dp empty since the badge itself only needs ~22dp — a big, obviously-unintentional
+             gap between the last tile and the badge. Dropped that spacer entirely: the cluster is
+             now exactly the badge's own 22dp — same width as ligne 3's own dismiss cross, so a
+             cluster right-aligned the same way as ligne 3's own right cluster puts the badge's
+             CENTER at exactly the same x as the cross's center, no extra math needed. The tile
+             strip now ends right where this narrower cluster begins (see widget_all_notifs_content's
+             own small marginEnd below for the little breathing room that's left). -->
         <RelativeLayout
             android:layout_width="0dp"
             android:layout_height="wrap_content"
@@ -85,43 +94,32 @@
 
             <LinearLayout
                 android:id="@+id/widget_triple_notifs_end_cluster"
-                android:layout_width="64dp"
-                android:layout_height="wrap_content"
+                android:layout_width="22dp"
+                android:layout_height="22dp"
                 android:layout_centerVertical="true"
                 android:layout_alignParentEnd="true"
-                android:orientation="horizontal"
-                android:gravity="center_vertical">
-
-                <!-- Empty spacer matching ligne 3's image (32dp + 10dp marginEnd) — invisible,
-                     only here so this cluster's total width equals ligne 3's own right cluster.
-                     FrameLayout, not a plain View: RemoteViews (widget layouts) only support a
-                     fixed whitelist of view classes, and android.view.View isn't in it — using it
-                     directly made the widget fail to inflate ("impossible d'ajouter le widget").
-                     FrameLayout is supported and already used as a spacer elsewhere in this file.
-                     34dp + 30dp below (not 42dp + 22dp, ligne 3's own image+dismiss split) —
-                     widened the badge's own share of the 64dp so a 2-digit count ("+12") never
-                     gets clipped; only the cluster's TOTAL width has to match ligne 3's, not how
-                     it's split internally. -->
-                <FrameLayout
-                    android:layout_width="34dp"
-                    android:layout_height="1dp" />
+                android:gravity="center">
 
                 <TextView
                     android:id="@+id/widget_triple_notifs_more"
-                    android:layout_width="30dp"
-                    android:layout_height="22dp"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
                     android:gravity="center"
                     android:textColor="@android:color/white"
                     android:textStyle="bold"
-                    android:textSize="10sp"
+                    android:textSize="9sp"
                     android:visibility="gone" />
 
             </LinearLayout>
 
-            <!-- "Toutes notifs" — exact copy of widget_now_bar_compact.xml's own widget_all_notifs_content. -->
+            <!-- "Toutes notifs" — exact copy of widget_now_bar_compact.xml's own widget_all_notifs_content.
+                 marginEnd 6dp (NEW 23/09/2026, fix #2 above): a little breathing room before the
+                 "+X" badge cluster, instead of the near-nothing gap a plain layout_toStartOf would
+                 otherwise leave (or the much bigger, unintentional one the old 64dp cluster left). -->
             <LinearLayout
                 android:id="@+id/widget_all_notifs_content"
                 android:layout_width="match_parent"
+                android:layout_marginEnd="6dp"
                 android:layout_height="wrap_content"
                 android:layout_toStartOf="@id/widget_triple_notifs_end_cluster"
                 android:layout_alignParentStart="true"
@@ -566,34 +564,30 @@
 
             <LinearLayout
                 android:id="@+id/widget_triple_sofascore_end_cluster"
-                android:layout_width="64dp"
-                android:layout_height="wrap_content"
+                android:layout_width="22dp"
+                android:layout_height="22dp"
                 android:layout_centerVertical="true"
                 android:layout_alignParentEnd="true"
-                android:orientation="horizontal"
-                android:gravity="center_vertical">
-
-                <!-- FrameLayout, not View — see ligne 1's own spacer comment above (34dp+30dp split, not 42dp+22dp — see its comment). -->
-                <FrameLayout
-                    android:layout_width="34dp"
-                    android:layout_height="1dp" />
+                android:gravity="center">
 
                 <TextView
                     android:id="@+id/widget_triple_sofascore_more"
-                    android:layout_width="30dp"
-                    android:layout_height="22dp"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
                     android:gravity="center"
                     android:textColor="@android:color/white"
                     android:textStyle="bold"
-                    android:textSize="10sp"
+                    android:textSize="9sp"
                     android:visibility="gone" />
 
             </LinearLayout>
 
-            <!-- Sofascore "Sport" view — exact copy of widget_now_bar_compact.xml's widget_sofascore_content. -->
+            <!-- Sofascore "Sport" view — exact copy of widget_now_bar_compact.xml's widget_sofascore_content.
+                 marginEnd 6dp — see ligne 1's own widget_all_notifs_content comment above. -->
             <LinearLayout
                 android:id="@+id/widget_sofascore_content"
                 android:layout_width="match_parent"
+                android:layout_marginEnd="6dp"
                 android:layout_height="wrap_content"
                 android:layout_toStartOf="@id/widget_triple_sofascore_end_cluster"
                 android:layout_alignParentStart="true"
