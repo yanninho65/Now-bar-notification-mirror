@@ -21,6 +21,9 @@
     <string name="widget_empty_title">Aucune notification</string>
     <string name="widget_description">Affiche la dernière notification reçue, style Now Bar.</string>
     <string name="sofascore_widget_empty">Aucun match</string>
+    <!-- NEW 22/09/2026 — deuxième widget (4x2, NowBarWidgetProviderCompact) : icônes sport/toutes
+         notifs en haut, dernière notification en bas. -->
+    <string name="widget_compact_description">Icônes sport/notifications en haut, dernière notification en bas.</string>
 
     <string name="main_description">Cette app reflète la dernière notification reçue dans une notification persistante compatible Now Bar.\n\nElle nécessite l’accès aux notifications.</string>
     <string name="allow_notification_access">Autoriser l’accès aux notifications</string>
