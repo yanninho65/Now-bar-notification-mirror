@@ -338,6 +338,17 @@ class MirrorNotificationListener : NotificationListenerService() {
 
         val eligible = all.asSequence()
             .filter { it.packageName != packageName }
+            // Sofascore's own package is excluded here too, not just inside buildAllNotifEntryPush
+            // below — FIXED 23/09/2026 (Yann: "le compteur des notifications ne doit pas compter
+            // celles de sofascore sinon ça fait doublon"): eligible.size now feeds the "+X" overflow
+            // count (see below), and without this filter it would have counted every active
+            // Sofascore match TWICE — once here (toward the generic badge) and once more toward
+            // Sofascore's own true count (SofascoreWidgetStore.getActiveCount) — even though a
+            // Sofascore match was never actually going to occupy a generic "Toutes notifs" slot in
+            // the first place (buildAllNotifEntryPush already drops it for that exact reason, see
+            // its own doc). No behavior change to [entries] below: buildAllNotifEntryPush already
+            // returned null for these, so they were never actually part of the pushed batch either.
+            .filter { it.packageName != SofascoreNotificationListenerService.SOFASCORE_PACKAGE }
             .filter { !it.isOngoing }
             .filter { it.notification.flags and Notification.FLAG_GROUP_SUMMARY == 0 }
             .filter { !isMediaPlaybackNotification(it) }
@@ -346,9 +357,9 @@ class MirrorNotificationListener : NotificationListenerService() {
             .toList()
 
         // See WidgetAllNotificationsStore.saveActiveGenericCount's doc — eligible.size (before the
-        // mapNotNull below, which can drop an entry buildAllNotifEntryPush fails to build) is the
-        // TRUE count NowBarWidgetProviderTriple's "+X" badge needs, independent of the 6-slot cap
-        // [entries] below is about to be capped to.
+        // mapNotNull below, which can drop an entry buildAllNotifEntryPush fails to build for some
+        // OTHER reason) is the TRUE count NowBarWidgetProviderTriple's "+X" badge needs,
+        // independent of the 6-slot cap [entries] below is about to be capped to.
         WidgetAllNotificationsStore.saveActiveGenericCount(applicationContext, eligible.size)
 
         val entries = eligible.mapNotNull { sbn -> buildAllNotifEntryPush(sbn) }
@@ -377,15 +388,21 @@ class MirrorNotificationListener : NotificationListenerService() {
      *
      * Same eligibility filter as [refillAllNotifsHistory] — kept separate (rather than having this
      * call that function and just ignore its side effects) since the two run at different moments
-     * and for different reasons; duplicating five one-line filters is cheaper to keep in sync here
+     * and for different reasons; duplicating six one-line filters is cheaper to keep in sync here
      * than reusing a function whose own doc is entirely about avoiding a full refill on this exact
      * event.
+     *
+     * Excludes Sofascore's own package (FIXED 23/09/2026, same "doublon" fix and reasoning as
+     * [refillAllNotifsHistory]'s own — see its doc): without it, a Sofascore match would count
+     * toward BOTH this badge and Sofascore's own true count, despite never actually being able to
+     * occupy a generic "Toutes notifs" slot in the first place.
      */
     private fun refreshActiveGenericCount() {
         try {
             val all = activeNotifications ?: return
             val count = all.asSequence()
                 .filter { it.packageName != packageName }
+                .filter { it.packageName != SofascoreNotificationListenerService.SOFASCORE_PACKAGE }
                 .filter { !it.isOngoing }
                 .filter { it.notification.flags and Notification.FLAG_GROUP_SUMMARY == 0 }
                 .filter { !isMediaPlaybackNotification(it) }
