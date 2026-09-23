@@ -153,19 +153,21 @@ class NowBarWidgetProviderTriple : AppWidgetProvider() {
         private fun applyRows(context: Context, views: RemoteViews) {
             val latest = WidgetAllNotificationsStore.get(context).firstOrNull()
             val latestIsSofascore = latest != null && latest.kind == WidgetAllNotificationsStore.Kind.SOFASCORE_MATCH
+            val latestIsGeneric = latest != null && latest.kind == WidgetAllNotificationsStore.Kind.GENERIC
 
             NowBarWidgetProvider.applyAllNotifsIcon(context, views, R.id.widget_triple_notifs_icon)
             val notifEntries = WidgetAllNotificationsStore.get(context)
                 .filter { it.kind == WidgetAllNotificationsStore.Kind.GENERIC }
                 .filterNot { latest != null && it.key == latest.key && it.postTimeMillis == latest.postTimeMillis }
             NowBarWidgetProvider.applyAllNotifs(context, views, notifEntries, PEEK_REQUEST_CODE_ALL_NOTIFS_BASE)
-            // NOTE: notifEntries is already capped at WidgetAllNotificationsStore.MAX_SLOTS_PER_KIND
-            // (6) by the store itself, so this can only ever show "+1" — unlike Sofascore below,
-            // there's no single moment where the TRUE count of currently active generic
-            // notifications is captured on every event (only on listener reconnect), so it isn't
-            // tracked the same way. Fine as long as more than 6 eligible generic notifications
-            // are never active at once; flag it if that turns out not to hold.
-            applyOverflowBadge(views, R.id.widget_triple_notifs_more, hidden = notifEntries.size - 5)
+            // Same fix, same reasoning as Sofascore's own below (Yann: "je voulais le même
+            // mécanisme pour les notifications autre que sofascore") — uses the TRUE active-count
+            // (WidgetAllNotificationsStore.getActiveGenericCount, kept fresh by
+            // MirrorNotificationListener.refreshActiveGenericCount/refillAllNotifsHistory on every
+            // post/removal/reconnect), NOT notifEntries.size, which comes from a store capped at
+            // MAX_SLOTS_PER_KIND (6) and so could never say more than "+1" on its own.
+            val notifsHidden = WidgetAllNotificationsStore.getActiveGenericCount(context) - 5 - (if (latestIsGeneric) 1 else 0)
+            applyOverflowBadge(views, R.id.widget_triple_notifs_more, hidden = notifsHidden)
 
             NowBarWidgetProvider.applySofascoreIcon(context, views, R.id.widget_triple_sofascore_icon)
             val matches = SofascoreWidgetStore.get(context)

@@ -85,6 +85,7 @@ object WidgetAllNotificationsStore {
 
     private const val PREFS_NAME = "widget_all_notifs_prefs"
     private const val KEY_ENTRIES = "entries"
+    private const val KEY_ACTIVE_GENERIC_COUNT = "active_generic_count"
 
     enum class Kind { GENERIC, SOFASCORE_MATCH }
 
@@ -416,4 +417,23 @@ object WidgetAllNotificationsStore {
 
     private fun JSONObject.optNullableString(key: String): String? =
         if (has(key) && !isNull(key)) getString(key) else null
+
+    /**
+     * NEW 23/09/2026 (Yann: "je voulais le même mécanisme pour les notifications autre que
+     * sofascore" — see SofascoreWidgetStore.save's own `activeCount` doc for the "+1 alors qu'il y
+     * a 17 matchs" bug this mirrors). [get]'s GENERIC entries are capped at [MAX_SLOTS_PER_KIND]
+     * (6) by [mergeEntry], so NowBarWidgetProviderTriple's own "+X" overflow badge for the
+     * "Dernière notif" row could never say more than "+1" if it only ever counted THOSE — this
+     * separately persisted count is the TRUE number of currently active, eligible generic
+     * notifications (any app with a mirror mode, not this app's own mirrors, not ongoing/a group
+     * summary/media playback — see MirrorNotificationListener.refreshActiveGenericCount, called
+     * from onNotificationPosted/onNotificationRemoved/listener reconnect, same
+     * always-recompute-from-scratch pattern as SofascoreNotificationListenerService.refresh()),
+     * independent of [MAX_SLOTS_PER_KIND]. 0 if never saved yet.
+     */
+    fun saveActiveGenericCount(context: Context, count: Int) {
+        prefs(context).edit().putInt(KEY_ACTIVE_GENERIC_COUNT, count).apply()
+    }
+
+    fun getActiveGenericCount(context: Context): Int = prefs(context).getInt(KEY_ACTIVE_GENERIC_COUNT, 0)
 }

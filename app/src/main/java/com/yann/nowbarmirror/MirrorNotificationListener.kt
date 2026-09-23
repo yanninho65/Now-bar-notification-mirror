@@ -331,23 +331,70 @@ class MirrorNotificationListener : NotificationListenerService() {
      * and one widget redraw for the lot — the widget jumps straight to the final state.
      */
     private fun refillAllNotifsHistory(all: List<StatusBarNotification>) {
-        if (!ServicePrefs.isEnabled(applicationContext)) return
+        if (!ServicePrefs.isEnabled(applicationContext)) {
+            WidgetAllNotificationsStore.saveActiveGenericCount(applicationContext, 0)
+            return
+        }
 
-        val entries = all.asSequence()
+        val eligible = all.asSequence()
             .filter { it.packageName != packageName }
             .filter { !it.isOngoing }
             .filter { it.notification.flags and Notification.FLAG_GROUP_SUMMARY == 0 }
             .filter { !isMediaPlaybackNotification(it) }
             .filter { AppMirrorPrefs.getMode(applicationContext, it.packageName) != MirrorMode.NONE }
             .sortedBy { it.postTime }
-            .mapNotNull { sbn -> buildAllNotifEntryPush(sbn) }
             .toList()
+
+        // See WidgetAllNotificationsStore.saveActiveGenericCount's doc — eligible.size (before the
+        // mapNotNull below, which can drop an entry buildAllNotifEntryPush fails to build) is the
+        // TRUE count NowBarWidgetProviderTriple's "+X" badge needs, independent of the 6-slot cap
+        // [entries] below is about to be capped to.
+        WidgetAllNotificationsStore.saveActiveGenericCount(applicationContext, eligible.size)
+
+        val entries = eligible.mapNotNull { sbn -> buildAllNotifEntryPush(sbn) }
 
         try {
             NowBarWidgetProvider.pushToAllNotificationsBatch(applicationContext, entries)
         } catch (_: Throwable) {
             // Same reasoning as pushAllNotifsHistoryOnly's own try/catch: never let this widget
             // nice-to-have crash the listener.
+        }
+    }
+
+    /**
+     * NEW 23/09/2026 (Yann, after the same fix was applied to Sofascore's own overflow badge: "je
+     * voulais le même mécanisme pour les notifications autre que sofascore") — lightweight sibling
+     * of [refillAllNotifsHistory] for [onNotificationPosted]: that function's own doc explains why
+     * a full history refill only runs at listener reconnect and after a removal, not on every
+     * single posted notification (repushing the whole "Toutes notifs" batch on every post would be
+     * needless extra work there, on top of the already-correct incremental [mirror] push).
+     * NowBarWidgetProviderTriple's "+X" overflow badge still needs to stay just as fresh as
+     * Sofascore's own count does (SofascoreNotificationListenerService.refresh() recomputes its
+     * full active list on every post/removal too) — so this recomputes ONLY the count (a pure read
+     * + one SharedPreferences write via WidgetAllNotificationsStore.saveActiveGenericCount, no
+     * store/widget rebuild of its own), which is cheap enough to call on every posted notification
+     * as well, unlike a full [refillAllNotifsHistory] run.
+     *
+     * Same eligibility filter as [refillAllNotifsHistory] — kept separate (rather than having this
+     * call that function and just ignore its side effects) since the two run at different moments
+     * and for different reasons; duplicating five one-line filters is cheaper to keep in sync here
+     * than reusing a function whose own doc is entirely about avoiding a full refill on this exact
+     * event.
+     */
+    private fun refreshActiveGenericCount() {
+        try {
+            val all = activeNotifications ?: return
+            val count = all.asSequence()
+                .filter { it.packageName != packageName }
+                .filter { !it.isOngoing }
+                .filter { it.notification.flags and Notification.FLAG_GROUP_SUMMARY == 0 }
+                .filter { !isMediaPlaybackNotification(it) }
+                .filter { AppMirrorPrefs.getMode(applicationContext, it.packageName) != MirrorMode.NONE }
+                .count()
+            WidgetAllNotificationsStore.saveActiveGenericCount(applicationContext, count)
+        } catch (_: Throwable) {
+            // Same reasoning as refillAllNotifsHistory's own try/catch: never let this widget
+            // nice-to-have take the service down.
         }
     }
 
@@ -364,6 +411,12 @@ class MirrorNotificationListener : NotificationListenerService() {
         // (e.g. France Info: articles vs. its radio player). Some apps don't mark this
         // notification ongoing, so isOngoing() above can't be relied on alone.
         if (isMediaPlaybackNotification(sbn)) return
+
+        // See refreshActiveGenericCount's own doc — BEFORE the mirror() call below, which is what
+        // actually triggers the widget rebuild for this event: saving the fresh count first means
+        // that rebuild picks up THIS notification's effect on the count, instead of the rebuild
+        // running against whatever count was last saved before this event arrived.
+        refreshActiveGenericCount()
 
         when (AppMirrorPrefs.getMode(applicationContext, sbn.packageName)) {
             MirrorMode.ALL -> {
