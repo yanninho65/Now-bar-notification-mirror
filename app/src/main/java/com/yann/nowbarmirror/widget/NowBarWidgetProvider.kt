@@ -1085,18 +1085,25 @@ class NowBarWidgetProvider : AppWidgetProvider() {
          * sport") — used to show Sofascore's own app icon; now shows the stylized football-pitch
          * glyph instead (same one used on the right toggle for ALL_NOTIFS, see
          * applyRightToggleIcon/ic_football_pitch.xml), at the left column's full 32dp size.
+         *
+         * [targetViewId] (NEW 23/09/2026, `internal`) defaults to the main widget's own
+         * widget_app_icon — the compact 4x2 widget's row 1 has its own, differently-id'd left icon
+         * (widget_app_icon is already taken by ITS row 2), so NowBarWidgetProviderCompact passes
+         * that id instead, reusing this exact same icon-picking logic rather than duplicating it.
          */
-        private fun applySofascoreIcon(context: Context, views: RemoteViews) {
-            views.setImageViewResource(R.id.widget_app_icon, R.drawable.ic_football_pitch)
+        internal fun applySofascoreIcon(context: Context, views: RemoteViews, targetViewId: Int = R.id.widget_app_icon) {
+            views.setImageViewResource(targetViewId, R.drawable.ic_football_pitch)
         }
 
         /**
          * No single source app for a merged "Toutes notifs" feed — replaced 18/09/2026 (Yann:
          * "Remplacer l'icône sur la gauche en vue toutes notifs par une cloche représentant
          * notification") with a generic notification-bell glyph instead of this app's own icon.
+         *
+         * [targetViewId] — see [applySofascoreIcon]'s doc.
          */
-        private fun applyAllNotifsIcon(context: Context, views: RemoteViews) {
-            views.setImageViewResource(R.id.widget_app_icon, R.drawable.ic_notification_bell)
+        internal fun applyAllNotifsIcon(context: Context, views: RemoteViews, targetViewId: Int = R.id.widget_app_icon) {
+            views.setImageViewResource(targetViewId, R.drawable.ic_notification_bell)
         }
 
         private val SOFASCORE_SLOT_IDS = listOf(R.id.widget_match_1, R.id.widget_match_2, R.id.widget_match_3, R.id.widget_match_4, R.id.widget_match_5)
@@ -1113,8 +1120,20 @@ class NowBarWidgetProvider : AppWidgetProvider() {
          * CHANGED 18/09/2026: a tap no longer opens Sofascore directly — it opens a "peek" (see
          * WidgetPeekPrefs' class doc) showing that match full-format inside the widget itself; the
          * actual "open Sofascore" action now lives on the peek's own content tap (see resolvePeek).
+         *
+         * [peekRequestCodeBase] (NEW 23/09/2026, `internal`) defaults to this widget's own
+         * [PEEK_REQUEST_CODE_SPORT_BASE]. NowBarWidgetProviderCompact — whose row 1 "il faut que ça
+         * soit exactement la même chose que la vue icône du widget 4x1" reuses this exact rendering
+         * — passes its OWN distinct base instead, so its tiles never share a PendingIntent identity
+         * with this widget's own tiles at the same slot index (see that class' own request-code
+         * constants' doc).
          */
-        private fun applySofascoreMatches(context: Context, views: RemoteViews, matches: List<SofascoreWidgetStore.Data>) {
+        internal fun applySofascoreMatches(
+            context: Context,
+            views: RemoteViews,
+            matches: List<SofascoreWidgetStore.Data>,
+            peekRequestCodeBase: Int = PEEK_REQUEST_CODE_SPORT_BASE
+        ) {
             views.setViewVisibility(R.id.widget_sofascore_empty, if (matches.isEmpty()) View.VISIBLE else View.GONE)
 
             for (i in SOFASCORE_SLOT_IDS.indices) {
@@ -1144,7 +1163,7 @@ class NowBarWidgetProvider : AppWidgetProvider() {
 
                 views.setOnClickPendingIntent(
                     slotId,
-                    openPeekPendingIntent(context, WidgetPeekPrefs.Source.SPORT, match.key, PEEK_REQUEST_CODE_SPORT_BASE + i)
+                    openPeekPendingIntent(context, WidgetPeekPrefs.Source.SPORT, match.key, peekRequestCodeBase + i)
                 )
             }
         }
@@ -1177,8 +1196,16 @@ class NowBarWidgetProvider : AppWidgetProvider() {
          *
          * CHANGED 18/09/2026: same as applySofascoreMatches above — a tap now opens a "peek"
          * instead of the notification directly (see WidgetPeekPrefs' class doc / resolvePeek).
+         *
+         * [peekRequestCodeBase] — see [applySofascoreMatches]'s doc, same reasoning, defaults to
+         * this widget's own [PEEK_REQUEST_CODE_ALL_NOTIFS_BASE].
          */
-        private fun applyAllNotifs(context: Context, views: RemoteViews, entries: List<WidgetAllNotificationsStore.Data>) {
+        internal fun applyAllNotifs(
+            context: Context,
+            views: RemoteViews,
+            entries: List<WidgetAllNotificationsStore.Data>,
+            peekRequestCodeBase: Int = PEEK_REQUEST_CODE_ALL_NOTIFS_BASE
+        ) {
             views.setViewVisibility(R.id.widget_all_notifs_empty, if (entries.isEmpty()) View.VISIBLE else View.GONE)
 
             for (i in ALL_NOTIF_SLOT_IDS.indices) {
@@ -1198,7 +1225,7 @@ class NowBarWidgetProvider : AppWidgetProvider() {
                 val entryId = allNotifEntryId(entry.key, entry.postTimeMillis)
                 views.setOnClickPendingIntent(
                     ids.container,
-                    openPeekPendingIntent(context, WidgetPeekPrefs.Source.ALL_NOTIFS, entryId, PEEK_REQUEST_CODE_ALL_NOTIFS_BASE + i)
+                    openPeekPendingIntent(context, WidgetPeekPrefs.Source.ALL_NOTIFS, entryId, peekRequestCodeBase + i)
                 )
             }
         }
@@ -1301,8 +1328,13 @@ class NowBarWidgetProvider : AppWidgetProvider() {
          * de terrain de foot stylisee") — the arrows are gone entirely now (the icon alone, shown
          * bigger, is the affordance) and the ALL_NOTIFS-view icon is no longer derived from
          * Sofascore's own app icon; see ic_football_pitch.xml.
+         *
+         * `internal` (NEW 23/09/2026) — NowBarWidgetProviderCompact's row 1 reuses this UNCHANGED
+         * for its own widget_view_toggle_right (same id, present in its layout too), since [currentView]
+         * there is always SPORT or ALL_NOTIFS (never LATEST, see WidgetViewModePrefs.sportOrAllNotifsView),
+         * so this is always visible there — matching "comme aujourd'hui" exactly.
          */
-        private fun applyRightToggle(context: Context, views: RemoteViews, currentView: WidgetViewModePrefs.WidgetView) {
+        internal fun applyRightToggle(context: Context, views: RemoteViews, currentView: WidgetViewModePrefs.WidgetView) {
             val visible = currentView != WidgetViewModePrefs.WidgetView.LATEST
             views.setViewVisibility(R.id.widget_view_toggle_right, if (visible) View.VISIBLE else View.GONE)
             if (visible) {

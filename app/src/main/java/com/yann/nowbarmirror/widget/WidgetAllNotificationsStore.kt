@@ -86,8 +86,18 @@ object WidgetAllNotificationsStore {
     private const val PREFS_NAME = "widget_all_notifs_prefs"
     private const val KEY_ENTRIES = "entries"
 
-    /** Kept in sync with NowBarWidgetProvider's fixed widget_notif_1..5 layout slots. */
-    const val MAX_SLOTS = 5
+    /**
+     * The main 4x1 widget's own fixed widget_notif_1..5 layout slots (and "Dernière notif",
+     * [get]'s own firstOrNull()) only ever need the first 5/1 of these — so why 6 (RAISED
+     * 23/09/2026, same reasoning as SofascoreWidgetStore.MAX_SLOTS's own doc, Yann: "Je voulais
+     * qu'il y en ait toujours 5 [dans la ligne d'icônes du widget 4x2]. Ça veut dire que tu
+     * affiches la sixième en attente de l'autre widget."): the compact 4x2 widget's row 1
+     * (NowBarWidgetProviderCompact.applyIconsRow) shows this SAME history with whichever entry is
+     * currently "Dernière notif" filtered OUT first, so keeping only 5 here could leave as few as
+     * 4 to show there. One extra "in reserve" means row 1 shows a full 5 whenever at least 6
+     * entries are actually in this history.
+     */
+    const val MAX_SLOTS = 6
 
     enum class Kind { GENERIC, SOFASCORE_MATCH }
 

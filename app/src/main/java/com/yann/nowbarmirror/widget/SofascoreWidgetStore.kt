@@ -32,8 +32,19 @@ object SofascoreWidgetStore {
     private const val PREFS_NAME = "sofascore_widget_prefs"
     private const val KEY_MATCHES = "matches"
 
-    /** Kept in sync with NowBarWidgetProvider's fixed widget_match_1..5 layout slots (5th slot added 17/09/2026 at Yann's request). */
-    const val MAX_SLOTS = 5
+    /**
+     * The main 4x1 widget's own fixed widget_match_1..5 layout slots only ever render the first 5
+     * (5th slot added 17/09/2026 at Yann's request) — so why 6 (RAISED 23/09/2026, Yann: "Je
+     * voulais qu'il y en ait toujours 5 [dans la ligne d'icônes du widget 4x2]. Ça veut dire que
+     * tu affiches la sixième en attente de l'autre widget."): the compact 4x2 widget's row 1
+     * (NowBarWidgetProviderCompact.applyIconsRow) shows this SAME list with whichever match is
+     * currently "Dernière notif" filtered OUT first — so with only 5 ever kept here, that filter
+     * could leave as few as 4 to show. Keeping one extra "in reserve" means there's still a 6th
+     * one ready to take that slot whenever the excluded match is actually part of this list, so
+     * the compact widget's row 1 shows a full 5 whenever at least 6 matches are actually active,
+     * exactly like it would if the excluded one had simply never been mirrored at all.
+     */
+    const val MAX_SLOTS = 6
 
     /** What [save] needs for one match. Deliberately Android-widget-agnostic (no PendingIntent — see NowBarWidgetProvider.SofascoreWidgetMatch, which carries the live one of those but never persists it, same limitation as WidgetAllNotificationsStore.PersistableEntry). */
     data class PersistableMatch(
