@@ -152,13 +152,20 @@ class NowBarWidgetProviderTriple : AppWidgetProvider() {
          */
         private fun applyRows(context: Context, views: RemoteViews) {
             val latest = WidgetAllNotificationsStore.get(context).firstOrNull()
+            val latestIsSofascore = latest != null && latest.kind == WidgetAllNotificationsStore.Kind.SOFASCORE_MATCH
 
             NowBarWidgetProvider.applyAllNotifsIcon(context, views, R.id.widget_triple_notifs_icon)
             val notifEntries = WidgetAllNotificationsStore.get(context)
                 .filter { it.kind == WidgetAllNotificationsStore.Kind.GENERIC }
                 .filterNot { latest != null && it.key == latest.key && it.postTimeMillis == latest.postTimeMillis }
             NowBarWidgetProvider.applyAllNotifs(context, views, notifEntries, PEEK_REQUEST_CODE_ALL_NOTIFS_BASE)
-            applyOverflowBadge(views, R.id.widget_triple_notifs_more, notifEntries.size)
+            // NOTE: notifEntries is already capped at WidgetAllNotificationsStore.MAX_SLOTS_PER_KIND
+            // (6) by the store itself, so this can only ever show "+1" — unlike Sofascore below,
+            // there's no single moment where the TRUE count of currently active generic
+            // notifications is captured on every event (only on listener reconnect), so it isn't
+            // tracked the same way. Fine as long as more than 6 eligible generic notifications
+            // are never active at once; flag it if that turns out not to hold.
+            applyOverflowBadge(views, R.id.widget_triple_notifs_more, hidden = notifEntries.size - 5)
 
             NowBarWidgetProvider.applySofascoreIcon(context, views, R.id.widget_triple_sofascore_icon)
             val matches = SofascoreWidgetStore.get(context)
@@ -168,9 +175,16 @@ class NowBarWidgetProviderTriple : AppWidgetProvider() {
                     apiSourceOf = { it.apiSource },
                     postTimeOf = { it.postTimeMillis }
                 )
-                .filterNot { latest != null && latest.kind == WidgetAllNotificationsStore.Kind.SOFASCORE_MATCH && it.key == latest.key }
+                .filterNot { latestIsSofascore && it.key == latest?.key }
             NowBarWidgetProvider.applySofascoreMatches(context, views, matches, PEEK_REQUEST_CODE_SPORT_BASE)
-            applyOverflowBadge(views, R.id.widget_triple_sofascore_more, matches.size)
+            // Uses the TRUE active-match count (SofascoreWidgetStore.getActiveCount — see its own
+            // and pushSofascoreMatches' doc), NOT matches.size: matches comes from a store capped
+            // at MAX_SLOTS (6), so going by its size alone could only ever say "+1" no matter how
+            // many matches were really active (Yann: "je vois +1 alors qu'il y a 17 matchs en
+            // tout"). The one match currently shown as row 3's own "Dernière notif" (if any) is
+            // subtracted too — it's not "hidden", it's just shown elsewhere in this widget.
+            val sofascoreHidden = SofascoreWidgetStore.getActiveCount(context) - 5 - (if (latestIsSofascore) 1 else 0)
+            applyOverflowBadge(views, R.id.widget_triple_sofascore_more, hidden = sofascoreHidden)
         }
 
         /**
@@ -180,13 +194,10 @@ class NowBarWidgetProviderTriple : AppWidgetProvider() {
          * of whatever list they're given (see their own doc), silently dropping the rest; this
          * fills the "+X" badge (widget_triple_notifs_more / widget_triple_sofascore_more, reserved
          * in the same column as ligne 3's dismiss cross — see widget_now_bar_triple.xml) with
-         * however many entries didn't fit, or hides it entirely when everything fit.
-         *
-         * [shownCount] is fixed at 5 (ALL_NOTIF_SLOT_IDS/SOFASCORE_SLOT_IDS' own size in
-         * NowBarWidgetProvider) rather than imported directly, since both are private there.
+         * [hidden] (already computed by the caller, each row its own way — see [applyRows]), or
+         * hides the badge entirely when nothing's hidden.
          */
-        private fun applyOverflowBadge(views: RemoteViews, badgeViewId: Int, totalCount: Int, shownCount: Int = 5) {
-            val hidden = totalCount - shownCount
+        private fun applyOverflowBadge(views: RemoteViews, badgeViewId: Int, hidden: Int) {
             if (hidden > 0) {
                 views.setViewVisibility(badgeViewId, View.VISIBLE)
                 views.setTextViewText(badgeViewId, "+$hidden")

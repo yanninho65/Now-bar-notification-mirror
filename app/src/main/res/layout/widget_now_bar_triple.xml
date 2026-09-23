@@ -65,7 +65,18 @@
              ligne 3's own text ends: widget_triple_notifs_end_cluster below reserves the exact
              same width as ligne 3's image+dismiss cluster (32dp + 10dp margin + 22dp), and the
              "+X" badge sits in that cluster's own 22dp slot — same box as ligne 3's dismiss
-             cross, so the two land in the same column. -->
+             cross, so the two land in the same column.
+
+             FIXED 23/09/2026 (Yann: "les icones de sofascore ne sont plus alignés avec celles des
+             notifications [...] quand il y a +1, ça décale les icones sur la gauche et les
+             resserre") — the cluster's width is now a FIXED 64dp, not wrap_content: with
+             wrap_content, hiding the "+X" TextView (visibility=gone, no active overflow) shrank
+             this cluster down to just its 42dp spacer, which pulled the tile strip's own
+             layout_toStartOf boundary further right than when the badge is showing (64dp) —
+             misaligning ligne 1 against ligne 2 the moment only one of them has an overflow badge,
+             and visibly shifting/compressing a row's own tiles the moment its badge appears or
+             disappears. Fixed at 64dp always, the tile strip's right edge — and so every tile's
+             center — never moves regardless of whether the badge is shown. -->
         <RelativeLayout
             android:layout_width="0dp"
             android:layout_height="wrap_content"
@@ -74,7 +85,7 @@
 
             <LinearLayout
                 android:id="@+id/widget_triple_notifs_end_cluster"
-                android:layout_width="wrap_content"
+                android:layout_width="64dp"
                 android:layout_height="wrap_content"
                 android:layout_centerVertical="true"
                 android:layout_alignParentEnd="true"
@@ -86,15 +97,18 @@
                      FrameLayout, not a plain View: RemoteViews (widget layouts) only support a
                      fixed whitelist of view classes, and android.view.View isn't in it — using it
                      directly made the widget fail to inflate ("impossible d'ajouter le widget").
-                     FrameLayout is supported and already used as a spacer elsewhere in this file. -->
+                     FrameLayout is supported and already used as a spacer elsewhere in this file.
+                     34dp + 30dp below (not 42dp + 22dp, ligne 3's own image+dismiss split) —
+                     widened the badge's own share of the 64dp so a 2-digit count ("+12") never
+                     gets clipped; only the cluster's TOTAL width has to match ligne 3's, not how
+                     it's split internally. -->
                 <FrameLayout
-                    android:layout_width="32dp"
-                    android:layout_height="1dp"
-                    android:layout_marginEnd="10dp" />
+                    android:layout_width="34dp"
+                    android:layout_height="1dp" />
 
                 <TextView
                     android:id="@+id/widget_triple_notifs_more"
-                    android:layout_width="22dp"
+                    android:layout_width="30dp"
                     android:layout_height="22dp"
                     android:gravity="center"
                     android:textColor="@android:color/white"
@@ -552,22 +566,21 @@
 
             <LinearLayout
                 android:id="@+id/widget_triple_sofascore_end_cluster"
-                android:layout_width="wrap_content"
+                android:layout_width="64dp"
                 android:layout_height="wrap_content"
                 android:layout_centerVertical="true"
                 android:layout_alignParentEnd="true"
                 android:orientation="horizontal"
                 android:gravity="center_vertical">
 
-                <!-- FrameLayout, not View — see ligne 1's own spacer comment above. -->
+                <!-- FrameLayout, not View — see ligne 1's own spacer comment above (34dp+30dp split, not 42dp+22dp — see its comment). -->
                 <FrameLayout
-                    android:layout_width="32dp"
-                    android:layout_height="1dp"
-                    android:layout_marginEnd="10dp" />
+                    android:layout_width="34dp"
+                    android:layout_height="1dp" />
 
                 <TextView
                     android:id="@+id/widget_triple_sofascore_more"
-                    android:layout_width="22dp"
+                    android:layout_width="30dp"
                     android:layout_height="22dp"
                     android:gravity="center"
                     android:textColor="@android:color/white"

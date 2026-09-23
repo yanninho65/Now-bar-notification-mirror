@@ -31,6 +31,7 @@ object SofascoreWidgetStore {
 
     private const val PREFS_NAME = "sofascore_widget_prefs"
     private const val KEY_MATCHES = "matches"
+    private const val KEY_ACTIVE_COUNT = "active_count"
 
     /**
      * The main 4x1 widget's own fixed widget_match_1..5 layout slots only ever render the first 5
@@ -83,8 +84,19 @@ object SofascoreWidgetStore {
     private fun imageFile(context: Context, slot: Int) =
         File(context.filesDir, "sofascore_widget_match_$slot.png")
 
-    /** [matches] beyond [MAX_SLOTS] are silently dropped here as a safety net — the caller (NowBarWidgetProvider) is expected to have already capped the list. */
-    fun save(context: Context, matches: List<PersistableMatch>) {
+    /**
+     * [matches] beyond [MAX_SLOTS] are silently dropped here as a safety net — the caller
+     * (NowBarWidgetProvider) is expected to have already capped the list.
+     *
+     * [activeCount] (NEW 23/09/2026, Yann: "pour sofascore je vois +1 alors qu'il y a 17 matchs en
+     * tout" — NowBarWidgetProviderTriple's own "+X" overflow badge, see its applyOverflowBadge)
+     * defaults to [matches]'s own (already-capped) size, but NowBarWidgetProvider.pushSofascoreMatches
+     * passes the TRUE pre-cap count of currently active matches instead: with only the capped
+     * [matches] to go on, the badge could only ever say "+1" (MAX_SLOTS − the 5 shown), no matter
+     * how many matches were actually active beyond that — this is what lets the badge reflect
+     * reality (e.g. "+12" for 17 active matches, 5 shown) instead of the storage cap.
+     */
+    fun save(context: Context, matches: List<PersistableMatch>, activeCount: Int = matches.size) {
         for (slot in 0 until MAX_SLOTS) imageFile(context, slot).delete()
 
         val array = JSONArray()
@@ -116,8 +128,15 @@ object SofascoreWidgetStore {
             }
         }
 
-        prefs(context).edit().putString(KEY_MATCHES, array.toString()).apply()
+        prefs(context)
+            .edit()
+            .putString(KEY_MATCHES, array.toString())
+            .putInt(KEY_ACTIVE_COUNT, activeCount)
+            .apply()
     }
+
+    /** See [save]'s own doc (its `activeCount` param) — the true number of currently active matches, independent of [MAX_SLOTS]. 0 if never saved yet. */
+    fun getActiveCount(context: Context): Int = prefs(context).getInt(KEY_ACTIVE_COUNT, 0)
 
     fun get(context: Context): List<Data> {
         val raw = prefs(context).getString(KEY_MATCHES, null) ?: return emptyList()

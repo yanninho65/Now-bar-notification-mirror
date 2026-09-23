@@ -442,6 +442,12 @@ class NowBarWidgetProvider : AppWidgetProvider() {
          * whichever view/peek is currently showing (a Sport-view rebuild picks the new matches up
          * immediately; any other view's rebuild only needs this to recompute whether the left
          * toggle button should now be visible — see applyLeftToggle).
+         *
+         * [matches]' OWN size (before the `.take` below) is [matches]' full, uncapped count of
+         * currently active Sofascore matches — passed through to SofascoreWidgetStore.save as
+         * [SofascoreWidgetStore.save]'s `activeCount`, so NowBarWidgetProviderTriple's "+X" overflow
+         * badge can reflect the real total instead of just [SofascoreWidgetStore.MAX_SLOTS] (see
+         * that param's own doc for the "+1 alors qu'il y a 17 matchs" bug this fixes).
          */
         fun pushSofascoreMatches(context: Context, matches: List<SofascoreWidgetMatch>) {
             val kept = matches.sortedForWidget(
@@ -471,7 +477,8 @@ class NowBarWidgetProvider : AppWidgetProvider() {
                         text = m.text,
                         image = m.image
                     )
-                }
+                },
+                activeCount = matches.size
             )
 
             pushToAllWidgets(context, buildViews(context))
