@@ -82,8 +82,12 @@
                 android:gravity="center_vertical">
 
                 <!-- Empty spacer matching ligne 3's image (32dp + 10dp marginEnd) — invisible,
-                     only here so this cluster's total width equals ligne 3's own right cluster. -->
-                <View
+                     only here so this cluster's total width equals ligne 3's own right cluster.
+                     FrameLayout, not a plain View: RemoteViews (widget layouts) only support a
+                     fixed whitelist of view classes, and android.view.View isn't in it — using it
+                     directly made the widget fail to inflate ("impossible d'ajouter le widget").
+                     FrameLayout is supported and already used as a spacer elsewhere in this file. -->
+                <FrameLayout
                     android:layout_width="32dp"
                     android:layout_height="1dp"
                     android:layout_marginEnd="10dp" />
@@ -555,7 +559,8 @@
                 android:orientation="horizontal"
                 android:gravity="center_vertical">
 
-                <View
+                <!-- FrameLayout, not View — see ligne 1's own spacer comment above. -->
+                <FrameLayout
                     android:layout_width="32dp"
                     android:layout_height="1dp"
                     android:layout_marginEnd="10dp" />
