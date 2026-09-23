@@ -24,6 +24,9 @@
     <!-- NEW 22/09/2026 — deuxième widget (4x2, NowBarWidgetProviderCompact) : icônes sport/toutes
          notifs en haut, dernière notification en bas. -->
     <string name="widget_compact_description">Icônes sport/notifications en haut, dernière notification en bas.</string>
+    <!-- NEW 23/09/2026 — troisième widget (NowBarWidgetProviderTriple) : deux lignes d'icônes
+         permanentes (notifications puis Sofascore), dernière notification toujours en bas. -->
+    <string name="widget_triple_description">Icônes notifications et Sofascore sur deux lignes, dernière notification en bas.</string>
 
     <string name="main_description">Cette app reflète la dernière notification reçue dans une notification persistante compatible Now Bar.\n\nElle nécessite l’accès aux notifications.</string>
     <string name="allow_notification_access">Autoriser l’accès aux notifications</string>

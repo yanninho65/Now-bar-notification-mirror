@@ -192,6 +192,23 @@
                 android:name="android.appwidget.provider"
                 android:resource="@xml/now_bar_widget_compact_info" />
         </receiver>
+
+        <!--
+            NEW 23/09/2026 — troisième widget (voir NowBarWidgetProviderTriple/widget_now_bar_triple.xml's
+            class docs) : deux lignes d'icônes permanentes (dernière notif générique, puis
+            Sofascore) plus la vue texte toujours en bas. Même exported="false" reasoning que les
+            deux widgets ci-dessus.
+        -->
+        <receiver
+            android:name=".widget.NowBarWidgetProviderTriple"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/now_bar_widget_triple_info" />
+        </receiver>
     </application>
 </manifest>
 

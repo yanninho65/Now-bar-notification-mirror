@@ -890,15 +890,17 @@ class NowBarWidgetProvider : AppWidgetProvider() {
         /**
          * The one choke point every state-changing action in this file goes through (see e.g.
          * [pushSofascoreMatches]/[pushToAllNotificationsBatch]/onReceive's various branches) —
-         * ALSO refreshes the compact 4x2 widget (NEW 22/09/2026, NowBarWidgetProviderCompact) here,
-         * so every one of those existing call sites picks that up for free instead of each needing
-         * its own extra call. No-op on the compact side if none is currently placed.
+         * ALSO refreshes the compact 4x2 widget (NEW 22/09/2026, NowBarWidgetProviderCompact) and
+         * the third, double-icon-row widget (NEW 23/09/2026, NowBarWidgetProviderTriple) here, so
+         * every one of those existing call sites picks both up for free instead of each needing its
+         * own extra call. No-op on either side if that widget isn't currently placed.
          */
         private fun pushToAllWidgets(context: Context, views: RemoteViews) {
             val manager = AppWidgetManager.getInstance(context)
             val ids = manager.getAppWidgetIds(ComponentName(context, NowBarWidgetProvider::class.java))
             if (ids.isNotEmpty()) ids.forEach { id -> manager.updateAppWidget(id, views) }
             NowBarWidgetProviderCompact.refreshAll(context)
+            NowBarWidgetProviderTriple.refreshAll(context)
         }
 
         private fun buildViews(context: Context): RemoteViews {

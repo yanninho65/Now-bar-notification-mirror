@@ -124,8 +124,16 @@ class SofascoreNotificationListenerService : NotificationListenerService() {
         super.onListenerConnected()
         instance = this
         ready.set(true)
-        refresh()
+        // ORDRE INVERSÉ 23/09/2026 (voir pickLatestAvoidingDuplicate's doc, "éviter le doublon
+        // Score en direct / Dernière notif") : bootstrapAllNotificationsHistory() DOIT tourner
+        // AVANT refresh() maintenant, pas après — refresh() lit WidgetAllNotificationsStore pour
+        // savoir ce que "Dernière notif" affiche actuellement, et bootstrapAllNotificationsHistory()
+        // est justement ce qui remplit/rafraîchit ce store à la (re)connexion. Dans l'ancien ordre,
+        // refresh() lisait un store pas encore à jour (souvent vide, juste après l'installation ou
+        // l'octroi de la permission) et pouvait donc rater la détection du doublon lors du tout
+        // premier rendu.
         bootstrapAllNotificationsHistory()
+        refresh()
         pendingDismissKey?.let { key ->
             pendingDismissKey = null
             val postTime = pendingDismissPostTime
@@ -189,8 +197,13 @@ class SofascoreNotificationListenerService : NotificationListenerService() {
             activeNotifications?.firstOrNull { it.key == key }?.let { cancelNotification(it.key) }
         }
         SofascoreApiOverridePrefs.remove(applicationContext, key)
-        refresh()
+        // ORDRE INVERSÉ 23/09/2026 — même raisonnement que onListenerConnected/onNotificationRemoved
+        // ci-dessous : removeFromAllNotificationsHistory (qui retire ce match de
+        // WidgetAllNotificationsStore ET repousse tout ce qui reste actif) doit tourner AVANT
+        // refresh(), sans quoi refresh() déciderait du "match précédent" (pickLatestAvoidingDuplicate)
+        // sur un store qui contient encore le match qu'on est justement en train de supprimer.
         removeFromAllNotificationsHistory(key, postTimeMillis)
+        refresh()
         try {
             NowBarWidgetProvider.closePeekIfShowing(applicationContext, key, postTimeMillis)
         } catch (_: Throwable) {
@@ -252,8 +265,14 @@ class SofascoreNotificationListenerService : NotificationListenerService() {
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         if (sbn.packageName == SOFASCORE_PACKAGE) {
-            refresh()
+            // ORDRE INVERSÉ 23/09/2026 (voir pickLatestAvoidingDuplicate's doc) —
+            // pushToAllNotificationsHistory doit tourner AVANT refresh() : c'est cet appel qui met à
+            // jour WidgetAllNotificationsStore avec CETTE notification (nouvelle position la plus
+            // récente si c'est bien la dernière reçue tous types confondus), et refresh() a besoin de
+            // lire ce store déjà à jour pour savoir si le match qu'il s'apprête à choisir pour "Score
+            // en direct" est aussi celui que "Dernière notif" affiche.
             pushToAllNotificationsHistory(sbn)
+            refresh()
         }
     }
 
@@ -369,8 +388,10 @@ class SofascoreNotificationListenerService : NotificationListenerService() {
     override fun onNotificationRemoved(sbn: StatusBarNotification) {
         if (sbn.packageName == SOFASCORE_PACKAGE) {
             SofascoreApiOverridePrefs.remove(applicationContext, sbn.key)
-            refresh()
+            // ORDRE INVERSÉ 23/09/2026 — même raisonnement que dismiss()/onListenerConnected : voir
+            // pickLatestAvoidingDuplicate's doc.
             removeFromAllNotificationsHistory(sbn.key, sbn.postTime)
+            refresh()
             // "Peek" (NEW 18/09/2026, see WidgetPeekPrefs' class doc) — this match's notification
             // might be the one currently peeked (from either SPORT or ALL_NOTIFS), removed by
             // something other than the widget's own dismiss button (the match simply ending and
@@ -444,11 +465,12 @@ class SofascoreNotificationListenerService : NotificationListenerService() {
 
         // Si un match précis a été choisi ET qu'il a encore une notif
         // active, on le suit ; sinon (mode "dernière", ou match choisi
-        // terminé/supprimé) on retombe sur la notif la plus récente.
+        // terminé/supprimé) on retombe sur la notif la plus récente — voir
+        // [pickLatestAvoidingDuplicate] pour la nuance ajoutée le 23/09/2026 dans CE cas précis.
         val chosenKey = SofascorePrefs.loadChosenKey(this)
             ?.takeIf { SofascorePrefs.loadMode(this) == SofascorePrefs.Mode.CHOSEN }
         val target = (chosenKey?.let { key -> notifications.find { it.key == key } })
-            ?: notifications.maxByOrNull { it.postTime }
+            ?: pickLatestAvoidingDuplicate(notifications.sortedByDescending { it.postTime })
             ?: return
 
         val baseMatch = toMatchResult(target) ?: return
@@ -466,6 +488,46 @@ class SofascoreNotificationListenerService : NotificationListenerService() {
         WatchSync.sendMatch(this, match, notifImage = targetImage?.let { WatchSync.bitmapToAsset(it) })
 
         pushWidgetMatches(notifications)
+    }
+
+    /**
+     * NEW 23/09/2026 (Yann : "sur montre si j'ai complication Sofascore et derniere notif et que
+     * la dernière notif est un match Sofascore, ne pas afficher le même match sur la complication
+     * Sofascore, afficher le match précédent. Afficher le même si c'est le seul.") — repli "auto"
+     * (mode LATEST, ou mode CHOSEN retombant sur LATEST faute de notif encore active pour le match
+     * choisi, voir [refresh]) pour la notif Sofascore active à afficher sur la complication "Score
+     * en direct". Sans ce correctif, quand la notif Sofascore la plus récente est AUSSI, tous types
+     * confondus, la notification la plus récente ([WidgetAllNotificationsStore]'s own most-recent
+     * entry — ce que la complication "Notification"/le widget "Dernière notif" affichent déjà),
+     * "Score en direct" affichait exactement le même match — un doublon inutile entre les deux
+     * complications de la montre quand Yann les a assignées toutes les deux.
+     *
+     * [sortedByRecency] est déjà trié du plus récent au plus ancien par l'appelant. S'il n'y a
+     * qu'UN SEUL match actif, ce doublon n'a de toute façon aucune alternative : "Afficher le même
+     * si c'est le seul" — on le retourne tel quel, sans même aller lire
+     * [WidgetAllNotificationsStore]. Sinon, si le plus récent est bien le doublon détecté, on
+     * retombe sur le SUIVANT dans l'ordre de mise à jour ("le match précédent") plutôt que le plus
+     * récent.
+     *
+     * Ne s'applique qu'à ce repli "auto" — un match choisi explicitement par Yann ([SofascorePrefs.Mode.CHOSEN],
+     * tant que sa notif reste active) n'est jamais réécrit ici, voir [refresh] : c'est un choix
+     * délibéré, pas un cas à désambiguïser.
+     *
+     * ORDRE : les appelants (onNotificationPosted/onListenerConnected/dismiss/onNotificationRemoved)
+     * ont tous été réordonnés le même jour pour que [WidgetAllNotificationsStore] soit déjà à jour
+     * avec l'événement en cours AVANT que [refresh]/cette fonction ne le lisent — sans ça, la
+     * détection de doublon se serait basée sur l'état d'AVANT cet événement (voir leurs commentaires
+     * "ORDRE INVERSÉ 23/09/2026" respectifs).
+     */
+    private fun pickLatestAvoidingDuplicate(sortedByRecency: List<StatusBarNotification>): StatusBarNotification? {
+        val latest = sortedByRecency.firstOrNull() ?: return null
+        if (sortedByRecency.size < 2) return latest
+
+        val mostRecentAllNotif = WidgetAllNotificationsStore.get(applicationContext).firstOrNull()
+        val duplicatesLatestNotif = mostRecentAllNotif != null &&
+            mostRecentAllNotif.kind == WidgetAllNotificationsStore.Kind.SOFASCORE_MATCH &&
+            mostRecentAllNotif.key == latest.key
+        return if (duplicatesLatestNotif) sortedByRecency[1] else latest
     }
 
     /**
