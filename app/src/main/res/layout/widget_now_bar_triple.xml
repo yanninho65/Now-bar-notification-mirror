@@ -59,16 +59,57 @@
             android:scaleType="centerCrop"
             android:contentDescription="@null" />
 
-        <!-- "Toutes notifs" — exact copy of widget_now_bar_compact.xml's own widget_all_notifs_content. -->
-        <LinearLayout
-            android:id="@+id/widget_all_notifs_content"
+        <!-- NEW 23/09/2026 (Yann: "à droite des lignes d'icônes, indiquer le nombre d'autres
+             notifications non montrées [...] le +X aligné avec la croix pour supprimer la
+             dernière notif") — wrapped in a RelativeLayout so the tile strip ends exactly where
+             ligne 3's own text ends: widget_triple_notifs_end_cluster below reserves the exact
+             same width as ligne 3's image+dismiss cluster (32dp + 10dp margin + 22dp), and the
+             "+X" badge sits in that cluster's own 22dp slot — same box as ligne 3's dismiss
+             cross, so the two land in the same column. -->
+        <RelativeLayout
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:layout_marginStart="10dp"
-            android:orientation="horizontal"
-            android:gravity="top"
-            android:weightSum="5.4">
+            android:layout_marginStart="10dp">
+
+            <LinearLayout
+                android:id="@+id/widget_triple_notifs_end_cluster"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_centerVertical="true"
+                android:layout_alignParentEnd="true"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <!-- Empty spacer matching ligne 3's image (32dp + 10dp marginEnd) — invisible,
+                     only here so this cluster's total width equals ligne 3's own right cluster. -->
+                <View
+                    android:layout_width="32dp"
+                    android:layout_height="1dp"
+                    android:layout_marginEnd="10dp" />
+
+                <TextView
+                    android:id="@+id/widget_triple_notifs_more"
+                    android:layout_width="22dp"
+                    android:layout_height="22dp"
+                    android:gravity="center"
+                    android:textColor="@android:color/white"
+                    android:textStyle="bold"
+                    android:textSize="10sp"
+                    android:visibility="gone" />
+
+            </LinearLayout>
+
+            <!-- "Toutes notifs" — exact copy of widget_now_bar_compact.xml's own widget_all_notifs_content. -->
+            <LinearLayout
+                android:id="@+id/widget_all_notifs_content"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_toStartOf="@id/widget_triple_notifs_end_cluster"
+                android:layout_alignParentStart="true"
+                android:orientation="horizontal"
+                android:gravity="top"
+                android:weightSum="5.4">
 
             <LinearLayout
                 android:id="@+id/widget_notif_1"
@@ -477,7 +518,9 @@
                 android:textSize="12sp"
                 android:visibility="gone" />
 
-        </LinearLayout>
+            </LinearLayout>
+
+        </RelativeLayout>
 
     </LinearLayout>
 
@@ -496,16 +539,49 @@
             android:scaleType="centerCrop"
             android:contentDescription="@null" />
 
-        <!-- Sofascore "Sport" view — exact copy of widget_now_bar_compact.xml's widget_sofascore_content. -->
-        <LinearLayout
-            android:id="@+id/widget_sofascore_content"
+        <!-- Same "+X" reservation as ligne 1's own RelativeLayout above — see its comment. -->
+        <RelativeLayout
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:layout_marginStart="10dp"
-            android:orientation="horizontal"
-            android:gravity="top"
-            android:weightSum="5.4">
+            android:layout_marginStart="10dp">
+
+            <LinearLayout
+                android:id="@+id/widget_triple_sofascore_end_cluster"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_centerVertical="true"
+                android:layout_alignParentEnd="true"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <View
+                    android:layout_width="32dp"
+                    android:layout_height="1dp"
+                    android:layout_marginEnd="10dp" />
+
+                <TextView
+                    android:id="@+id/widget_triple_sofascore_more"
+                    android:layout_width="22dp"
+                    android:layout_height="22dp"
+                    android:gravity="center"
+                    android:textColor="@android:color/white"
+                    android:textStyle="bold"
+                    android:textSize="10sp"
+                    android:visibility="gone" />
+
+            </LinearLayout>
+
+            <!-- Sofascore "Sport" view — exact copy of widget_now_bar_compact.xml's widget_sofascore_content. -->
+            <LinearLayout
+                android:id="@+id/widget_sofascore_content"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_toStartOf="@id/widget_triple_sofascore_end_cluster"
+                android:layout_alignParentStart="true"
+                android:orientation="horizontal"
+                android:gravity="top"
+                android:weightSum="5.4">
 
             <LinearLayout
                 android:id="@+id/widget_match_1"
@@ -759,7 +835,9 @@
                 android:textSize="12sp"
                 android:visibility="gone" />
 
-        </LinearLayout>
+            </LinearLayout>
+
+        </RelativeLayout>
 
     </LinearLayout>
 

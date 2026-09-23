@@ -91,6 +91,8 @@ class NowBarWidgetProviderTriple : AppWidgetProvider() {
             val views = RemoteViews(context.packageName, R.layout.widget_now_bar_triple)
             views.setViewVisibility(R.id.widget_sofascore_content, View.GONE)
             views.setViewVisibility(R.id.widget_all_notifs_content, View.GONE)
+            views.setViewVisibility(R.id.widget_triple_notifs_more, View.GONE)
+            views.setViewVisibility(R.id.widget_triple_sofascore_more, View.GONE)
             views.setImageViewResource(R.id.widget_triple_notifs_icon, R.drawable.ic_notification_bell)
             views.setImageViewResource(R.id.widget_triple_sofascore_icon, R.drawable.ic_football_pitch)
             views.setViewVisibility(R.id.widget_latest_content, View.VISIBLE)
@@ -156,6 +158,7 @@ class NowBarWidgetProviderTriple : AppWidgetProvider() {
                 .filter { it.kind == WidgetAllNotificationsStore.Kind.GENERIC }
                 .filterNot { latest != null && it.key == latest.key && it.postTimeMillis == latest.postTimeMillis }
             NowBarWidgetProvider.applyAllNotifs(context, views, notifEntries, PEEK_REQUEST_CODE_ALL_NOTIFS_BASE)
+            applyOverflowBadge(views, R.id.widget_triple_notifs_more, notifEntries.size)
 
             NowBarWidgetProvider.applySofascoreIcon(context, views, R.id.widget_triple_sofascore_icon)
             val matches = SofascoreWidgetStore.get(context)
@@ -167,6 +170,29 @@ class NowBarWidgetProviderTriple : AppWidgetProvider() {
                 )
                 .filterNot { latest != null && latest.kind == WidgetAllNotificationsStore.Kind.SOFASCORE_MATCH && it.key == latest.key }
             NowBarWidgetProvider.applySofascoreMatches(context, views, matches, PEEK_REQUEST_CODE_SPORT_BASE)
+            applyOverflowBadge(views, R.id.widget_triple_sofascore_more, matches.size)
+        }
+
+        /**
+         * NEW 23/09/2026 (Yann: "à droite des lignes d'icônes, indiquer le nombre d'autres
+         * notifications non montrées ou de match [...] +X aligné avec la croix pour supprimer la
+         * dernière notif") — [applyAllNotifs]/[applySofascoreMatches] only ever render the first 5
+         * of whatever list they're given (see their own doc), silently dropping the rest; this
+         * fills the "+X" badge (widget_triple_notifs_more / widget_triple_sofascore_more, reserved
+         * in the same column as ligne 3's dismiss cross — see widget_now_bar_triple.xml) with
+         * however many entries didn't fit, or hides it entirely when everything fit.
+         *
+         * [shownCount] is fixed at 5 (ALL_NOTIF_SLOT_IDS/SOFASCORE_SLOT_IDS' own size in
+         * NowBarWidgetProvider) rather than imported directly, since both are private there.
+         */
+        private fun applyOverflowBadge(views: RemoteViews, badgeViewId: Int, totalCount: Int, shownCount: Int = 5) {
+            val hidden = totalCount - shownCount
+            if (hidden > 0) {
+                views.setViewVisibility(badgeViewId, View.VISIBLE)
+                views.setTextViewText(badgeViewId, "+$hidden")
+            } else {
+                views.setViewVisibility(badgeViewId, View.GONE)
+            }
         }
     }
 
