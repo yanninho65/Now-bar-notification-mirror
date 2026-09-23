@@ -1,9 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+    CORRIGÉ 23/09/2026 — minHeight/targetCellHeight ramenés de 210dp/3 (4x3) à 140dp/2 (4x2), les
+    mêmes valeurs que now_bar_widget_compact_info.xml (Yann : "j'avais dit un widget 4x2 et pas
+    4x3. Le 4x2 laisse beaucoup d'espace en bas, je pense que tu peux transformer le 4x3 en 4x2
+    tout en gardant l'autre"). "L'autre" (NowBarWidgetProviderCompact, widget_now_bar_compact.xml,
+    ce fichier même) reste totalement inchangé — ce n'est QUE ce widget triple qui change de
+    gabarit déclaré. widget_now_bar_triple.xml lui-même n'a pas besoin d'être retouché : ses 3
+    lignes tenaient déjà largement dans l'espace réellement alloué par le lanceur à un 4x3, d'où
+    le constat de Yann ("beaucoup d'espace en bas") — passer à 4x2 réduit juste la taille
+    déclarée/l'espace réservé au dépôt du widget, pas son contenu.
+-->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
     android:minWidth="250dp"
-    android:minHeight="210dp"
+    android:minHeight="140dp"
     android:targetCellWidth="4"
-    android:targetCellHeight="3"
+    android:targetCellHeight="2"
     android:updatePeriodMillis="0"
     android:resizeMode="horizontal|vertical"
     android:widgetCategory="home_screen|keyguard"

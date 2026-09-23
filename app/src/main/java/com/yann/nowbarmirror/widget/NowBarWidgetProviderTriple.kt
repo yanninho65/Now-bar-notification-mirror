@@ -46,13 +46,13 @@ import com.yann.nowbarmirror.R
  * distinct from BOTH other widgets' own bases (4300/4400 main, 4700/4800 compact), so a tile here
  * never shares a PendingIntent identity with either of theirs at the same slot index.
  *
- * "5 icônes par ligne toujours" — [WidgetAllNotificationsStore.MAX_SLOTS] (6) already reserves one
- * spare slot so ROW 1 still shows up to 5 once the current "Dernière notif" is filtered out of it
- * (same mechanism NowBarWidgetProviderCompact's own single icon row already relies on — see that
- * constant's doc). There is no equivalent reserve for ROW 1's OWN "no Sofascore" filter: if fewer
- * than 5 GENERIC entries are currently in the shared history (e.g. several Sofascore matches
- * crowding out the 6 stored slots), row 1 simply shows however many are actually available — same
- * "up to 5" rule every other tile row in this app already follows, nothing new here.
+ * "5 icônes par ligne toujours" — [WidgetAllNotificationsStore.MAX_SLOTS_PER_KIND] (6) reserves
+ * one spare slot PER KIND (RESTRUCTURED 23/09/2026 — see that constant's and [mergeEntry]'s own
+ * doc for the "je n'en vois que 3" bug this fixes) so BOTH rows still show up to 5 once the
+ * current "Dernière notif" is filtered out of them: ROW 1's GENERIC quota is tracked completely
+ * independently of ROW 2's Sofascore one, so a burst of Sofascore matches can no longer crowd
+ * GENERIC entries out of the shared history (or vice versa) — each kind always keeps its own up
+ * to 6, regardless of how many of the other kind are also active.
  */
 class NowBarWidgetProviderTriple : AppWidgetProvider() {
 

@@ -86,20 +86,25 @@ object WidgetAllNotificationsStore {
     private const val PREFS_NAME = "widget_all_notifs_prefs"
     private const val KEY_ENTRIES = "entries"
 
-    /**
-     * The main 4x1 widget's own fixed widget_notif_1..5 layout slots (and "Dernière notif",
-     * [get]'s own firstOrNull()) only ever need the first 5/1 of these — so why 6 (RAISED
-     * 23/09/2026, same reasoning as SofascoreWidgetStore.MAX_SLOTS's own doc, Yann: "Je voulais
-     * qu'il y en ait toujours 5 [dans la ligne d'icônes du widget 4x2]. Ça veut dire que tu
-     * affiches la sixième en attente de l'autre widget."): the compact 4x2 widget's row 1
-     * (NowBarWidgetProviderCompact.applyIconsRow) shows this SAME history with whichever entry is
-     * currently "Dernière notif" filtered OUT first, so keeping only 5 here could leave as few as
-     * 4 to show there. One extra "in reserve" means row 1 shows a full 5 whenever at least 6
-     * entries are actually in this history.
-     */
-    const val MAX_SLOTS = 6
-
     enum class Kind { GENERIC, SOFASCORE_MATCH }
+
+    /**
+     * Per-KIND quota (RESTRUCTURED 23/09/2026 — see [mergeEntry]'s doc for the bug this fixes;
+     * Yann: "il faut avoir 5 icones, j'ai ce qu'il faut pour le remplir et je n'en vois que 3
+     * là"). Same "+1 in reserve" reasoning as the original single MAX_SLOTS had (so a row that
+     * filters OUT the current "Dernière notif" entry — NowBarWidgetProviderCompact's row 1,
+     * NowBarWidgetProviderTriple's rows 1 AND 2 — still shows a full 5 once that one entry is
+     * excluded), just applied to EACH [Kind] independently now instead of to the combined total.
+     */
+    const val MAX_SLOTS_PER_KIND = 6
+
+    /**
+     * Total on-disk capacity across BOTH kinds combined — [Kind.values().size] ×
+     * [MAX_SLOTS_PER_KIND] — used by [save] to size the slot/image-file range. [get]'s own
+     * firstOrNull() ("Dernière notif", any kind) and every "up to 5" consumer read the merged,
+     * recency-sorted result of [mergeEntry], never this constant directly.
+     */
+    val MAX_SLOTS = Kind.values().size * MAX_SLOTS_PER_KIND
 
     /** What [push] needs for one notification. Deliberately Android-widget-agnostic (no PendingIntent — see NowBarWidgetProvider.liveAllNotifIntents, which carries the live one of those but never persists it, same limitation as SofascoreWidgetStore). */
     data class PersistableEntry(
@@ -184,20 +189,37 @@ object WidgetAllNotificationsStore {
     /**
      * The actual merge behind [push]/[pushAll]: folds [entry] into [existing] — same tile
      * (collapsed by key alone, or the exact (key, postTimeMillis) pair re-pushed) gets replaced
-     * in place, anything else is kept — then re-sorts by recency and caps to [MAX_SLOTS]. Pure
-     * (no I/O), so [pushAll] can call it once per entry in memory without a store round-trip
-     * between each one.
+     * in place, anything else is kept — then re-sorts by recency and caps EACH [Kind]
+     * independently to [MAX_SLOTS_PER_KIND] before re-merging by recency. Pure (no I/O), so
+     * [pushAll] can call it once per entry in memory without a store round-trip between each one.
+     *
+     * CORRIGÉ 23/09/2026 (Yann, à propos de la ligne "Dernière notif" — GENERIC uniquement — du
+     * nouveau widget triple : "j'ai ce qu'il faut pour le remplir et je n'en vois que 3 là").
+     * Cause : le cap était auparavant appliqué au total des deux genres confondus
+     * (`.take(MAX_SLOTS)` sur la liste globale déjà triée par recency) — plusieurs matchs
+     * Sofascore actifs (remontés en tête à CHAQUE but/évènement, donc quasi toujours plus
+     * "récents" que de vraies notifications génériques plus anciennes) pouvaient à eux seuls
+     * occuper la totalité des [MAX_SLOTS_PER_KIND] × 2 emplacements et évincer des GENERIC
+     * pourtant reçues récemment — exactement le scénario que le propre commentaire de classe de
+     * NowBarWidgetProviderTriple anticipait déjà ("il n'y a pas de réserve équivalente pour le
+     * filtre 'pas de Sofascore' de la LIGNE 1"). Chaque genre a maintenant son propre quota,
+     * plafonné indépendamment l'un de l'autre, donc un afflux de l'un ne peut plus jamais chasser
+     * l'autre de l'historique.
      */
     private fun mergeEntry(existing: List<PersistableEntry>, entry: PersistableEntry): List<PersistableEntry> {
         val collapse = collapsesByKeyAlone(entry.kind, entry.isConversation)
-        return buildList {
+        val merged = buildList {
             add(entry)
             existing.forEach { data ->
                 val isSameTile = data.key == entry.key &&
                     (collapse || data.postTimeMillis == entry.postTimeMillis)
                 if (!isSameTile) add(data)
             }
-        }.sortedByDescending { it.postTimeMillis }.take(MAX_SLOTS)
+        }.sortedByDescending { it.postTimeMillis }
+
+        return Kind.values()
+            .flatMap { kind -> merged.filter { it.kind == kind }.take(MAX_SLOTS_PER_KIND) }
+            .sortedByDescending { it.postTimeMillis }
     }
 
     private fun prefs(context: Context) =
