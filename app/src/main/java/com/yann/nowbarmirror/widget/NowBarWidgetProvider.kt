@@ -182,7 +182,7 @@ data class AllNotifEntryPush(
  * store here is only ever written in reaction to a real notification-listener event, never on a
  * timer.
  */
-private fun <T> List<T>.sortedForWidget(
+internal fun <T> List<T>.sortedForWidget(
     nowMillis: Long,
     statusOf: (T) -> String,
     apiSourceOf: (T) -> String,
@@ -374,7 +374,7 @@ class NowBarWidgetProvider : AppWidgetProvider() {
         private var liveAllNotifDetailLines: Map<String, List<String>> = emptyMap()
 
         /** Composite identity for [liveAllNotifIntents]/[liveAllNotifActions] — see those fields' doc. */
-        private fun allNotifEntryId(key: String, postTimeMillis: Long) = "$key::$postTimeMillis"
+        internal fun allNotifEntryId(key: String, postTimeMillis: Long) = "$key::$postTimeMillis"
 
         // Guards [syncWatchToLatest] against sending a redundant putDataItem to the watch on
         // every widget rebuild (a view toggle, a peek open/close…) that doesn't actually change
@@ -831,7 +831,7 @@ class NowBarWidgetProvider : AppWidgetProvider() {
          * whatever happens to be peeking by then. Safe to call unconditionally, including when
          * nothing is currently peeking or scheduled.
          */
-        private fun closePeekAndCancelAlarm(context: Context) {
+        internal fun closePeekAndCancelAlarm(context: Context) {
             WidgetPeekPrefs.close(context)
             cancelAutoClosePeekAlarm(context)
         }
@@ -887,11 +887,18 @@ class NowBarWidgetProvider : AppWidgetProvider() {
             pushToAllWidgets(context, buildViews(context))
         }
 
+        /**
+         * The one choke point every state-changing action in this file goes through (see e.g.
+         * [pushSofascoreMatches]/[pushToAllNotificationsBatch]/onReceive's various branches) —
+         * ALSO refreshes the compact 4x2 widget (NEW 22/09/2026, NowBarWidgetProviderCompact) here,
+         * so every one of those existing call sites picks that up for free instead of each needing
+         * its own extra call. No-op on the compact side if none is currently placed.
+         */
         private fun pushToAllWidgets(context: Context, views: RemoteViews) {
             val manager = AppWidgetManager.getInstance(context)
             val ids = manager.getAppWidgetIds(ComponentName(context, NowBarWidgetProvider::class.java))
-            if (ids.isEmpty()) return
-            ids.forEach { id -> manager.updateAppWidget(id, views) }
+            if (ids.isNotEmpty()) ids.forEach { id -> manager.updateAppWidget(id, views) }
+            NowBarWidgetProviderCompact.refreshAll(context)
         }
 
         private fun buildViews(context: Context): RemoteViews {
@@ -1017,7 +1024,7 @@ class NowBarWidgetProvider : AppWidgetProvider() {
          * to show one of these entries full-format — "Dernière notif" is now just that same
          * rendering applied to entry #1 instead of a tapped one.
          */
-        private fun applyLatestContent(context: Context, views: RemoteViews) {
+        internal fun applyLatestContent(context: Context, views: RemoteViews) {
             val entry = WidgetAllNotificationsStore.get(context).firstOrNull()
 
             if (entry == null) {
@@ -1338,7 +1345,7 @@ class NowBarWidgetProvider : AppWidgetProvider() {
          * enlarged tap zone" reasoning as applyLeftToggle above — only the big icon's PICTURE
          * changes, not what tapping it does.
          */
-        private fun applyPeekLeftColumn(context: Context, views: RemoteViews, iconPackageName: String?) {
+        internal fun applyPeekLeftColumn(context: Context, views: RemoteViews, iconPackageName: String?) {
             val appIcon = iconPackageName?.let { appIconBitmap(context, it) }
             if (appIcon != null) {
                 views.setImageViewBitmap(R.id.widget_app_icon, circularBitmap(appIcon))
@@ -1363,7 +1370,7 @@ class NowBarWidgetProvider : AppWidgetProvider() {
             )
         }
 
-        private fun toggleSportNotifsPendingIntent(context: Context): PendingIntent {
+        internal fun toggleSportNotifsPendingIntent(context: Context): PendingIntent {
             val intent = Intent(context, NowBarWidgetProvider::class.java).apply {
                 action = ACTION_TOGGLE_SPORT_NOTIFS
             }
@@ -1390,7 +1397,7 @@ class NowBarWidgetProvider : AppWidgetProvider() {
          * fully unlocking on tap instead of just showing the peek in place. Back to a plain
          * broadcast, same as ACTION_TOGGLE_VIEW/ACTION_CLOSE_PEEK below.
          */
-        private fun openPeekPendingIntent(context: Context, source: WidgetPeekPrefs.Source, entryId: String, requestCode: Int): PendingIntent {
+        internal fun openPeekPendingIntent(context: Context, source: WidgetPeekPrefs.Source, entryId: String, requestCode: Int): PendingIntent {
             val intent = Intent(context, NowBarWidgetProvider::class.java).apply {
                 action = ACTION_OPEN_PEEK
                 putExtra(EXTRA_PEEK_SOURCE, source.name)
@@ -1424,7 +1431,7 @@ class NowBarWidgetProvider : AppWidgetProvider() {
          * qui est uniformisé"). Never touches widget_app_icon, which callers set separately per
          * state (applyLatestIcon / applySofascoreIcon / applyAllNotifsIcon / applyPeekLeftColumn).
          */
-        private fun renderLatestFormat(
+        internal fun renderLatestFormat(
             context: Context,
             views: RemoteViews,
             title: String,
@@ -1513,7 +1520,7 @@ class NowBarWidgetProvider : AppWidgetProvider() {
          * RENAMED from ResolvedPeek 20/09/2026 when this stopped being peek-only — see
          * [resolveAllNotifEntryContent]'s doc.
          */
-        private data class ResolvedNotifContent(
+        internal data class ResolvedNotifContent(
             val title: String,
             val text: String,
             val image: Bitmap?,
@@ -1582,7 +1589,7 @@ class NowBarWidgetProvider : AppWidgetProvider() {
          * longer there (aged out of the capped top-5, or removed elsewhere) — buildViewsUnsafe
          * treats that as "close the peek and fall back to that view's tile grid".
          */
-        private fun resolvePeek(context: Context, peek: WidgetPeekPrefs.Peek): ResolvedNotifContent? {
+        internal fun resolvePeek(context: Context, peek: WidgetPeekPrefs.Peek): ResolvedNotifContent? {
             return when (peek.source) {
                 WidgetPeekPrefs.Source.SPORT -> {
                     val match = SofascoreWidgetStore.get(context).firstOrNull { it.key == peek.entryId } ?: return null
@@ -1715,7 +1722,7 @@ class NowBarWidgetProvider : AppWidgetProvider() {
             )
         }
 
-        private fun appIconBitmap(context: Context, packageName: String): Bitmap? {
+        internal fun appIconBitmap(context: Context, packageName: String): Bitmap? {
             return try {
                 drawableToBitmap(context.packageManager.getApplicationIcon(packageName))
             } catch (_: Throwable) {
@@ -1735,7 +1742,7 @@ class NowBarWidgetProvider : AppWidgetProvider() {
         }
 
         /** Crops [source] into a circle, matching the round chips in the reference design. */
-        private fun circularBitmap(source: Bitmap): Bitmap {
+        internal fun circularBitmap(source: Bitmap): Bitmap {
             val size = minOf(source.width, source.height).coerceAtLeast(1)
             val output = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
             val canvas = Canvas(output)
@@ -1779,8 +1786,14 @@ class NowBarWidgetProvider : AppWidgetProvider() {
                 return
             }
             ACTION_TOGGLE_SPORT_NOTIFS -> {
+                // NEW 22/09/2026 — toggleSportOrAllNotifsView (instead of the plain
+                // toggleSportAllNotifs) so this same broadcast/PendingIntent, now ALSO bound to the
+                // compact widget's own toggle button, still flips the Sport/Toutes-notifs choice
+                // even while the main widget itself is sitting on LATEST (where its own RIGHT
+                // button is hidden and toggleSportAllNotifs alone would no-op) — see that
+                // function's doc.
                 closePeekAndCancelAlarm(context)
-                WidgetViewModePrefs.toggleSportAllNotifs(context)
+                WidgetViewModePrefs.toggleSportOrAllNotifsView(context)
                 pushToAllWidgets(context, buildViews(context))
                 return
             }

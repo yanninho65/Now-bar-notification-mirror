@@ -27,6 +27,10 @@ import android.content.Context
  * One value shared by every placed widget instance — the simplest option, and the only one that
  * matters here: Yann places a single instance of this widget (lock screen via LockStar), so
  * there's never more than one to keep in sync.
+ *
+ * NEW 22/09/2026 — also read/written by the compact 4x2 widget (NowBarWidgetProviderCompact), whose
+ * own icon row reuses this SAME Sport/Toutes-notifs choice rather than keeping a separate one — see
+ * [sportOrAllNotifsView]/[toggleSportOrAllNotifsView].
  */
 object WidgetViewModePrefs {
 
@@ -74,6 +78,43 @@ object WidgetViewModePrefs {
             WidgetView.LATEST -> return
         }
         setView(context, next)
+        setLastNonLatestView(context, next)
+    }
+
+    /**
+     * NEW 22/09/2026, widget 4x2 ("harmoniser au maximum avec le widget existant [...] c'est juste
+     * une manière de présenter différente") — the compact widget's icon row is always showing
+     * either Sport or Toutes-notifs (it has no LATEST view of its own, row 2 always covers that),
+     * so it needs to read this SAME Sport/Toutes-notifs choice regardless of whether the main
+     * widget itself currently happens to be sitting on LATEST. Unlike [currentView], which would
+     * just answer LATEST in that case, this always answers with the last SPORT/ALL_NOTIFS choice.
+     */
+    fun sportOrAllNotifsView(context: Context): WidgetView {
+        val current = currentView(context)
+        return if (current == WidgetView.LATEST) lastNonLatestView(context) else current
+    }
+
+    /**
+     * NEW 22/09/2026, widget 4x2 — same toggle action as [toggleSportAllNotifs] (RIGHT button),
+     * reused by the compact widget's own toggle so both widgets flip the SAME shared choice in
+     * lockstep (see [sportOrAllNotifsView]'s doc). [toggleSportAllNotifs] alone isn't enough here:
+     * it no-ops whenever the main widget's [currentView] is LATEST (its RIGHT button is simply
+     * never shown/clickable then, so that branch was previously unreachable) — the compact widget's
+     * toggle has to work in that situation too, since its icon row has no LATEST state of its own
+     * to be blocked by. When [currentView] actually IS SPORT/ALL_NOTIFS this delegates straight to
+     * [toggleSportAllNotifs], so behavior for the main widget's own button is unchanged.
+     */
+    fun toggleSportOrAllNotifsView(context: Context) {
+        val current = currentView(context)
+        if (current == WidgetView.SPORT || current == WidgetView.ALL_NOTIFS) {
+            toggleSportAllNotifs(context)
+            return
+        }
+        val next = when (lastNonLatestView(context)) {
+            WidgetView.SPORT -> WidgetView.ALL_NOTIFS
+            WidgetView.ALL_NOTIFS -> WidgetView.SPORT
+            WidgetView.LATEST -> WidgetView.ALL_NOTIFS // defensive: lastNonLatestView never actually persists LATEST
+        }
         setLastNonLatestView(context, next)
     }
 
