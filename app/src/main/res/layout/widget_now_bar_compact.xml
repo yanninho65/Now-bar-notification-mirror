@@ -1,0 +1,545 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    NEW 22/09/2026 (Yann: "Fais moi un widget 4x2. En bas du widget, la vue dernière notif. En
+    haut, les icônes avec comme aujourd'hui la possibilité d'alterner entre sport et toutes notifs.
+    Ne pas inclure l'icone de la dernière notif vu qu'elle est déjà en dessous. Si je clique sur une
+    icône, afficher le texte à la place de la dernière notif. Au bout de 15 secondes comme pour
+    l'autre, fermer la vue texte et donc revenir à la dernière notif. Harmoniser au maximum avec le
+    widget existant. C'est juste une manière de présenter différente.") — a SECOND, 4x2 widget
+    (NowBarWidgetProviderCompact), same lock-screen-friendly transparent background as
+    widget_now_bar.xml, TWO stacked rows instead of that widget's one:
+
+    - ROW 1 (top): a compact ICON-ONLY strip — either the Sofascore matches or the "Toutes notifs"
+      entries (never both), same Sport/Toutes-notifs choice as widget_now_bar's own right toggle
+      (see WidgetViewModePrefs.sportOrAllNotifsView) so the two widgets stay in lockstep — just
+      rendered as bare icons, no score/period/title underneath, since row 2 already carries the
+      full detail for whichever one is tapped. Whichever entry is currently "Dernière notif" (row
+      2's own default content) is filtered out of this row before the 5 fixed slots are filled
+      (NowBarWidgetProviderCompact.applySportIcons/applyNotifIcons) — "elle est déjà en dessous".
+      widget_compact_toggle (right edge) flips between the two sets, reusing the EXACT SAME
+      PendingIntent as widget_now_bar's widget_view_toggle_right (ACTION_TOGGLE_SPORT_NOTIFS) — see
+      NowBarWidgetProvider.toggleSportNotifsPendingIntent.
+
+    - ROW 2 (bottom): "Dernière notif" — a byte-for-byte copy of widget_now_bar.xml's left column
+      (widget_app_icon/widget_view_toggle) + widget_latest_content block, SAME ids, so
+      NowBarWidgetProvider.applyLatestContent/renderLatestFormat/applyPeekLeftColumn (and the
+      "peek" mechanism they're already part of — WidgetPeekPrefs, the 15s auto-close alarm) render
+      this row exactly as-is, unmodified — tapping a row-1 icon opens a "peek" (the SAME
+      ACTION_OPEN_PEEK broadcast widget_now_bar's own tiles use, just a different request-code
+      range — see NowBarWidgetProviderCompact.PEEK_REQUEST_CODE_*) that shows full-format here
+      instead of the true latest notification, and the SAME 15s alarm closes it automatically,
+      falling back to "Dernière notif" again — nothing new to build for any of that, it's the
+      widget's existing peek feature, just triggered from this row's icons instead of a full tile
+      grid. widget_view_toggle (the small arrows glyph) only ever appears here while peeking, bound
+      to "close the peek" exactly like widget_now_bar's own — there's no separate LATEST-away
+      "grid" view in THIS widget to switch to otherwise (row 1 covers that permanently), so it's
+      GONE the rest of the time.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_compact_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@android:color/transparent"
+    android:paddingStart="8dp"
+    android:paddingEnd="8dp"
+    android:paddingTop="4dp"
+    android:paddingBottom="4dp">
+
+    <!-- ROW 1 — icon strip (Sport or Toutes notifs) + the Sport/Toutes-notifs toggle. -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginBottom="4dp">
+
+        <FrameLayout
+            android:id="@+id/widget_compact_icons_area"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1">
+
+            <!--
+                SPORT icons — 5 fixed slots (same fixed-slot-COUNT convention as
+                widget_now_bar.xml's widget_match_1..5), each a bare team-logo image, no
+                score/period text below it (that's what row 2 is for once tapped). Width-responsive
+                like widget_now_bar's own tile rows (0dp+weight="1" tiles, weight="0.1" spacers,
+                explicit weightSum so a GONE slot never stretches a visible neighbour — see that
+                file's class doc for the full reasoning, unchanged here).
+            -->
+            <LinearLayout
+                android:id="@+id/widget_compact_sport_icons"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:weightSum="5.4"
+                android:visibility="gone">
+
+                <ImageView
+                    android:id="@+id/widget_compact_sport_icon_1"
+                    android:layout_width="0dp"
+                    android:layout_height="28dp"
+                    android:layout_weight="1"
+                    android:adjustViewBounds="true"
+                    android:scaleType="fitCenter"
+                    android:contentDescription="@null"
+                    android:visibility="gone" />
+
+                <FrameLayout android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="0.1" />
+
+                <ImageView
+                    android:id="@+id/widget_compact_sport_icon_2"
+                    android:layout_width="0dp"
+                    android:layout_height="28dp"
+                    android:layout_weight="1"
+                    android:adjustViewBounds="true"
+                    android:scaleType="fitCenter"
+                    android:contentDescription="@null"
+                    android:visibility="gone" />
+
+                <FrameLayout android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="0.1" />
+
+                <ImageView
+                    android:id="@+id/widget_compact_sport_icon_3"
+                    android:layout_width="0dp"
+                    android:layout_height="28dp"
+                    android:layout_weight="1"
+                    android:adjustViewBounds="true"
+                    android:scaleType="fitCenter"
+                    android:contentDescription="@null"
+                    android:visibility="gone" />
+
+                <FrameLayout android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="0.1" />
+
+                <ImageView
+                    android:id="@+id/widget_compact_sport_icon_4"
+                    android:layout_width="0dp"
+                    android:layout_height="28dp"
+                    android:layout_weight="1"
+                    android:adjustViewBounds="true"
+                    android:scaleType="fitCenter"
+                    android:contentDescription="@null"
+                    android:visibility="gone" />
+
+                <FrameLayout android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="0.1" />
+
+                <ImageView
+                    android:id="@+id/widget_compact_sport_icon_5"
+                    android:layout_width="0dp"
+                    android:layout_height="28dp"
+                    android:layout_weight="1"
+                    android:adjustViewBounds="true"
+                    android:scaleType="fitCenter"
+                    android:contentDescription="@null"
+                    android:visibility="gone" />
+
+            </LinearLayout>
+
+            <!--
+                "Toutes notifs" icons — same 5-fixed-slot convention. Each slot is EITHER the
+                notification's own photo (+ small app-icon badge in the corner, or the app icon
+                alone if there's no photo — same rule as widget_now_bar's widget_notif_N) OR, for a
+                Sofascore entry, its team-logo image — never both, toggled per-slot exactly like
+                widget_now_bar's applyAllNotifSlotAsMatch/Generic. No title/score/period text below
+                either style here.
+            -->
+            <LinearLayout
+                android:id="@+id/widget_compact_notif_icons"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:weightSum="5.4"
+                android:visibility="gone">
+
+                <FrameLayout
+                    android:id="@+id/widget_compact_notif_icon_1"
+                    android:layout_width="0dp"
+                    android:layout_height="32dp"
+                    android:layout_weight="1"
+                    android:visibility="gone">
+
+                    <ImageView
+                        android:id="@+id/widget_compact_notif_icon_1_photo"
+                        android:layout_width="32dp"
+                        android:layout_height="32dp"
+                        android:layout_gravity="center"
+                        android:scaleType="centerCrop"
+                        android:contentDescription="@null" />
+
+                    <ImageView
+                        android:id="@+id/widget_compact_notif_icon_1_match"
+                        android:layout_width="match_parent"
+                        android:layout_height="30dp"
+                        android:layout_gravity="center"
+                        android:adjustViewBounds="true"
+                        android:scaleType="fitCenter"
+                        android:contentDescription="@null"
+                        android:visibility="gone" />
+
+                    <ImageView
+                        android:id="@+id/widget_compact_notif_icon_1_badge"
+                        android:layout_width="14dp"
+                        android:layout_height="14dp"
+                        android:layout_gravity="bottom|end"
+                        android:padding="1dp"
+                        android:background="@drawable/widget_dismiss_background"
+                        android:scaleType="centerCrop"
+                        android:contentDescription="@null"
+                        android:visibility="gone" />
+
+                </FrameLayout>
+
+                <FrameLayout android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="0.1" />
+
+                <FrameLayout
+                    android:id="@+id/widget_compact_notif_icon_2"
+                    android:layout_width="0dp"
+                    android:layout_height="32dp"
+                    android:layout_weight="1"
+                    android:visibility="gone">
+
+                    <ImageView
+                        android:id="@+id/widget_compact_notif_icon_2_photo"
+                        android:layout_width="32dp"
+                        android:layout_height="32dp"
+                        android:layout_gravity="center"
+                        android:scaleType="centerCrop"
+                        android:contentDescription="@null" />
+
+                    <ImageView
+                        android:id="@+id/widget_compact_notif_icon_2_match"
+                        android:layout_width="match_parent"
+                        android:layout_height="30dp"
+                        android:layout_gravity="center"
+                        android:adjustViewBounds="true"
+                        android:scaleType="fitCenter"
+                        android:contentDescription="@null"
+                        android:visibility="gone" />
+
+                    <ImageView
+                        android:id="@+id/widget_compact_notif_icon_2_badge"
+                        android:layout_width="14dp"
+                        android:layout_height="14dp"
+                        android:layout_gravity="bottom|end"
+                        android:padding="1dp"
+                        android:background="@drawable/widget_dismiss_background"
+                        android:scaleType="centerCrop"
+                        android:contentDescription="@null"
+                        android:visibility="gone" />
+
+                </FrameLayout>
+
+                <FrameLayout android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="0.1" />
+
+                <FrameLayout
+                    android:id="@+id/widget_compact_notif_icon_3"
+                    android:layout_width="0dp"
+                    android:layout_height="32dp"
+                    android:layout_weight="1"
+                    android:visibility="gone">
+
+                    <ImageView
+                        android:id="@+id/widget_compact_notif_icon_3_photo"
+                        android:layout_width="32dp"
+                        android:layout_height="32dp"
+                        android:layout_gravity="center"
+                        android:scaleType="centerCrop"
+                        android:contentDescription="@null" />
+
+                    <ImageView
+                        android:id="@+id/widget_compact_notif_icon_3_match"
+                        android:layout_width="match_parent"
+                        android:layout_height="30dp"
+                        android:layout_gravity="center"
+                        android:adjustViewBounds="true"
+                        android:scaleType="fitCenter"
+                        android:contentDescription="@null"
+                        android:visibility="gone" />
+
+                    <ImageView
+                        android:id="@+id/widget_compact_notif_icon_3_badge"
+                        android:layout_width="14dp"
+                        android:layout_height="14dp"
+                        android:layout_gravity="bottom|end"
+                        android:padding="1dp"
+                        android:background="@drawable/widget_dismiss_background"
+                        android:scaleType="centerCrop"
+                        android:contentDescription="@null"
+                        android:visibility="gone" />
+
+                </FrameLayout>
+
+                <FrameLayout android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="0.1" />
+
+                <FrameLayout
+                    android:id="@+id/widget_compact_notif_icon_4"
+                    android:layout_width="0dp"
+                    android:layout_height="32dp"
+                    android:layout_weight="1"
+                    android:visibility="gone">
+
+                    <ImageView
+                        android:id="@+id/widget_compact_notif_icon_4_photo"
+                        android:layout_width="32dp"
+                        android:layout_height="32dp"
+                        android:layout_gravity="center"
+                        android:scaleType="centerCrop"
+                        android:contentDescription="@null" />
+
+                    <ImageView
+                        android:id="@+id/widget_compact_notif_icon_4_match"
+                        android:layout_width="match_parent"
+                        android:layout_height="30dp"
+                        android:layout_gravity="center"
+                        android:adjustViewBounds="true"
+                        android:scaleType="fitCenter"
+                        android:contentDescription="@null"
+                        android:visibility="gone" />
+
+                    <ImageView
+                        android:id="@+id/widget_compact_notif_icon_4_badge"
+                        android:layout_width="14dp"
+                        android:layout_height="14dp"
+                        android:layout_gravity="bottom|end"
+                        android:padding="1dp"
+                        android:background="@drawable/widget_dismiss_background"
+                        android:scaleType="centerCrop"
+                        android:contentDescription="@null"
+                        android:visibility="gone" />
+
+                </FrameLayout>
+
+                <FrameLayout android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="0.1" />
+
+                <FrameLayout
+                    android:id="@+id/widget_compact_notif_icon_5"
+                    android:layout_width="0dp"
+                    android:layout_height="32dp"
+                    android:layout_weight="1"
+                    android:visibility="gone">
+
+                    <ImageView
+                        android:id="@+id/widget_compact_notif_icon_5_photo"
+                        android:layout_width="32dp"
+                        android:layout_height="32dp"
+                        android:layout_gravity="center"
+                        android:scaleType="centerCrop"
+                        android:contentDescription="@null" />
+
+                    <ImageView
+                        android:id="@+id/widget_compact_notif_icon_5_match"
+                        android:layout_width="match_parent"
+                        android:layout_height="30dp"
+                        android:layout_gravity="center"
+                        android:adjustViewBounds="true"
+                        android:scaleType="fitCenter"
+                        android:contentDescription="@null"
+                        android:visibility="gone" />
+
+                    <ImageView
+                        android:id="@+id/widget_compact_notif_icon_5_badge"
+                        android:layout_width="14dp"
+                        android:layout_height="14dp"
+                        android:layout_gravity="bottom|end"
+                        android:padding="1dp"
+                        android:background="@drawable/widget_dismiss_background"
+                        android:scaleType="centerCrop"
+                        android:contentDescription="@null"
+                        android:visibility="gone" />
+
+                </FrameLayout>
+
+            </LinearLayout>
+
+            <!-- Shown instead of either icon row when its current mode has nothing to show. -->
+            <TextView
+                android:id="@+id/widget_compact_icons_empty"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="@android:color/white"
+                android:textSize="11sp"
+                android:visibility="gone" />
+
+        </FrameLayout>
+
+        <!-- Sport <-> Toutes notifs, same icons/action as widget_now_bar's widget_view_toggle_right. -->
+        <ImageView
+            android:id="@+id/widget_compact_toggle"
+            android:layout_width="28dp"
+            android:layout_height="28dp"
+            android:layout_marginStart="8dp"
+            android:padding="3dp"
+            android:background="@drawable/widget_dismiss_background"
+            android:src="@drawable/ic_widget_switch_view"
+            android:contentDescription="@null" />
+
+    </LinearLayout>
+
+    <!-- ROW 2 — "Dernière notif" / peek, byte-for-byte the same block as widget_now_bar.xml. -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:gravity="center_horizontal">
+
+            <ImageView
+                android:id="@+id/widget_app_icon"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:scaleType="centerCrop"
+                android:contentDescription="@null" />
+
+            <ImageView
+                android:id="@+id/widget_view_toggle"
+                android:layout_width="20dp"
+                android:layout_height="20dp"
+                android:layout_marginTop="3dp"
+                android:padding="3dp"
+                android:background="@drawable/widget_dismiss_background"
+                android:src="@drawable/ic_widget_switch_view"
+                android:contentDescription="@null"
+                android:visibility="gone" />
+
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/widget_latest_content"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="10dp"
+            android:orientation="vertical">
+
+            <RelativeLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content">
+
+                <LinearLayout
+                    android:id="@+id/widget_right_cluster"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_centerVertical="true"
+                    android:layout_alignParentEnd="true"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <ImageView
+                        android:id="@+id/widget_image"
+                        android:layout_width="32dp"
+                        android:layout_height="32dp"
+                        android:layout_marginEnd="10dp"
+                        android:scaleType="centerCrop"
+                        android:contentDescription="@null" />
+
+                    <ImageView
+                        android:id="@+id/widget_dismiss"
+                        android:layout_width="22dp"
+                        android:layout_height="22dp"
+                        android:padding="4dp"
+                        android:background="@drawable/widget_dismiss_background"
+                        android:src="@drawable/ic_widget_dismiss"
+                        android:contentDescription="@null" />
+
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_centerVertical="true"
+                    android:layout_toStartOf="@id/widget_right_cluster"
+                    android:layout_alignParentStart="true"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/widget_title"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:maxLines="1"
+                        android:ellipsize="end"
+                        android:textColor="@android:color/white"
+                        android:textSize="13sp"
+                        android:textStyle="bold"
+                        android:text="Titre de la notification" />
+
+                    <TextView
+                        android:id="@+id/widget_text"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:maxLines="2"
+                        android:ellipsize="end"
+                        android:textColor="@android:color/white"
+                        android:textSize="12sp"
+                        android:text="Aperçu du texte de la notification, qui peut être un peu plus long que le titre." />
+                </LinearLayout>
+
+            </RelativeLayout>
+
+            <LinearLayout
+                android:id="@+id/widget_actions_container"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:visibility="gone">
+
+                <TextView
+                    android:id="@+id/widget_action_1"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="6dp"
+                    android:paddingStart="10dp"
+                    android:paddingEnd="10dp"
+                    android:paddingTop="4dp"
+                    android:paddingBottom="4dp"
+                    android:textColor="@android:color/white"
+                    android:textSize="11sp"
+                    android:maxLines="1"
+                    android:ellipsize="end"
+                    android:visibility="gone" />
+
+                <TextView
+                    android:id="@+id/widget_action_2"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="6dp"
+                    android:paddingStart="10dp"
+                    android:paddingEnd="10dp"
+                    android:paddingTop="4dp"
+                    android:paddingBottom="4dp"
+                    android:textColor="@android:color/white"
+                    android:textSize="11sp"
+                    android:maxLines="1"
+                    android:ellipsize="end"
+                    android:visibility="gone" />
+
+                <TextView
+                    android:id="@+id/widget_action_3"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:paddingStart="10dp"
+                    android:paddingEnd="10dp"
+                    android:paddingTop="4dp"
+                    android:paddingBottom="4dp"
+                    android:textColor="@android:color/white"
+                    android:textSize="11sp"
+                    android:maxLines="1"
+                    android:ellipsize="end"
+                    android:visibility="gone" />
+
+            </LinearLayout>
+
+        </LinearLayout>
+
+    </LinearLayout>
+
+</LinearLayout>
