@@ -25,6 +25,7 @@ import com.yann.nowbarmirror.BitmapUtils
 import com.yann.nowbarmirror.MirrorNotificationListener
 import com.yann.nowbarmirror.R
 import com.yann.nowbarmirror.WatchNotificationSync
+import com.yann.nowbarmirror.WatchCompanionLink
 import com.yann.nowbarmirror.sport.SofascoreNotificationListenerService
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -104,7 +105,6 @@ data class SofascoreWidgetMatch(
     val awayScore: String?,
     val lastScorer: String?,
     val status: String,
-    val apiSource: String,
     val postTimeMillis: Long,
     val title: String,
     val text: String,
@@ -143,7 +143,6 @@ data class AllNotifEntryPush(
     val awayScore: String? = null,
     val lastScorer: String? = null,
     val status: String? = null,
-    val apiSource: String? = null,
     val image: Bitmap?,
     val contentIntent: PendingIntent?,
     val actions: List<WidgetAction> = emptyList(),
@@ -186,7 +185,6 @@ data class AllNotifEntryPush(
 internal fun <T> List<T>.sortedForWidget(
     nowMillis: Long,
     statusOf: (T) -> String,
-    apiSourceOf: (T) -> String,
     postTimeOf: (T) -> Long
 ): List<T> {
     fun isDemoted(item: T): Boolean {
@@ -468,7 +466,6 @@ class NowBarWidgetProvider : AppWidgetProvider() {
             val kept = matches.sortedForWidget(
                 nowMillis = System.currentTimeMillis(),
                 statusOf = { it.status },
-                apiSourceOf = { it.apiSource },
                 postTimeOf = { it.postTimeMillis }
             ).take(SofascoreWidgetStore.MAX_SLOTS)
 
@@ -478,7 +475,7 @@ class NowBarWidgetProvider : AppWidgetProvider() {
             // AUDIT 23/09/2026 — nothing the widget renders changed (same matches, same postings,
             // same score/status, same count): skip the store write and the 3-widget rebuild.
             val signature = kept.joinToString("|") { m ->
-                "${m.key}/${m.postTimeMillis}/${m.homeScore}/${m.awayScore}/${m.lastScorer}/${m.status}/${m.apiSource}/${m.text}"
+                "${m.key}/${m.postTimeMillis}/${m.homeScore}/${m.awayScore}/${m.lastScorer}/${m.status}/${m.text}"
             } + "#$activeCount"
             if (signature == lastSofascoreSignature) return
             lastSofascoreSignature = signature
@@ -494,7 +491,6 @@ class NowBarWidgetProvider : AppWidgetProvider() {
                         awayScore = m.awayScore,
                         lastScorer = m.lastScorer,
                         status = m.status,
-                        apiSource = m.apiSource,
                         postTimeMillis = m.postTimeMillis,
                         title = m.title,
                         text = m.text,
@@ -565,7 +561,6 @@ class NowBarWidgetProvider : AppWidgetProvider() {
                         awayScore = entry.awayScore,
                         lastScorer = entry.lastScorer,
                         status = entry.status,
-                        apiSource = entry.apiSource,
                         image = entry.image,
                         imageLoader = entry.imageLoader
                     )
@@ -716,7 +711,7 @@ class NowBarWidgetProvider : AppWidgetProvider() {
          * [NotificationCompat.Builder.setFullScreenIntent] (même [openIntent], voir
          * ensureOpenOnPhoneChannel's doc pour le canal HIGH que ça nécessite) : sur Android 14+
          * (notre cible), ceci ouvre automatiquement la cible — sans tap — SI Yann a accordé
-         * l'accès "Notifications plein écran" à l'app (bouton dédié dans MainActivity ; pas
+         * l'accès "Notifications plein écran" à l'app (bouton dédié dans PermissionsActivity ; pas
          * auto-accordé sur 14+ pour une app hors téléphonie/alarme). Tant que ce n'est pas
          * accordé, ou si les conditions d'auto-lancement plein écran ne sont pas réunies (p. ex.
          * téléphone déjà déverrouillé et à l'écran), le système se rabat de lui-même sur le
@@ -763,6 +758,12 @@ class NowBarWidgetProvider : AppWidgetProvider() {
          * (MirrorNotificationListener.openMessageOnPhone).
          */
         fun postOpenOnPhone(context: Context, title: String, text: String, image: Bitmap?, openIntent: PendingIntent): Boolean {
+            // UPDATED 24/09/2026 — watch associated (WatchCompanionLink, kept across updates unlike
+            // the full-screen access): open directly. Unlocked, that's all; locked, the relay
+            // notification below is still posted (full-screen if granted, auto-cancelled).
+            val locked = isDeviceLocked(context)
+            val openedDirectly = WatchCompanionLink.openDirect(context, openIntent)
+            if (openedDirectly && !locked) return true
             return try {
                 ensureOpenOnPhoneChannel(context)
                 val builder = NotificationCompat.Builder(context, OPEN_ON_PHONE_CHANNEL_ID)
@@ -780,10 +781,10 @@ class NowBarWidgetProvider : AppWidgetProvider() {
                     .setFullScreenIntent(openIntent, /* highPriority = */ true)
                 image?.let { builder.setLargeIcon(it) }
                 NotificationManagerCompat.from(context).notify(OPEN_ON_PHONE_NOTIFICATION_ID, builder.build())
-                if (isDeviceLocked(context)) scheduleAutoCancelOpenOnPhone(context)
+                if (locked) scheduleAutoCancelOpenOnPhone(context)
                 true
             } catch (_: Throwable) {
-                false
+                openedDirectly
             }
         }
 
@@ -1054,7 +1055,6 @@ class NowBarWidgetProvider : AppWidgetProvider() {
             val sofascoreMatches = SofascoreWidgetStore.get(context).sortedForWidget(
                 nowMillis = System.currentTimeMillis(),
                 statusOf = { it.status },
-                apiSourceOf = { it.apiSource },
                 postTimeOf = { it.postTimeMillis }
             )
             val allNotifs = WidgetAllNotificationsStore.get(context)
@@ -1228,7 +1228,7 @@ class NowBarWidgetProvider : AppWidgetProvider() {
                 )
                 views.setTextViewText(
                     SOFASCORE_SLOT_PERIOD_IDS[i],
-                    SofascoreMatchPresentation.periodLabel(match.status, match.apiSource, kickoffEpochMillis = null)
+                    SofascoreMatchPresentation.periodLabel(match.status)
                 )
 
                 views.setOnClickPendingIntent(
@@ -1322,7 +1322,7 @@ class NowBarWidgetProvider : AppWidgetProvider() {
             )
             views.setTextViewText(
                 ids.period,
-                SofascoreMatchPresentation.periodLabel(entry.status.orEmpty(), entry.apiSource.orEmpty(), kickoffEpochMillis = null)
+                SofascoreMatchPresentation.periodLabel(entry.status.orEmpty())
             )
         }
 

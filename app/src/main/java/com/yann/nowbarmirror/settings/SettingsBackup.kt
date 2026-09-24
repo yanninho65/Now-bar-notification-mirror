@@ -26,7 +26,7 @@ object SettingsBackup {
             put("widget_actions_enabled", WidgetActionsPrefs.isEnabled(context))
             put("modes", modes)
             put("invert_title_text", inverted)
-            put("message_apps", org.json.JSONArray().apply { MessageAppsPrefs.get(context).forEach { put(it) } })
+            put("message_apps", org.json.JSONArray().apply { MessageAppsPrefs.getOrdered(context).forEach { put(it) } })
         }.toString(2)
     }
 
@@ -62,7 +62,7 @@ object SettingsBackup {
         }
 
         root.optJSONArray("message_apps")?.let { apps ->
-            MessageAppsPrefs.set(context, (0 until apps.length()).map { apps.getString(it) }.toSet())
+            MessageAppsPrefs.setOrdered(context, (0 until apps.length()).map { apps.getString(it) })
         }
 
         if (root.has("service_enabled")) {

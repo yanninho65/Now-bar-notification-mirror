@@ -59,7 +59,6 @@ object SofascoreWidgetStore {
         val awayScore: String?,
         val lastScorer: String?,
         val status: String,
-        val apiSource: String,
         val postTimeMillis: Long,
         val title: String,
         val text: String,
@@ -77,7 +76,6 @@ object SofascoreWidgetStore {
         val awayScore: String?,
         val lastScorer: String?,
         val status: String,
-        val apiSource: String,
         val postTimeMillis: Long,
         val title: String,
         val text: String,
@@ -128,7 +126,6 @@ object SofascoreWidgetStore {
                     put("awayScore", match.awayScore ?: JSONObject.NULL)
                     put("lastScorer", match.lastScorer ?: JSONObject.NULL)
                     put("status", match.status)
-                    put("apiSource", match.apiSource)
                     put("postTimeMillis", match.postTimeMillis)
                     put("title", match.title)
                     put("text", match.text)
@@ -169,7 +166,6 @@ object SofascoreWidgetStore {
                 awayScore = obj.optNullableString("awayScore"),
                 lastScorer = obj.optNullableString("lastScorer"),
                 status = obj.optString("status", ""),
-                apiSource = obj.optString("apiSource", "SPORTS_DB"),
                 postTimeMillis = obj.optLong("postTimeMillis", 0L),
                 // Fallback rebuilds the raw title exactly like the notification's own EXTRA_TITLE
                 // ("$homeTeam - $awayTeam") for anything persisted before this field existed.

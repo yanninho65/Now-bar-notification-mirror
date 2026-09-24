@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Liste plein écran (24/09/2026) : les options et l'export/import sont dans Paramètres. -->
+<!-- Sport (24/09/2026, ex-onglet de l'écran principal) — voir sport/SportActivity. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/root"
     android:layout_width="match_parent"
@@ -10,20 +10,28 @@
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="@string/app_selection_title"
+        android:text="@string/sport_title"
         android:textColor="@color/one_ui_text_primary"
         android:textStyle="bold"
         android:textSize="26sp"
         android:paddingHorizontal="20dp"
         android:paddingTop="20dp"
-        android:paddingBottom="12dp" />
+        android:paddingBottom="8dp" />
+
+    <TextView
+        android:id="@+id/sport_status"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textColor="@color/one_ui_text_secondary"
+        android:textSize="14sp"
+        android:paddingHorizontal="20dp"
+        android:paddingBottom="8dp" />
 
     <androidx.recyclerview.widget.RecyclerView
-        android:id="@+id/app_list"
+        android:id="@+id/sport_list"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
-        android:clipToPadding="false"
-        android:paddingVertical="4dp" />
+        android:paddingHorizontal="4dp" />
 
 </LinearLayout>

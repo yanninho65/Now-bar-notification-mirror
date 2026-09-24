@@ -22,7 +22,7 @@ fi
 python3 "$HERE/genR.py" "$REPO/app/src/main/res" com.yann.nowbarmirror "$W/RApp.kt"
 python3 "$HERE/genR.py" "$REPO/wear/src/main/res" com.yann.nowbarmirror.wear "$W/RWear.kt"
 # UI files use appcompat/material/recyclerview/viewbinding — not stubbed, excluded.
-APP=$(find "$REPO/app/src/main/java" -name '*.kt' | grep -v -E 'MainActivity|AppSelectionActivity|MessageAppsActivity|AppSelectionAdapter|MatchesAdapter|SofascoreHomeAdapter|SimpleListAdapter')
+APP=$(find "$REPO/app/src/main/java" -name '*.kt' | grep -v -E 'MainActivity|AppSelectionActivity|MessageAppsActivity|AppSelectionAdapter|SofascoreHomeAdapter|SportActivity|SettingsActivity|PermissionsActivity')
 WEAR=$(find "$REPO/wear/src/main/kotlin" -name '*.kt')
 set +e
 "$W/kotlinc/bin/kotlinc" -nowarn -jvm-target 17 -cp "$W/android-36.jar" -d "$W/app.jar" "$HERE"/stubs/*.kt "$W/RApp.kt" $APP 2>&1 | grep -E "error:" > "$W/app.log"

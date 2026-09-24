@@ -137,7 +137,6 @@ object WidgetAllNotificationsStore {
         val awayScore: String? = null,
         val lastScorer: String? = null,
         val status: String? = null,
-        val apiSource: String? = null,
         val image: Bitmap?,
         // AUDIT 23/09/2026 — see WidgetImageFiles: the file this entry already had on disk (an
         // entry carried over from a previous save), and a lazy alternative to [image] that's only
@@ -161,7 +160,6 @@ object WidgetAllNotificationsStore {
         val awayScore: String?,
         val lastScorer: String?,
         val status: String?,
-        val apiSource: String?,
         val imageFile: File?
     )
 
@@ -191,7 +189,6 @@ object WidgetAllNotificationsStore {
         awayScore = awayScore,
         lastScorer = lastScorer,
         status = status,
-        apiSource = apiSource,
         image = null,
         existingImageFile = imageFile
     )
@@ -310,7 +307,6 @@ object WidgetAllNotificationsStore {
                     put("awayScore", entry.awayScore ?: JSONObject.NULL)
                     put("lastScorer", entry.lastScorer ?: JSONObject.NULL)
                     put("status", entry.status ?: JSONObject.NULL)
-                    put("apiSource", entry.apiSource ?: JSONObject.NULL)
                     put("image", imageName ?: JSONObject.NULL)
                 }
             )
@@ -424,7 +420,6 @@ object WidgetAllNotificationsStore {
                 awayScore = obj.optNullableString("awayScore"),
                 lastScorer = obj.optNullableString("lastScorer"),
                 status = obj.optNullableString("status"),
-                apiSource = obj.optNullableString("apiSource"),
                 imageFile = if (obj.has("image")) {
                     WidgetImageFiles.resolve(context, obj.optNullableString("image"))
                 } else {

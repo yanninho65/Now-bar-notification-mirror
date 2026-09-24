@@ -19,25 +19,20 @@ import java.util.concurrent.atomic.AtomicBoolean
  * [StatusBarNotification.getKey], stable tant que la notif reste active (une
  * mise à jour en place — même id/tag — garde la même clé). [latestLine] est
  * la ligne la plus récente, pour donner un aperçu dans l'écran d'accueil
- * (MainActivity). [notifImage] est le résultat de
+ * (SportActivity). [notifImage] est le résultat de
  * [SofascoreNotificationListenerService.extractNotificationImage] pour
  * CETTE notif précise — la même fonction, donc la même image, que celle
  * envoyée à la montre par [SofascoreNotificationListenerService.refresh] —
  * affiché en vignette dans la liste pour vérifier visuellement ce qui est
  * réellement extrait avant de s'y fier côté montre. `null` si aucune des
  * pistes de [extractNotificationImage] n'aboutit pour cette notif.
- * [override] : l'API de score/période éventuellement configurée pour CETTE
- * notif précise (voir SofascoreApiOverridePrefs) — `null` si aucune, auquel
- * cas le score/la période affichés restent ceux déduits du texte de la
- * notif elle-même.
  */
 data class SofascoreMatchOption(
     val key: String,
     val homeTeam: String,
     val awayTeam: String,
     val latestLine: String,
-    val notifImage: Bitmap?,
-    val override: SofascoreApiOverride?
+    val notifImage: Bitmap?
 )
 
 /**
@@ -48,16 +43,8 @@ data class SofascoreMatchOption(
  * confondre avec les apps "Livesport"/Soccerway, éditeur différent) et
  * pousse à la montre, pour la notification ACTIVE (voir ci-dessous), les
  * noms d'équipe + l'image telles que Sofascore les fournit, et un score/
- * statut qui est soit déduit du texte de la notif, soit — si Yann a
- * configuré un override pour CETTE notif précise (voir
- * [SofascoreApiOverridePrefs]) — repris du dernier sondage de l'API choisie
- * (TheSportsDB ou Live Tennis API, voir [ApiOverrideFollowService]), champ
- * par champ (score et/ou période). AVANT cette date, TheSportsDB/Live
- * Tennis API pouvaient aussi être suivis de façon totalement autonome
- * (MainActivity + MatchFollowService, tous deux retirés) avec leurs propres
- * noms d'équipe et logos envoyés à la montre — ce n'est plus possible :
- * l'API ne sert plus qu'à affiner score/période d'un match dont le nom/
- * l'image viennent toujours de Sofascore.
+ * statut déduits du texte de la notif (SofascoreNotificationParser). Les
+ * overrides TheSportsDB / Live Tennis API ont été retirés le 24/09/2026.
  *
  * Notification ACTIVE (celle qui pilote la complication) : choisie par
  * Yann dans l'app et persistée dans [SofascorePrefs] :
@@ -65,22 +52,21 @@ data class SofascoreMatchOption(
  *   toutes les notifs Sofascore actives.
  * - CHOSEN : un match précis, choisi à la main parmi une liste de ceux
  *   actuellement dans le centre de notifications (voir [listAvailableMatches],
- *   appelé depuis MainActivity). Si ce match n'a plus de notif active (fini,
+ *   appelé depuis SportActivity). Si ce match n'a plus de notif active (fini,
  *   notif supprimée), on retombe automatiquement sur LATEST plutôt que de ne
  *   rien afficher.
  *
  * DEPUIS l'ajout de la vue "Sport" au widget lock-screen (voir
  * [pushWidgetMatches]) : ce service alimente maintenant DEUX surfaces à
  * chaque [refresh] — la complication montre (un seul match "actif", comme
- * ci-dessus, override compris) ET le widget (jusqu'à 4 matchs, TOUS ceux
- * actuellement actifs, SANS override — voir la doc de [pushWidgetMatches]
- * pour pourquoi). Les deux partagent la même extraction de base
+ * ci-dessus) ET le widget (tous ceux actuellement actifs, voir
+ * [pushWidgetMatches]). Les deux partagent la même extraction de base
  * ([toMatchResult]), qui ne fait que du parsing, sans se soucier de la
  * notion de notif "active".
  *
  * Nécessite que Yann accorde l'accès aux notifications à cette app
  * (permission spéciale, non demandable au runtime contrairement à
- * POST_NOTIFICATIONS — voir le bouton dédié dans MainActivity qui ouvre
+ * POST_NOTIFICATIONS — voir le bouton dédié dans PermissionsActivity qui ouvre
  * directement l'écran système).
  *
  * CONFIRMÉ SUR APPAREIL (test du 12/09, Real Madrid - Rayo Vallecano) :
@@ -196,7 +182,6 @@ class SofascoreNotificationListenerService : NotificationListenerService() {
         } catch (_: Throwable) {
             activeNotifications?.firstOrNull { it.key == key }?.let { cancelNotification(it.key) }
         }
-        SofascoreApiOverridePrefs.remove(applicationContext, key)
         // ORDRE INVERSÉ 23/09/2026 — même raisonnement que onListenerConnected/onNotificationRemoved
         // ci-dessous : removeFromAllNotificationsHistory (qui retire ce match de
         // WidgetAllNotificationsStore ET repousse tout ce qui reste actif) doit tourner AVANT
@@ -313,7 +298,6 @@ class SofascoreNotificationListenerService : NotificationListenerService() {
                 awayScore = match.awayScore,
                 lastScorer = match.lastScorer,
                 status = match.status,
-                apiSource = match.source.name,
                 // Lazy (AUDIT 23/09/2026, see WidgetImageFiles): only extracted when this exact
                 // posting has no image on disk yet — a refill/bootstrap re-pushing every active
                 // match no longer re-extracts (and re-encodes) all their images.
@@ -378,20 +362,9 @@ class SofascoreNotificationListenerService : NotificationListenerService() {
             ?: emptyList()
     }
 
-    /**
-     * CORRIGÉ/ÉTENDU le 16/09/2026 (demandé par Yann) : une notif
-     * supprimée doit aussi faire disparaître l'override éventuellement
-     * configuré pour elle (voir [SofascoreApiOverridePrefs]) — sans quoi un
-     * override resterait indéfiniment stocké pour une clé de notification
-     * qui n'existera jamais plus (Android ne réutilise pas les clés d'une
-     * notif à l'autre). [refresh] recalcule ensuite la notif active parmi
-     * celles qui restent, ce qui arrête au passage le sondage
-     * ApiOverrideFollowService si c'est l'override qui vient d'être
-     * supprimé qui était actif.
-     */
+    /** A removed Sofascore notification: drop it from the history, then [refresh] recomputes the active match. */
     override fun onNotificationRemoved(sbn: StatusBarNotification) {
         if (sbn.packageName == SOFASCORE_PACKAGE) {
-            SofascoreApiOverridePrefs.remove(applicationContext, sbn.key)
             // ORDRE INVERSÉ 23/09/2026 — même raisonnement que dismiss()/onListenerConnected : voir
             // pickLatestAvoidingDuplicate's doc.
             removeFromAllNotificationsHistory(sbn.key, sbn.postTime)
@@ -441,10 +414,7 @@ class SofascoreNotificationListenerService : NotificationListenerService() {
 
     /**
      * Relit les notifications actives, calcule le match à afficher pour
-     * celle qui est active (voir doc de classe), lui superpose l'override
-     * éventuellement configuré (voir [applyOverride]), aligne le sondage
-     * en tâche de fond sur cet override (voir [ApiOverrideFollowService.sync])
-     * et pousse le résultat à la montre — PUIS pousse aussi le widget (voir
+     * celle qui est active (voir doc de classe) et pousse le résultat à la montre — PUIS pousse aussi le widget (voir
      * [pushWidgetMatches]), à partir de TOUTES les notifs actives (pas
      * seulement la cible ci-dessus).
      *
@@ -465,7 +435,6 @@ class SofascoreNotificationListenerService : NotificationListenerService() {
                 WatchSync.sendCleared(this)
                 lastWatchSignature = WATCH_CLEARED
             }
-            ApiOverrideFollowService.sync(this, null, null)
             pushWidgetMatches(emptyList())
             return
         }
@@ -480,21 +449,14 @@ class SofascoreNotificationListenerService : NotificationListenerService() {
             ?: pickLatestAvoidingDuplicate(notifications.sortedByDescending { it.postTime })
             ?: return
 
-        val baseMatch = toMatchResult(target) ?: return
+        val match = toMatchResult(target) ?: return
 
-        val override = SofascoreApiOverridePrefs.get(this, target.key)
-        ApiOverrideFollowService.sync(this, target.key, override)
-        val match = applyOverride(baseMatch, override)
-
-        // Image combinée des deux logos telle que postée par Sofascore
-        // lui-même — voir [extractNotificationImage]. Les noms d'équipe
-        // (homeTeam/awayTeam ci-dessus) et cette image sont TOUJOURS ceux
-        // de Sofascore, même quand un override API est actif : seuls
-        // score/statut peuvent venir de l'API (voir [applyOverride]).
+        // Image combinée des deux logos telle que postée par Sofascore lui-même — voir
+        // [extractNotificationImage].
         // AUDIT 23/09/2026 — only extract/encode the image and wake the watch over Bluetooth when
-        // something it displays actually changed: refresh() also runs on every API-override poll
-        // (every 60 s while one is active), on MainActivity interactions, and after any other
-        // Sofascore match's update, all of which usually leave the watched match untouched.
+        // something it displays actually changed: refresh() also runs on SportActivity
+        // interactions and after any other Sofascore match's update, which usually leave the
+        // watched match untouched.
         // Same posting (key + postTime) = same image; MatchResult is a data class, so its
         // toString covers every displayed field.
         val watchSignature = "${target.key}|${target.postTime}|$match"
@@ -563,12 +525,7 @@ class SofascoreNotificationListenerService : NotificationListenerService() {
     }
 
     /**
-     * Pousse jusqu'à 4 matchs au widget — un par notif Sofascore actuellement active, SANS
-     * l'override API éventuellement configuré (contrairement à la montre, voir [applyOverride]) :
-     * le système d'override ne suit qu'UN SEUL match (celui actif pour la montre) et n'est pas
-     * construit pour en suivre plusieurs à la fois, donc le widget affiche toujours le score/la
-     * période tels que la notif Sofascore elle-même les donne — exactement comme le fait déjà
-     * aujourd'hui tout match qui N'EST PAS le match actif de la montre. Le tri/plafonnement à 4
+     * Pousse au widget un match par notif Sofascore actuellement active. Le tri/plafonnement à 4
      * (priorité aux matchs en cours, un match fini depuis plus de 5 minutes passe après) se fait
      * côté NowBarWidgetProvider (à la fois ici, à l'envoi, et à nouveau au rendu — voir son
      * sortedForWidget pour pourquoi aux deux endroits) : cette fonction se contente de tout
@@ -592,7 +549,6 @@ class SofascoreNotificationListenerService : NotificationListenerService() {
                     awayScore = match.awayScore,
                     lastScorer = match.lastScorer,
                     status = match.status,
-                    apiSource = match.source.name,
                     postTimeMillis = sbn.postTime,
                     title = rawTitle,
                     text = rawText,
@@ -606,42 +562,6 @@ class SofascoreNotificationListenerService : NotificationListenerService() {
         } catch (_: Throwable) {
             // Voir la doc de la fonction : le widget ne doit jamais faire tomber ce service.
         }
-    }
-
-    /**
-     * Superpose au match issu du parsing Sofascore ([base]) le score et/ou
-     * la période venant de l'API choisie pour CETTE notification
-     * ([override]), si elle est configurée ET qu'ApiOverrideFollowService a
-     * déjà obtenu un premier résultat (voir [ApiOverrideCache] — sinon on
-     * retombe sur [base] le temps du premier sondage, plutôt que d'afficher
-     * "vs"/un statut vide). Les noms d'équipe et l'image restent TOUJOURS
-     * ceux de Sofascore : ni [base] ni le résultat API n'y touchent, voir
-     * [refresh].
-     *
-     * [MatchResult.status] est déjà, pour [base] comme pour un résultat
-     * TheSportsDB/Live Tennis API, exprimé dans le vocabulaire brut que
-     * wear/MatchClock.kt sait traduire SELON [MatchResult.source] (voir
-     * SofascoreNotificationParser, doc de [SofascoreNotificationParser.parse])
-     * — remplacer status ET source ensemble quand [SofascoreApiOverride.showPeriod]
-     * est vrai suffit donc à faire traduire ce nouveau statut avec le bon
-     * vocabulaire côté montre, sans rien changer là-bas.
-     */
-    private fun applyOverride(base: MatchResult, override: SofascoreApiOverride?): MatchResult {
-        if (override == null) return base
-        val apiMatch = ApiOverrideCache.get(override) ?: return base
-        return base.copy(
-            homeScore = if (override.showScore) apiMatch.homeScore else base.homeScore,
-            awayScore = if (override.showScore) apiMatch.awayScore else base.awayScore,
-            currentSetHomeGames = if (override.showScore) apiMatch.currentSetHomeGames else base.currentSetHomeGames,
-            currentSetAwayGames = if (override.showScore) apiMatch.currentSetAwayGames else base.currentSetAwayGames,
-            // L'API ne fournit jamais l'info "qui vient de marquer"
-            // (crochets, voir MatchResult.lastScorer) — on l'efface dès que
-            // le score affiché n'est plus celui de Sofascore, pour ne pas
-            // laisser un crochet Sofascore obsolète sur un score API.
-            lastScorer = if (override.showScore) null else base.lastScorer,
-            status = if (override.showPeriod) apiMatch.status else base.status,
-            source = if (override.showPeriod) apiMatch.source else base.source
-        )
     }
 
     /**
@@ -665,9 +585,7 @@ class SofascoreNotificationListenerService : NotificationListenerService() {
 
     /**
      * Liste les matchs Sofascore actuellement dans le centre de
-     * notifications, pour l'écran d'accueil de MainActivity — un par notif
-     * active, avec l'override éventuellement configuré pour chacune (voir
-     * [SofascoreApiOverridePrefs]). Vide si l'accès aux notifications n'est
+     * notifications, pour SportActivity — un par notif active. Vide si l'accès aux notifications n'est
      * pas accordé, ou si aucune notif Sofascore n'est active.
      */
     fun listAvailableMatches(): List<SofascoreMatchOption> {
@@ -680,8 +598,7 @@ class SofascoreNotificationListenerService : NotificationListenerService() {
                 homeTeam = homeTeam,
                 awayTeam = awayTeam,
                 latestLine = latestLine,
-                notifImage = extractNotificationImage(sbn),
-                override = SofascoreApiOverridePrefs.get(applicationContext, sbn.key)
+                notifImage = extractNotificationImage(sbn)
             )
         }
     }
@@ -755,17 +672,11 @@ class SofascoreNotificationListenerService : NotificationListenerService() {
      * des branches connues de MatchClock ne le reconnaît).
      */
     private fun buildRawFallback(homeTeam: String, awayTeam: String, rawLine: String) = MatchResult(
-        id = "sofascore_fallback_raw",
-        source = ApiSource.SPORTS_DB,
         homeTeam = homeTeam,
         awayTeam = awayTeam,
         homeScore = null,
         awayScore = null,
-        date = SportsDbApi.todayUtcDateString(),
-        time = null,
-        status = rawLine,
-        league = "Sofascore",
-        kickoffEpochMillis = null
+        status = rawLine
     )
 
     companion object {
@@ -803,10 +714,9 @@ class SofascoreNotificationListenerService : NotificationListenerService() {
         private var lastWatchSignature: String? = null
 
         /**
-         * Appelé quand Yann change son choix de repli, sauvegarde/retire un
-         * override (MainActivity), ou quand ApiOverrideFollowService obtient
-         * un nouveau résultat de sondage, pour réafficher immédiatement le
-         * résultat sans attendre le prochain événement Sofascore. Sans effet
+         * Appelé quand Yann change le match suivi (SportActivity), pour
+         * réafficher immédiatement le résultat sans attendre le prochain
+         * événement Sofascore. Sans effet
          * si le service n'est pas encore connecté (accès aux notifications
          * pas encore accordé).
          */

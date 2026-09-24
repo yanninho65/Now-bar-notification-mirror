@@ -45,6 +45,14 @@ class PackageUpdateReceiver : BroadcastReceiver() {
 
         forceRebind(context, MirrorNotificationListener::class.java)
         forceRebind(context, SofascoreNotificationListenerService::class.java)
+
+        // Leftovers of the sport-API overrides removed 24/09/2026 (incl. the stored Live Tennis API key).
+        listOf("sofascore_api_overrides", "tennis_api_key").forEach {
+            try {
+                context.deleteSharedPreferences(it)
+            } catch (_: Throwable) {
+            }
+        }
     }
 
     /**

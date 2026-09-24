@@ -4,60 +4,25 @@ import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
-import android.widget.Button
-import android.widget.CompoundButton
-import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import com.google.android.material.switchmaterial.SwitchMaterial
 import com.yann.nowbarmirror.R
 
+/** "Applications à mirrorer": full-screen app list (options and export/import moved to SettingsActivity, 24/09/2026). */
 class AppSelectionActivity : AppCompatActivity() {
 
     private lateinit var recyclerView: RecyclerView
-
-    private val exportLauncher =
-        registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
-            if (uri == null) return@registerForActivityResult
-            try {
-                contentResolver.openOutputStream(uri)?.use { out ->
-                    out.write(SettingsBackup.export(this).toByteArray())
-                }
-                Toast.makeText(this, R.string.export_success, Toast.LENGTH_SHORT).show()
-            } catch (e: Exception) {
-                Toast.makeText(this, R.string.export_failed, Toast.LENGTH_SHORT).show()
-            }
-        }
-
-    private val importLauncher =
-        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-            if (uri == null) return@registerForActivityResult
-            try {
-                val json = contentResolver.openInputStream(uri)?.use { it.bufferedReader().readText() }
-                if (json == null) {
-                    Toast.makeText(this, R.string.import_failed, Toast.LENGTH_SHORT).show()
-                    return@registerForActivityResult
-                }
-                SettingsBackup.import(this, json)
-                refresh()
-                Toast.makeText(this, R.string.import_success, Toast.LENGTH_SHORT).show()
-            } catch (e: Exception) {
-                Toast.makeText(this, R.string.import_failed, Toast.LENGTH_SHORT).show()
-            }
-        }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContentView(R.layout.activity_app_selection)
 
-        // Same edge-to-edge fix as MainActivity: without this the title/switches row
-        // (the very first view here) ends up drawn under the status bar.
+        // Same edge-to-edge fix as MainActivity: without this the title ends up under the status bar.
         ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.root)) { view, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
             view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
@@ -66,35 +31,6 @@ class AppSelectionActivity : AppCompatActivity() {
 
         recyclerView = findViewById(R.id.app_list)
         recyclerView.layoutManager = LinearLayoutManager(this)
-
-        findViewById<SwitchMaterial>(R.id.service_enabled_switch).apply {
-            isChecked = ServicePrefs.isEnabled(this@AppSelectionActivity)
-            setOnCheckedChangeListener { _: CompoundButton, isChecked: Boolean ->
-                ServicePrefs.setEnabled(this@AppSelectionActivity, isChecked)
-            }
-        }
-
-        findViewById<SwitchMaterial>(R.id.latest_mode_fallback_switch).apply {
-            isChecked = LatestModePrefs.isFallbackEnabled(this@AppSelectionActivity)
-            setOnCheckedChangeListener { _: CompoundButton, isChecked: Boolean ->
-                LatestModePrefs.setFallbackEnabled(this@AppSelectionActivity, isChecked)
-            }
-        }
-
-        findViewById<SwitchMaterial>(R.id.widget_actions_switch).apply {
-            isChecked = WidgetActionsPrefs.isEnabled(this@AppSelectionActivity)
-            setOnCheckedChangeListener { _: CompoundButton, isChecked: Boolean ->
-                WidgetActionsPrefs.setEnabled(this@AppSelectionActivity, isChecked)
-            }
-        }
-
-        findViewById<Button>(R.id.export_button).setOnClickListener {
-            exportLauncher.launch("nowbarmirror-settings.json")
-        }
-        findViewById<Button>(R.id.import_button).setOnClickListener {
-            importLauncher.launch(arrayOf("application/json"))
-        }
-
         refresh()
     }
 

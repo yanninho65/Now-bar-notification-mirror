@@ -17,7 +17,7 @@ import androidx.wear.watchface.complications.datasource.ComplicationRequest
  * If the "Notification" complication is also placed (NotificationComplicationService.Presence) and
  * its current entry IS one of these messages (same phone notification key), that message is left
  * out here so it isn't shown twice — [visibleMessages], shared with nothing else: the list screen
- * still shows every message.
+ * still shows every message. Exception (24/09/2026): when it is the ONLY message, it's shown in both.
  */
 class MessagesComplicationService : ComplicationDataSourceService() {
 
@@ -73,7 +73,8 @@ class MessagesComplicationService : ComplicationDataSourceService() {
 
         /** [messages] minus the one the "Notification" complication is currently showing, if placed. */
         fun visibleMessages(context: Context, messages: List<MessageInfo>): List<MessageInfo> {
-            if (messages.isEmpty() || !NotificationComplicationService.Presence.isActive(context)) return messages
+            // A single message stays visible in both complications (Yann, 24/09/2026).
+            if (messages.size < 2 || !NotificationComplicationService.Presence.isActive(context)) return messages
             val latest = when (val read = PhoneDataLayer.readNotification(context)) {
                 is PhoneDataLayer.Read.Success -> read.value
                 PhoneDataLayer.Read.Failed -> NotificationInfoStore.current

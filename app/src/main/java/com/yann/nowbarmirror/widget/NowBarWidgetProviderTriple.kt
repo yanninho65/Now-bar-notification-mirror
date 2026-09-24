@@ -151,7 +151,6 @@ class NowBarWidgetProviderTriple : AppWidgetProvider() {
                 .sortedForWidget(
                     nowMillis = System.currentTimeMillis(),
                     statusOf = { it.status },
-                    apiSourceOf = { it.apiSource },
                     postTimeOf = { it.postTimeMillis }
                 )
                 .filterNot { latestIsSofascore && it.key == latest?.key }

@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Autorisations (24/09/2026) — voir PermissionsActivity. -->
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fillViewport="true"
+    android:background="@color/one_ui_background">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingBottom="24dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/permissions_title"
+            android:textColor="@color/one_ui_text_primary"
+            android:textStyle="bold"
+            android:textSize="26sp"
+            android:paddingHorizontal="20dp"
+            android:paddingTop="20dp"
+            android:paddingBottom="12dp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:layout_marginHorizontal="16dp"
+            android:background="@drawable/bg_card">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/access_button"
+                style="@style/MainMenuButton"
+                android:text="@string/allow_notification_access" />
+
+            <TextView
+                android:id="@+id/access_status"
+                style="@style/MenuStatusText" />
+
+            <View style="@style/MainMenuDivider" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/notif_button"
+                style="@style/MainMenuButton"
+                android:text="@string/allow_app_notifications" />
+
+            <TextView
+                android:id="@+id/notif_status"
+                style="@style/MenuStatusText" />
+
+            <View style="@style/MainMenuDivider" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/watch_link_button"
+                style="@style/MainMenuButton"
+                android:text="@string/watch_link_label" />
+
+            <TextView
+                android:id="@+id/watch_link_status"
+                style="@style/MenuStatusText" />
+
+            <!-- Android 14+ seulement (visibilité gérée en code). -->
+            <View
+                android:id="@+id/full_screen_intent_divider"
+                style="@style/MainMenuDivider"
+                android:visibility="gone" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/full_screen_intent_button"
+                style="@style/MainMenuButton"
+                android:text="@string/allow_full_screen_intent"
+                android:visibility="gone" />
+
+            <TextView
+                android:id="@+id/full_screen_intent_status"
+                style="@style/MenuStatusText"
+                android:visibility="gone" />
+
+        </LinearLayout>
+    </LinearLayout>
+</ScrollView>

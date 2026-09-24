@@ -6,24 +6,17 @@
         NEW 22/09/2026 — "Aff. sur tél." (montre) ouvre maintenant sa notification relais en
         plein écran (voir NowBarWidgetProvider.openEntry) plutôt que comme une notification à
         taper manuellement. Sur Android 14+ (targetSdk 34+, notre cas), cette permission n'est
-        PAS auto-accordée pour une app qui n'est ni téléphonie ni alarme : Yann doit l'activer
-        lui-même une fois (bouton dédié dans MainActivity, écran système "Notifications plein
-        écran" — voir MainActivity.setupHomeTab). Sans cet accord, Android affiche simplement la
-        notification en heads-up normal (comportement identique à avant ce changement) au lieu de
-        l'ouvrir tout seul — aucune régression, juste pas le nouveau comportement tant que ce
-        n'est pas accordé.
+        PAS auto-accordée pour une app qui n'est ni téléphonie ni alarme (écran Autorisations,
+        PermissionsActivity) — et l'installateur peut la réinitialiser à chaque mise à jour. Depuis
+        le 24/09/2026 l'association de la montre (WatchCompanionLink) prend le relais ; le plein
+        écran reste utilisé téléphone verrouillé s'il est accordé.
     -->
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
 
-    <!--
-        Pour le traitement Sofascore (onglet Sport, com.yann.nowbarmirror.sport) — voir
-        README.md, section "Fusion avec Sport Watch Complication". FOREGROUND_SERVICE_DATA_SYNC
-        est requis en plus de FOREGROUND_SERVICE depuis Android 14 (targetSdk 34+) pour déclarer
-        android:foregroundServiceType="dataSync" sur ApiOverrideFollowService ci-dessous.
-    -->
-    <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- Association montre (CompanionDeviceManager, WatchCompanionLink) — facultatif. -->
+    <uses-feature
+        android:name="android.software.companion_device_setup"
+        android:required="false" />
 
     <!--
         Package visibility (Android 11+, applies to any app targeting API 30+): without this,
@@ -64,6 +57,22 @@
         <activity
             android:name=".settings.AppSelectionActivity"
             android:label="@string/app_selection_title"
+            android:exported="false" />
+
+        <!-- NEW 24/09/2026 : écrans ouverts depuis l'écran principal (ex-onglet Sport, options, autorisations). -->
+        <activity
+            android:name=".sport.SportActivity"
+            android:label="@string/sport_title"
+            android:exported="false" />
+
+        <activity
+            android:name=".settings.SettingsActivity"
+            android:label="@string/settings_title"
+            android:exported="false" />
+
+        <activity
+            android:name=".settings.PermissionsActivity"
+            android:label="@string/permissions_title"
             android:exported="false" />
 
         <!-- NEW 24/09/2026 : choix des applis de messagerie (complication montre "Messages"). -->
@@ -120,16 +129,6 @@
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
         </service>
-
-        <!--
-            Sonde en arrière-plan l'API (TheSportsDB/Live Tennis) choisie pour l'override actif de
-            l'onglet Sport, même app fermée — voir ApiOverrideFollowService.kt. exported=false : ce
-            service n'est destiné qu'à cette app (démarré depuis SofascoreNotificationListenerService).
-        -->
-        <service
-            android:name=".sport.ApiOverrideFollowService"
-            android:exported="false"
-            android:foregroundServiceType="dataSync" />
 
         <!--
             FIX (17/09/2026, Yann: "je ne vois que celles apparues après la mise à jour") — see

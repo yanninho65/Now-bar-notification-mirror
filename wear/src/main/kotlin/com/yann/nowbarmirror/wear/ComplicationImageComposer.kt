@@ -345,9 +345,11 @@ object ComplicationImageComposer {
         drawBlackBackground(canvas)
         val shown = messages.take(4)
         if (shown.isEmpty()) {
-            // UPDATED 24/09/2026 (Yann : "une enveloppe en haut et en dessous un zéro").
-            drawEnvelope(canvas, ROUND_CENTER, ROUND_CENTER - 40f, 108f, 72f)
-            drawFittedText(canvas, "0", ROUND_CENTER, ROUND_CENTER + 58f, 88f, 60f, 200f, 6f)
+            // UPDATED 24/09/2026 (Yann: the WhatsApp outline without the handset, same size as
+            // WhatsApp's own complication — measured on his screenshot: glyph ~0.6 r wide, centered
+            // 0.39 r above the middle; count ~0.43 r tall, 0.33 r below).
+            drawChatBubble(canvas, ROUND_CENTER, ROUND_CENTER - 62f, 43f)
+            drawFittedText(canvas, "0", ROUND_CENTER, ROUND_CENTER + 53f, 96f, 70f, 200f, 6f)
             return bitmap
         }
         // (dx, dy) offsets from the center + contact radius — all fit inside the 160 px round.
@@ -383,13 +385,25 @@ object ComplicationImageComposer {
         canvas.drawCircle(ROUND_CENTER, ROUND_CENTER, ROUND_RADIUS, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK })
     }
 
-    /** White outlined envelope (body + flap "V"), with a thin dark outline so it reads on any watch face. */
-    private fun drawEnvelope(canvas: Canvas, cx: Float, cy: Float, width: Float, height: Float) {
-        val rect = RectF(cx - width / 2f, cy - height / 2f, cx + width / 2f, cy + height / 2f)
-        val flap = android.graphics.Path().apply {
-            moveTo(rect.left + 6f, rect.top + 6f)
-            lineTo(cx, cy + height * 0.12f)
-            lineTo(rect.right - 6f, rect.top + 6f)
+    /**
+     * WhatsApp-style chat bubble outline without the handset: a circle of [radius] around
+     * ([cx], [cy]) whose bottom-left opens into a small pointed tail. White stroke with a thin
+     * dark outline, same style as the rest of the complication glyphs.
+     */
+    private fun drawChatBubble(canvas: Canvas, cx: Float, cy: Float, radius: Float) {
+        fun onCircle(deg: Double) = Pair(
+            cx + radius * Math.cos(Math.toRadians(deg)).toFloat(),
+            cy + radius * Math.sin(Math.toRadians(deg)).toFloat()
+        )
+        // Canvas angles: 0° = right, clockwise. The tail sits between 112° and 152° (bottom-left).
+        val (sx, sy) = onCircle(112.0)
+        val (ex, ey) = onCircle(152.0)
+        val bubble = android.graphics.Path().apply {
+            moveTo(sx, sy)
+            lineTo(cx - radius * 1.02f, cy + radius * 1.02f)   // tail tip
+            lineTo(ex, ey)
+            arcTo(RectF(cx - radius, cy - radius, cx + radius, cy + radius), 152f, 320f, false)
+            close()
         }
         val outline = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
@@ -399,10 +413,8 @@ object ComplicationImageComposer {
             strokeWidth = 12f
         }
         val stroke = Paint(outline).apply { color = Color.WHITE; strokeWidth = 7f }
-        listOf(outline, stroke).forEach { paint ->
-            canvas.drawRoundRect(rect, 10f, 10f, paint)
-            canvas.drawPath(flap, paint)
-        }
+        canvas.drawPath(bubble, outline)
+        canvas.drawPath(bubble, stroke)
     }
 
     private val INITIAL_COLORS = intArrayOf(

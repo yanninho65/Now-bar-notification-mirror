@@ -690,22 +690,11 @@ object SofascoreNotificationParser {
      * d'arriver dans cette fonction ; [setSportFinished] ne reste utile
      * qu'en repli si cette ligne existait sans score exploitable (voir sa
      * doc). Pas de score de jeux du set en cours (Sofascore ne le donne pas
-     * en direct dans ces notifs) : [MatchResult.currentSetHomeGames]/
-     * [MatchResult.currentSetAwayGames] restent null.
+     * en direct dans ces notifs).
      *
-     * MODIFIÉ le 20/09/2026 (demandé par Yann : "pour tennis, arrête de mettre en direct, mets les
-     * sets comme les autres sports") — avant cette date, retournait `source = LIVE_TENNIS` et
-     * `status = "live"/"completed"`, ce qui faisait passer ce résultat par
-     * wear/MatchClock.kt#tennisLabel -> liveSetLabel : comme [currentSetHomeGames]/
-     * [currentSetAwayGames] ci-dessus ne sont jamais renseignés par ce repli Sofascore, liveSetLabel
-     * retombait TOUJOURS sur "En direct", jamais sur un vrai score de set. Retourne maintenant
-     * `source = SPORTS_DB` et un statut "S<N>"/"Fin" — exactement le même gabarit que
-     * [parseSetTally] (tennis de table/volley) : traité tel quel par la branche générique de
-     * wear/MatchClock.kt#label / SofascoreMatchPresentation.kt#periodLabel (repli `else -> status`,
-     * déjà utilisé pour "S1".."S5"), donc aucune modification nécessaire côté montre/widget pour ce
-     * changement précis. Ne touche PAS le chemin d'override Live Tennis API
-     * (ApiOverrideFollowService/LiveTennisApi.kt), qui continue d'utiliser `LIVE_TENNIS` et
-     * `tennisLabel` normalement — seul ce repli de parsing direct des notifs Sofascore change.
+     * Statut "S<N>"/"Fin" (20/09/2026, Yann : "mets les sets comme les autres sports") — même
+     * gabarit que [parseSetTally], traité par la branche générique de wear/MatchClock.kt#label /
+     * SofascoreMatchPresentation.kt#periodLabel.
      */
     private fun parseTennis(
         homeTeam: String,
@@ -728,18 +717,12 @@ object SofascoreNotificationParser {
         val finished = lines.any { setSportFinished.containsMatchIn(it) }
         val status = if (finished) "Fin" else "S${homeSets + awaySets + 1}"
         return MatchResult(
-            id = "sofascore_fallback",
-            source = ApiSource.SPORTS_DB,
             homeTeam = homeTeam,
             awayTeam = awayTeam,
             homeScore = homeSets.toString(),
             awayScore = awaySets.toString(),
             lastScorer = lastSetWinner,
-            date = SportsDbApi.todayUtcDateString(),
-            time = null,
-            status = status,
-            league = "Sofascore",
-            kickoffEpochMillis = null
+            status = status
         )
     }
 
@@ -769,18 +752,12 @@ object SofascoreNotificationParser {
         val finished = lines.any { setSportFinished.containsMatchIn(it) }
         val status = if (finished) "Fin" else "S${mostRecentSetOrdinal + 1}"
         return MatchResult(
-            id = "sofascore_fallback",
-            source = ApiSource.SPORTS_DB,
             homeTeam = homeTeam,
             awayTeam = awayTeam,
             homeScore = firstScore.toString(),
             awayScore = secondScore.toString(),
             lastScorer = lastSetWinner,
-            date = SportsDbApi.todayUtcDateString(),
-            time = null,
-            status = status,
-            league = "Sofascore",
-            kickoffEpochMillis = null
+            status = status
         )
     }
 
@@ -792,17 +769,11 @@ object SofascoreNotificationParser {
         status: String,
         lastScorer: String? = null
     ) = MatchResult(
-        id = "sofascore_fallback",
-        source = ApiSource.SPORTS_DB,
         homeTeam = homeTeam,
         awayTeam = awayTeam,
         homeScore = homeScore,
         awayScore = awayScore,
         lastScorer = lastScorer,
-        date = SportsDbApi.todayUtcDateString(),
-        time = null,
-        status = status,
-        league = "Sofascore",
-        kickoffEpochMillis = null
+        status = status
     )
 }

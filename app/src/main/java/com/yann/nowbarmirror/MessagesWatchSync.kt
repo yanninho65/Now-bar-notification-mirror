@@ -108,14 +108,13 @@ object MessagesWatchSync {
 
     private data class AppEntry(val packageName: String, val label: String, val count: Int)
 
-    /** Selected message apps installed (launchable) on the phone, with counts; most unread first, then by name. */
+    /** Selected message apps installed (launchable) on the phone, with counts, in Yann's order (MessageAppsActivity, 24/09/2026). */
     private fun appEntries(context: Context, active: Array<StatusBarNotification>?): List<AppEntry> {
         val pm = context.packageManager
         val notifs = messageAppNotifications(context, active).groupBy { it.packageName }
-        return MessageAppsPrefs.get(context)
+        return MessageAppsPrefs.getOrdered(context)
             .filter { it != context.packageName && pm.getLaunchIntentForPackage(it) != null }
             .map { pkg -> AppEntry(pkg, appName(context, pkg), unreadCount(pkg, notifs[pkg].orEmpty())) }
-            .sortedWith(compareBy<AppEntry>({ -it.count }, { it.label.lowercase() }))
     }
 
     /**

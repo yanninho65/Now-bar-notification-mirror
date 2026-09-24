@@ -1,9 +1,5 @@
 package com.yann.nowbarmirror.widget
 
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
-
 /**
  * Phone-side equivalents of wear/MatchScore.kt (scoreText) and wear/MatchClock.kt (label), used
  * to render each Sofascore match tile in the widget's Sport view (see
@@ -13,15 +9,8 @@ import java.util.Locale
  * rather than a shared module — kept identical in spirit to wear/MatchClock.kt's vocabulary
  * mapping. See that file for the full reasoning/sourcing behind each status code; mirror any
  * change there here too.
- *
- * ONE simplification versus the watch: [periodLabel] doesn't reproduce wear/MatchClock.kt's
- * `liveSetLabel` ("3e set 4-3", tennis only) — a live tennis match here just shows "En direct",
- * since a widget tile this small (see widget_now_bar.xml/widget_match_1..4) has no comfortable
- * room for a 3rd line of that length next to 3 other tiles.
  */
 object SofascoreMatchPresentation {
-
-    private val kickoffTimeFormat = SimpleDateFormat("HH:mm", Locale.FRANCE)
 
     /** "2-1" (brackets around whichever side just scored/won the last set), or "vs" if unknown — see wear/MatchScore.kt/scoreText. */
     fun scoreText(homeScore: String?, awayScore: String?, lastScorer: String?): String {
@@ -31,16 +20,13 @@ object SofascoreMatchPresentation {
         return "$home-$away"
     }
 
-    /** Short period/status label ("P1"/"MT"/"Fin"...) — mirrors wear/MatchClock.kt/label's vocabulary mapping, see that file for the sourcing behind each code. [kickoffEpochMillis] is currently always null from the widget (see SofascoreWidgetStore — not carried over, since an ACTIVE Sofascore notification is never for a match that hasn't started yet), so the "kickoff time" branches below fall back to a bare "À venir". */
-    fun periodLabel(status: String, apiSource: String, kickoffEpochMillis: Long?): String {
-        if (apiSource.equals("LIVE_TENNIS", ignoreCase = true)) return tennisLabel(status, kickoffEpochMillis)
-
+    /** Short period/status label ("P1"/"MT"/"Fin"...) — mirrors wear/MatchClock.kt/label's vocabulary mapping, see that file for the sourcing behind each code. */
+    fun periodLabel(status: String): String {
         val trimmed = status.trim()
         return when {
             trimmed.isBlank() -> ""
 
-            trimmed.equals("NS", true) || trimmed.equals("TBD", true) || trimmed.contains("Not Started", true) ->
-                kickoffEpochMillis?.let { "À venir · ${kickoffTimeFormat.format(Date(it))}" } ?: "À venir"
+            trimmed.equals("NS", true) || trimmed.equals("TBD", true) || trimmed.contains("Not Started", true) -> "À venir"
 
             trimmed.equals("HT", true) -> "MT"
             trimmed.equals("1H", true) || trimmed.contains("1H", true) -> "P1"
@@ -83,31 +69,14 @@ object SofascoreMatchPresentation {
         }
     }
 
-    private fun tennisLabel(status: String, kickoffEpochMillis: Long?): String {
-        val trimmed = status.trim()
-        return when {
-            trimmed.equals("upcoming", true) ->
-                kickoffEpochMillis?.let { "À venir · ${kickoffTimeFormat.format(Date(it))}" } ?: "À venir"
-            trimmed.equals("live", true) -> "En direct"
-            trimmed.equals("completed", true) -> "Fin"
-            trimmed.equals("cancelled", true) -> "Annulé"
-            trimmed.isBlank() -> ""
-            else -> trimmed
-        }
-    }
-
     /**
      * The exact set of terminal statuses SofascoreNotificationParser.parse can produce — see its
      * class doc — used to decide the widget's live-first sort order (NowBarWidgetProvider.
-     * sortedForWidget). NOT the same test as MatchResult.isFinished in Models.kt: that one is
-     * tuned for TheSportsDB/Live Tennis API's own vocabulary ("Match Finished", "Cancelled"...)
-     * and doesn't recognise "Fin" (the set-tally sports' own finished status, see
-     * SofascoreNotificationParser.parseSetTally) — using it here would silently miss those.
+     * sortedForWidget).
      */
     fun isMatchFinished(status: String): Boolean =
         status.equals("FT", ignoreCase = true) ||
             status.equals("Fin", ignoreCase = true) ||
-            status.equals("completed", ignoreCase = true) ||
             // "AP" : score final foot avec tirs au but (voir SofascoreNotificationParser.kt/
             // matchFinishedWithShootout, ajouté le 20/09/2026) — sans cette entrée, un tel match
             // resterait classé "en cours" dans le tri du widget (sortedForWidget) indéfiniment.

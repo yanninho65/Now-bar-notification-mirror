@@ -1,65 +1,32 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
+<!--
+    Écran principal (24/09/2026) : plus d'onglets, cinq entrées qui ouvrent chacune leur écran —
+    voir MainActivity. Les réglages, l'export/import et les autorisations ont quitté la liste des
+    applications pour que celle-ci soit en plein écran.
+-->
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
+    android:fillViewport="true"
     android:background="@color/one_ui_background">
 
-    <!--
-         Pas de android:id sur cet élément racine (LinearLayout) : depuis la
-         fusion avec Sport Watch Complication, l'onglet Sport utilise
-         ViewBinding, où la racine d'un layout est déjà exposée automatiquement
-         via binding.root — un id explicite ici ferait doublon avec ce nom
-         réservé. Voir README.md, section "Fusion avec Sport Watch Complication".
-    -->
-
-    <TextView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="@string/app_name"
-        android:textColor="@color/one_ui_text_primary"
-        android:textStyle="bold"
-        android:textSize="28sp"
-        android:paddingHorizontal="20dp"
-        android:paddingTop="24dp"
-        android:paddingBottom="8dp" />
-
-    <!--
-         Onglet Sport (voir README.md, section "Fusion avec Sport Watch
-         Complication") : bascule entre l'écran d'accueil historique de Now
-         Bar Mirror (mirroring générique) et l'écran Sofascore repris tel
-         quel de Sport Watch Complication, traité à part comme demandé par
-         Yann. Les deux blocs de contenu ci-dessous (home_tab_content /
-         sport_tab_content) occupent le même emplacement, un seul visible à
-         la fois — voir MainActivity.selectTab().
-    -->
-    <com.google.android.material.tabs.TabLayout
-        android:id="@+id/tab_layout"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        app:tabMode="fixed"
-        app:tabGravity="fill">
-
-        <com.google.android.material.tabs.TabItem
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/tab_home" />
-
-        <com.google.android.material.tabs.TabItem
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/tab_sport" />
-
-    </com.google.android.material.tabs.TabLayout>
-
-    <!-- Onglet "Accueil" : contenu historique de Now Bar Mirror, inchangé. -->
     <LinearLayout
-        android:id="@+id/home_tab_content"
         android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:orientation="vertical">
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingBottom="24dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/app_name"
+            android:textColor="@color/one_ui_text_primary"
+            android:textStyle="bold"
+            android:textSize="28sp"
+            android:paddingHorizontal="20dp"
+            android:paddingTop="24dp"
+            android:paddingBottom="8dp" />
 
         <TextView
             android:layout_width="match_parent"
@@ -78,95 +45,41 @@
             android:background="@drawable/bg_card">
 
             <com.google.android.material.button.MaterialButton
-                android:id="@+id/access_button"
-                style="@style/Widget.MaterialComponents.Button.TextButton"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:gravity="start|center_vertical"
-                android:padding="16dp"
-                android:text="@string/allow_notification_access"
-                android:textAllCaps="false"
-                android:textColor="@color/one_ui_text_primary"
-                android:textSize="16sp" />
-
-            <View
-                android:layout_width="match_parent"
-                android:layout_height="1dp"
-                android:layout_marginStart="16dp"
-                android:background="@color/one_ui_divider" />
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/notif_button"
-                style="@style/Widget.MaterialComponents.Button.TextButton"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:gravity="start|center_vertical"
-                android:padding="16dp"
-                android:text="@string/allow_app_notifications"
-                android:textAllCaps="false"
-                android:textColor="@color/one_ui_text_primary"
-                android:textSize="16sp" />
-
-            <View
-                android:layout_width="match_parent"
-                android:layout_height="1dp"
-                android:layout_marginStart="16dp"
-                android:background="@color/one_ui_divider" />
-
-            <!--
-                NEW 22/09/2026 — visibilité gérée en code (MainActivity.setupHomeTab) : n'existe
-                que sur Android 14+, seule version où cette permission n'est pas auto-accordée.
-                Voir NowBarWidgetProvider.openEntry pour ce que ça débloque.
-            -->
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/full_screen_intent_button"
-                style="@style/Widget.MaterialComponents.Button.TextButton"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:gravity="start|center_vertical"
-                android:padding="16dp"
-                android:text="@string/allow_full_screen_intent"
-                android:textAllCaps="false"
-                android:textColor="@color/one_ui_text_primary"
-                android:textSize="16sp"
-                android:visibility="gone" />
-
-            <View
-                android:id="@+id/full_screen_intent_divider"
-                android:layout_width="match_parent"
-                android:layout_height="1dp"
-                android:layout_marginStart="16dp"
-                android:background="@color/one_ui_divider"
-                android:visibility="gone" />
-
-            <com.google.android.material.button.MaterialButton
                 android:id="@+id/app_selection_button"
-                style="@style/Widget.MaterialComponents.Button.TextButton"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:gravity="start|center_vertical"
-                android:padding="16dp"
-                android:text="@string/app_selection_title"
-                android:textAllCaps="false"
-                android:textColor="@color/one_ui_primary"
-                android:textStyle="bold"
-                android:textSize="16sp" />
+                style="@style/MainMenuButton"
+                android:text="@string/app_selection_title" />
+
+            <View style="@style/MainMenuDivider" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/sport_button"
+                style="@style/MainMenuButton"
+                android:text="@string/sport_title" />
+
+            <View style="@style/MainMenuDivider" />
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/message_apps_button"
-                style="@style/Widget.MaterialComponents.Button.TextButton"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:gravity="start|center_vertical"
-                android:padding="16dp"
-                android:text="@string/message_apps_title"
-                android:textAllCaps="false"
-                android:textColor="@color/one_ui_primary"
-                android:textStyle="bold"
-                android:textSize="16sp" />
+                style="@style/MainMenuButton"
+                android:text="@string/message_apps_title" />
+
+            <View style="@style/MainMenuDivider" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/settings_button"
+                style="@style/MainMenuButton"
+                android:text="@string/settings_title" />
+
+            <View style="@style/MainMenuDivider" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/permissions_button"
+                style="@style/MainMenuButton"
+                android:text="@string/permissions_title" />
 
         </LinearLayout>
 
+        <!-- Résumé des autorisations (MainActivity.refreshStatus). -->
         <TextView
             android:id="@+id/status_text"
             android:layout_width="match_parent"
@@ -176,222 +89,5 @@
             android:paddingHorizontal="20dp"
             android:paddingTop="20dp" />
 
-        <!-- NEW 22/09/2026 — visibilité gérée en code, voir full_screen_intent_button ci-dessus. -->
-        <TextView
-            android:id="@+id/full_screen_intent_status_text"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:textColor="@color/one_ui_text_secondary"
-            android:textSize="14sp"
-            android:paddingHorizontal="20dp"
-            android:paddingTop="8dp"
-            android:visibility="gone" />
-
     </LinearLayout>
-
-    <!--
-         Onglet "Sport" : repris tel quel de Sport Watch Complication
-         (mobile/activity_main.xml), Sofascore traité à part de la liste
-         AppMirrorPrefs générique — voir MainActivity et le package
-         com.yann.nowbarmirror.sport. visibility="gone" par défaut : seul
-         l'onglet Accueil est visible à l'ouverture.
-    -->
-    <LinearLayout
-        android:id="@+id/sport_tab_content"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:orientation="vertical"
-        android:padding="16dp"
-        android:visibility="gone">
-
-        <Button
-            android:id="@+id/buttonNotificationAccess"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="8dp"
-            android:text="Activer l'accès aux notifications (repli Sofascore)" />
-
-        <LinearLayout
-            android:id="@+id/searchControls"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:visibility="gone">
-
-            <RadioGroup
-                android:id="@+id/radioApi"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:layout_marginBottom="8dp">
-
-                <RadioButton
-                    android:id="@+id/radioApiSportsDb"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="TheSportsDB"
-                    android:checked="true" />
-
-                <RadioButton
-                    android:id="@+id/radioApiTennis"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="Live Tennis API" />
-
-            </RadioGroup>
-
-            <RadioGroup
-                android:id="@+id/radioSportsDbSport"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:layout_marginBottom="8dp">
-
-                <RadioButton
-                    android:id="@+id/radioSdbAll"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Tous sports"
-                    android:checked="true" />
-
-                <RadioButton
-                    android:id="@+id/radioSdbSoccer"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Football" />
-
-                <RadioButton
-                    android:id="@+id/radioSdbBasketball"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Basketball" />
-
-                <RadioButton
-                    android:id="@+id/radioSdbHandball"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Handball" />
-
-                <RadioButton
-                    android:id="@+id/radioSdbRugby"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Rugby" />
-
-                <RadioButton
-                    android:id="@+id/radioSdbVolleyball"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Volleyball" />
-
-            </RadioGroup>
-
-            <LinearLayout
-                android:id="@+id/tennisApiKeyRow"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:layout_marginBottom="8dp"
-                android:visibility="gone">
-
-                <EditText
-                    android:id="@+id/editTennisApiKey"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:hint="Clé Live Tennis API"
-                    android:inputType="textPassword"
-                    android:singleLine="true" />
-
-                <Button
-                    android:id="@+id/buttonSaveTennisApiKey"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Enregistrer la clé" />
-
-            </LinearLayout>
-
-            <RadioGroup
-                android:id="@+id/radioSearchMode"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:layout_marginBottom="8dp">
-
-                <RadioButton
-                    android:id="@+id/radioModeTeam"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="Équipe"
-                    android:checked="true" />
-
-                <RadioButton
-                    android:id="@+id/radioModePlayer"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="Joueur" />
-
-                <RadioButton
-                    android:id="@+id/radioModeLeague"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="Ligue" />
-
-            </RadioGroup>
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal">
-
-                <EditText
-                    android:id="@+id/editSearch"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:hint="Nom d'équipe (ex. PSG)"
-                    android:inputType="text"
-                    android:imeOptions="actionSearch"
-                    android:singleLine="true" />
-
-                <Button
-                    android:id="@+id/buttonSearch"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Rechercher" />
-
-            </LinearLayout>
-
-            <Button
-                android:id="@+id/buttonBackToSearch"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:text="← Retour à l'accueil" />
-
-        </LinearLayout>
-
-        <TextView
-            android:id="@+id/textStatus"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:textStyle="italic"
-            android:textColor="@color/one_ui_text_secondary" />
-
-        <androidx.recyclerview.widget.RecyclerView
-            android:id="@+id/recyclerView"
-            android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="1"
-            android:layout_marginTop="8dp" />
-
-    </LinearLayout>
-
-</LinearLayout>
+</ScrollView>

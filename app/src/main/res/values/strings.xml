@@ -7,14 +7,13 @@
          téléphone poste quand on demande à voir une entrée depuis la montre. -->
     <string name="open_on_phone_channel_name">Ouvrir depuis la montre</string>
     <string name="open_on_phone_channel_description">Notification posée quand la pilule \"Aff. sur tél.\" est utilisée depuis la montre</string>
-    <string name="open_settings">Notification access</string>
     <!-- NEW 22/09/2026 — bouton donnant accès à l'écran système "Notifications plein écran"
          (Android 14+), nécessaire pour que "Aff. sur tél." depuis la montre ouvre directement la
          cible sur le téléphone au lieu de poser une notification à taper (voir
          NowBarWidgetProvider.openEntry). N'est affiché que sur Android 14+ (voir MainActivity). -->
-    <string name="allow_full_screen_intent">Autoriser l\'ouverture plein écran (\"Aff. sur tél.\" depuis la montre)</string>
-    <string name="full_screen_intent_enabled">✓ Ouverture plein écran activée</string>
-    <string name="full_screen_intent_disabled">⚠ Ouverture plein écran non activée — \"Aff. sur tél.\" restera à taper manuellement</string>
+    <string name="allow_full_screen_intent">Ouverture plein écran (téléphone verrouillé)</string>
+    <string name="full_screen_intent_enabled">✓ Activée</string>
+    <string name="full_screen_intent_disabled">Non activée — facultatif si la montre est associée (l\'installateur la retire parfois à chaque mise à jour)</string>
     <string name="service_name">Now Bar Mirror notification listener</string>
     <string name="sport_service_name">Now Bar Mirror — Sport (Sofascore)</string>
     <string name="invert_title_text_label">Titre ↔ texte</string>
@@ -31,9 +30,19 @@
     <string name="main_description">Cette app reflète la dernière notification reçue dans une notification persistante compatible Now Bar.\n\nElle nécessite l’accès aux notifications.</string>
     <string name="allow_notification_access">Autoriser l’accès aux notifications</string>
     <string name="allow_app_notifications">Autoriser les notifications de l’app</string>
-    <string name="status_enabled">✓ Accès aux notifications activé</string>
-    <string name="status_disabled">⚠ Accès aux notifications non activé</string>
 
-    <string name="tab_home">Accueil</string>
-    <string name="tab_sport">Sport</string>
+    <!-- Écran principal et sous-écrans (24/09/2026). -->
+    <string name="sport_title">Sport</string>
+    <string name="settings_title">Paramètres</string>
+    <string name="permissions_title">Autorisations</string>
+    <string name="permissions_all_ok">✓ Toutes les autorisations sont accordées</string>
+    <string name="permissions_missing">⚠ %1$d autorisation(s) manquante(s) — voir Autorisations</string>
+    <string name="status_granted">✓ Accordé</string>
+    <string name="status_not_granted">⚠ Non accordé</string>
+    <string name="access_mirror">Mirroring</string>
+    <string name="access_sport">Sport</string>
+    <string name="watch_link_label">Associer la montre (\"Aff. sur tél.\")</string>
+    <string name="watch_link_ok">✓ Montre associée — \"Aff. sur tél.\" ouvre directement, même après une mise à jour</string>
+    <string name="watch_link_missing">⚠ Non associée — choisis ta Galaxy Watch dans la liste</string>
+    <string name="sport_access_missing">Active l\'accès aux notifications « Sport » dans Autorisations pour voir tes matchs Sofascore.</string>
 </resources>

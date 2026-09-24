@@ -152,7 +152,6 @@ class NowBarWidgetProviderCompact : AppWidgetProvider() {
                         .sortedForWidget(
                             nowMillis = System.currentTimeMillis(),
                             statusOf = { it.status },
-                            apiSourceOf = { it.apiSource },
                             postTimeOf = { it.postTimeMillis }
                         )
                         .filterNot { latest != null && latest.kind == WidgetAllNotificationsStore.Kind.SOFASCORE_MATCH && it.key == latest.key }
