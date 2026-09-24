@@ -1,199 +1,142 @@
 # Now Bar Mirror
 
-Android app for a Samsung Galaxy phone + Galaxy Watch pair, two independent jobs:
+Android app for Yann's Samsung Galaxy phone + Galaxy Watch. Two-module Gradle project: phone app `app/`, Wear OS app `wear/` (same `applicationId` `com.yann.nowbarmirror`, same signing key — mandatory for the Data Layer).
 
-1. **Notification mirroring** — mirrors selected apps' notifications into persistent notification(s) eligible for Samsung One UI / Android Live Update surfaces, plus three lock-screen widgets and a watch-face complication.
-2. **Live sport scores** — reads Sofascore's own notifications and drives a separate Wear OS watch-face complication, optionally refined against TheSportsDB or the Live Tennis API.
+Two independent jobs, two tabs of one screen (**Accueil** / **Sport**):
 
-Two tabs of one screen (**Accueil** / **Sport**), sharing only what genuinely overlaps (see [Architecture](#architecture)). Two-module Gradle project: phone app (`app/`) and Wear OS app (`wear/`).
+1. **Notification mirroring** (Accueil) — mirrors selected apps' notifications into persistent notifications eligible for the Samsung Now Bar, feeds three lock-screen widgets and the watch's **"Notification"** complication.
+2. **Live sport scores** (Sport) — parses Sofascore's own notifications and drives the watch's **"Score en direct"** complication (optionally refined by TheSportsDB / Live Tennis API).
 
-## Working on this repo
+This README is a snapshot of current behavior for the next working session — not a changelog, no dates/quotes/test lists. Update it only when Yann asks.
 
-Public repo — clone directly rather than through any synced copy (which can lag behind a recent push):
+## Session workflow (read first)
+
+- Clone directly (public, no auth, branch `main`): `git clone https://github.com/yanninho65/Now-bar-notification-mirror.git`. Never push.
+- Deliver changed files reproducing the repo tree — a zip if more than 2 files — never a patch. List explicitly any file Yann must **delete** by hand on GitHub (uploads can't delete).
+- No Android SDK, no Google Maven in the sandbox. Real build = GitHub Actions (see [Build](#build)). **Before delivering, run the type-check**: `bash tools/compile-check/check.sh` from the repo root (downloads kotlinc 2.2.20 + android-36.jar on first run, then compiles `app/` minus UI files and `wear/` against `tools/compile-check/stubs/`). 0 errors = Kotlin-level OK; resources/manifest/real library signatures still only checked by CI. If code starts using a new androidx/Play Services API, add it to the stubs (and check the baseline compiles first to tell stub gaps from real errors).
+- Yann works from his phone, so no logcat: some error paths show a `Toast` ("Widget: …") as a temporary diagnostic.
+- Code comments are long and dated (history of each fix, Yann's quotes). Keep new comments shorter; don't rewrite old ones needlessly.
+
+## Architecture at a glance
 
 ```
-git clone https://github.com/yanninho65/Now-bar-notification-mirror.git
+Phone                                                         Watch
+─────                                                         ─────
+MirrorNotificationListener ──┐                                PhoneDataListenerService
+  (apps set LATEST/ALL)      ├─► WidgetAllNotificationsStore      ├─ /match        → MatchScoreStore       → ScoreComplicationService
+SofascoreNotificationListener┘    (history, 6/kind)               └─ /notification → NotificationInfoStore → NotificationComplicationService
+  (com.sofascore.results)  ──► SofascoreWidgetStore (6 matches)                                              → NotificationDetailActivity
+                                   │                                                                         PhoneRelay (action/dismiss/open)
+            NowBarWidgetProvider.requestUpdate()  (coalesced, 300 ms)                                              │
+                                   ▼                                                                               │
+            refreshAllNow(): syncWatchToLatest() → WatchNotificationSync (/notification)                           │
+                             4x1 + Compact 4x2 + Triple 4x2 widgets                                                │
+            SofascoreNotificationListenerService.refresh() → WatchSync (/match)                                    │
+            WearActionRelayService ◄── /notifdetail/{action,dismiss,open} ─────────────────────────────────────────┘
 ```
 
-No auth needed; default branch `main`. No local Android SDK in most working sessions — see [Build](#build) (GitHub Actions, then manual install — no local `gradle build`/emulator round-trip).
+Single source of truth: **"Dernière notif"** (widget LATEST view, the watch "Notification" complication, the detail screen) is always `WidgetAllNotificationsStore.get().first()` — never a separate store.
 
-Deliver changes as updated files reproducing the repo's folder structure (zip if more than 2 files), never a patch, never pushed to GitHub (Yann does that himself). Update this README only when asked — keep it a snapshot of current behavior, not a changelog: no dates, no quotes, no test checklists, no "next steps".
+## Phone — notification mirroring (`MirrorNotificationListener`)
 
-## Accueil tab — notification mirroring
+- Ignores its own notifications, ongoing, group summaries, media playback (`isMirrorableShape`). Mirrors only apps chosen in **Applications à mirorer**: **LATEST** (one shared mirror id `9001`, replaced by the most recent LATEST-mode post) or **ALL** (one mirror per original, ids from `9100`).
+- Per-app "Titre ↔ texte" swap applies to the Now Bar mirror only — widgets/watch always show the original title/text.
+- Copies title, text, image (`NotificationImageExtractor`: MessagingStyle photo → `EXTRA_PICTURE` → `getLargeIcon()` → `EXTRA_LARGE_ICON`), up to 3 actions (original `PendingIntent`s). Android 16+: promoted-ongoing request + Samsung ongoing-activity meta-data.
+- Deletion sync both ways (user swipe of a mirror = `REASON_CANCEL`/`REASON_CANCEL_ALL` only). "Revenir à la précédente" (default on): dismissing the LATEST slot promotes the next still-active one.
+- On (re)connect (`rebuildStateFromActiveNotifications`): rebuilds in-memory mirror bookkeeping from posted mirrors' extras (`mirror.original.key`), drops orphan mirrors, prunes the widget history against `getActiveNotifications()`, bootstraps mirrors for already-active notifications, then one batched `refillAllNotifsHistory`. `PackageUpdateReceiver` forces a rebind of both listeners after an app update.
+- `isEligibleGeneric` = shape filters + not Sofascore + mode ≠ NONE: defines what counts in "Toutes notifs" and its "+X" badge (`WidgetAllNotificationsStore.saveActiveGenericCount`).
+- Battery gating: `onNotificationPosted` reads the app mode first and returns for NONE before any `getActiveNotifications()`; `onNotificationRemoved` only prunes/refills/refreshes when the removed entry was tracked or is eligible; Sofascore removals are left to the Sofascore listener.
+- "Service actif" switch pauses without revoking access. Settings export/import as JSON (`SettingsBackup`).
 
-Three widgets exist (4×1 `NowBarWidgetProvider`, 4×2 `NowBarWidgetProviderCompact`, 4×2 double-row `NowBarWidgetProviderTriple` — see [Lock-screen widgets](#lock-screen-widgets)). `SofascoreWidgetStore` keeps 6 matches (`MAX_SLOTS`); `WidgetAllNotificationsStore` keeps 6 entries **per kind** (`MAX_SLOTS_PER_KIND`, generic and Sofascore capped independently so a burst of one kind can never crowd the other out of the shared history). Either way the extra slot is a reserve: a row that filters out the current "dernière notif" entry still falls back to a full 5 tiles instead of 4. Both stores also separately persist the TRUE, uncapped count of currently active entries of their own kind (`WidgetAllNotificationsStore.getActiveGenericCount`/`SofascoreWidgetStore.getActiveCount`, refreshed on every relevant post/removal/reconnect event — never just derived from the capped 6-slot list) — this is what lets `NowBarWidgetProviderTriple`'s own overflow badges (see below) say how many more entries actually exist, not just how many the 6-slot cap happens to still be holding.
+## Phone — Sport (`sport.SofascoreNotificationListenerService`)
 
-- `NotificationListenerService` (`MirrorNotificationListener`), ignoring its own notifications, ongoing notifications, and group-summary bundles.
-- Only mirrors apps explicitly selected in **Applications à mirrorer**. Per app: **Dernière notif (LATEST)** — one shared mirror slot across all LATEST-mode apps, replaced by whichever posts most recently — or **Toutes (ALL)** — every distinct notification gets its own persistent mirror.
-- Per-app "Titre ↔ texte" checkbox swaps which field is the title, but only for the real Now Bar pill/mirror popup — the lock-screen widget always shows the notification's original title/text regardless.
-- Copies title, text, large icon/contact image (or app icon fallback), and up to 3 action buttons, reusing their original `PendingIntent`s.
-- Mirror ↔ original deletion sync both ways (a LATEST-slot swap/ALL-mode content update is not a "deletion", so doesn't trigger this).
-- "Revenir à la précédente après suppression" (default on): dismissing the shared LATEST slot re-posts it with the next most recent still-active survivor instead of just clearing it.
-- On listener (re)connect, and right after an app update (`PackageUpdateReceiver` forces a rebind since Android doesn't reliably re-fire `onListenerConnected()` after an in-place update), catches up on any already-active eligible notification instead of only reacting to new ones. "Dernière notif" (widget + watch complication) needs no separate catch-up: it's derived live from `WidgetAllNotificationsStore`, itself self-healed against `getActiveNotifications()` on every reconnect (see below).
-- "Service actif" switch pauses mirroring without revoking notification access. Settings (modes, invert flags, service state, widget-actions flag) export/import as JSON via the system file picker.
-- Android 16+: requests a promoted ongoing notification + Samsung ongoing-activity metadata for Now Bar eligibility.
+- Separate listener with its own system toggle ("Now Bar Mirror — Sport (Sofascore)"). One Sofascore notification = one match, updated in place (`InboxStyle`, `EXTRA_TEXT_LINES` most recent first, max 6). Never groups by `groupKey` (Sofascore puts all matches in one group).
+- Teams from title split on `" - "` or `"@"` (American sports, order kept). Score/status parsed from text by `SofascoreNotificationParser` (football/handball incl. ET/penalties, rugby, basketball quarters, tennis sets, table tennis/volleyball); unknown wording → raw-line fallback. Wording-dependent.
+- Watched match (`SofascorePrefs`): LATEST (auto) or CHOSEN (falls back to auto when its notification disappears). In auto mode `pickLatestAvoidingDuplicate` skips the match already shown as "Dernière notif" when ≥ 2 matches are active. Order matters: the history push runs **before** `refresh()` in every caller.
+- Optional per-match API override (`SofascoreApiOverridePrefs`, TheSportsDB / Live Tennis API with local key): `ApiOverrideFollowService` foreground-polls (60 s football, 180 s tennis) and calls `refreshIfConnected()` — from a background thread. Widget never shows overrides.
+- `refresh()` sends `/match` only when `key|postTime|MatchResult` changed (`lastWatchSignature`); `sendCleared` also deduped.
 
-### Lock-screen widgets
+## Phone — widgets (`widget/`)
 
-Three independent widgets, background-less, all meant to sit on the lock screen via a host like Samsung LockStar (also addable as ordinary home-screen widgets). They share almost all rendering code (`NowBarWidgetProvider`'s functions, bumped to `internal` and parametrized rather than duplicated) and both stores below, so a visual tweak to a tile applies to all three automatically. Each widget's picker entry (`android:previewLayout`) is its own static, pre-filled mockup layout (`widget_now_bar_preview.xml` / `_compact_preview.xml` / `_triple_preview.xml`) — sample data baked into the XML, never touched by any Kotlin code — so the widget-drawer thumbnail actually looks like the populated widget instead of an empty shell; `android:initialLayout` (the real interactive layout) is untouched by this.
+Three background-less widgets (lock screen via LockStar, or home screen), all rendered by `NowBarWidgetProvider`'s internal functions:
 
-**4×1 (`NowBarWidgetProvider`)** — one row, three views, `WidgetViewModePrefs` remembers which is showing:
+- **4x1** `NowBarWidgetProvider` — one row, three views (`WidgetViewModePrefs`): **Dernière notif**, **Sport** (5 matches, live/recent first via `sortedForWidget`, finished > 5 min demoted), **Toutes notifs** (5 entries, generic + Sofascore tiles). Left toggle: LATEST ↔ last of Sport/Toutes; right toggle: Sport ↔ Toutes.
+- **4x2** `NowBarWidgetProviderCompact` — row 1 = Sport/Toutes strip (shared toggle state, current "Dernière notif" filtered out), row 2 = Dernière notif/peek.
+- **4x2 double row** `NowBarWidgetProviderTriple` — row 1 generic-only notifs, row 2 Sofascore matches, row 3 Dernière notif/peek; no toggle; "+X" overflow badges from the TRUE active counts (generic count excludes Sofascore; minus 5 shown, minus 1 if row 3 shows that kind). Declared 4x2 (`minHeight=140dp`).
+- Picker previews are static XML mockups (`*_preview.xml`), never touched by code.
+- PendingIntent request-code ranges must stay distinct: 4x1 peeks 4300/4400, Compact 4700/4800, Triple 4900/5000, auto-close peek 4200, action-fire 4500+, open-on-phone cancel 4600, toggles 0/1, close-peek 2.
+- **Peek**: tapping a tile shows it full-format (`WidgetPeekPrefs`) via a plain broadcast (`ACTION_OPEN_PEEK`) — **never an Activity** (any Activity launched from a lock-screen widget interacts with the keyguard; several trampoline attempts broke). Closes when its notification disappears (`closePeekIfShowing`, both listeners) or after 15 s (non-wakeup alarm, same-entry check).
+- "Actions dans le widget" (off by default): up to 3 text actions. "Silent" actions (semantic mark-read/delete/archive/mute) are routed through the listener (`ACTION_FIRE_WIDGET_ACTION`) which fires the PendingIntent then cancels the source notification; others fire directly.
+- Refresh model: listeners write stores synchronously, then `requestUpdate()` (throttled, max one refresh per 300 ms, any thread). `refreshAllNow()` runs `syncWatchToLatest()` (deduped by entry identity) then rebuilds only the widgets actually placed. Direct taps (`onReceive`) call `refreshAllNow()` immediately. The Compact/Triple bottom row and refresh body are shared (`renderPeekOrLatestRow`, `refreshProvider`).
 
-- **Dernière notif** (default) — derived directly from `WidgetAllNotificationsStore`'s most recent entry (same store as Toutes notifs below, any kind: ALL/LATEST app notification or a Sofascore match) — no separate store to keep in sync. Shows source icon, original title/text, image, dismiss button; tap opens the notification (or launches the source app if the live `PendingIntent` was lost to a process restart).
-- **Sport** — up to 5 Sofascore matches (`SofascoreWidgetStore`, first 5 of its 6 stored slots — see note above): combined team image, score (bracket on whichever side just scored), period/status. Live/recently-finished matches sort first. Tapping a tile peeks it (see below), never dismisses the source notification.
-- **Toutes notifs** — up to 5 recently received notifications (`WidgetAllNotificationsStore`, first 5 of its 6 stored slots), fed by both listeners into one shared history: any mirrored app's notification (original title always, regardless of the invert setting) and every Sofascore notification (rendered exactly like a Sport tile, same image/score/period layout down to matching tile heights — any future appearance change to a Sofascore tile must be mirrored between the two views). Self-heals against a fresh `getActiveNotifications()` snapshot on every listener reconnect and after every removal, so a stale tile can never linger and a freed slot is refilled from whatever's already active — refilled in one batched push (`WidgetAllNotificationsStore.pushAll` / `NowBarWidgetProvider.pushToAllNotificationsBatch`) rather than one push per notification, so the widget lands directly on the final top-5 instead of visibly stepping through each intermediate candidate. Identity: a Sofascore match or a messaging conversation always updates its ONE tile in place (by key); anything else keys by (notification id, post time), so e.g. 5 separate "Dernière notif"-mode postings from one app get 5 separate tiles. A tile disappears as soon as its notification is dismissed anywhere; tapping only opens it, never dismisses it.
+### Stores
 
-Left toggle (rotating arrows, under the app icon): LATEST ↔ whichever of Sport/Toutes-notifs was last shown. Right toggle (far right edge): Sport ↔ Toutes notifs directly. Both scale their 5 tiles to the widget's actual width so all 5 always fit.
+- `WidgetAllNotificationsStore` — history, max 6 per kind (GENERIC / SOFASCORE_MATCH, capped independently, merged by recency). Identity: Sofascore match or conversation (`isConversation`: shortcutId / CATEGORY_MESSAGE / MessagingStyle) collapses by key; anything else is (key, postTime). Self-heals with `pruneAgainstActive` + batched refill (`pushAll`) — one store write per batch.
+- `SofascoreWidgetStore` — the 6 matches shown by Sport views + true active count. `pushSofascoreMatches` skips save/refresh when the kept list's signature is unchanged.
+- Both: JSON in SharedPreferences (parsed once per change, `ParsedCache`), images as **content-addressed PNG files** (`WidgetImageFiles`: one file per posting key+postTime, kept across saves, orphans deleted; legacy slot files migrated), downscaled to 256 px, images passed lazily (`imageLoader`) so unchanged postings are never re-extracted/re-encoded. `save` is `@Synchronized` (main thread + API-poll thread).
+- Live `PendingIntent`s/actions/detail lines are in memory only (`liveAllNotifIntents`, `liveSofascoreIntents`…): lost on process restart → taps fall back to launching the source app (Sofascore for a match).
+- `BitmapUtils` (top-level): single `drawableToBitmap`/`circular`/`downscale`, LRU caches for app icons (`AppIcons`) and decoded store images (`ImageFiles`, keyed by path + lastModified).
 
-**4×2 (`NowBarWidgetProviderCompact`)** — row 1 on top: the exact same Sport/Toutes-notifs icon strip as the 4×1's own (same rendering functions, same 5-tile layout, same left icon/right toggle — shared `WidgetViewModePrefs` state, flipping either widget's toggle moves both), except the entry currently shown as "Dernière notif" is filtered out of the list first. Row 2 below: "Dernière notif"/peek, rendered by the exact same functions as the 4×1's own LATEST view. Own `PendingIntent` request-code range (4700/4800) distinct from the 4×1's (4300/4400) so same-slot tiles on the two widgets never collide.
+## Watch (`wear/`)
 
-**4×2, double icon row (`NowBarWidgetProviderTriple`)** — three rows stacked, always all visible, no toggle at all (unlike the other two widgets, nothing to switch between here): row 1 "Dernière notif" filtered to **generic notifications only** (never a Sofascore match, even when one happens to be the single most recent notification received of any kind), row 2 "Sofascore" (every currently active match), row 3 the same Dernière notif/peek block as the 4×2's own row 2. Both icon rows additionally exclude whichever entry row 3 is currently showing as "Dernière notif" — same reasoning as the 4×2's own row 1. Each icon row ends with a small "+X" overflow badge — its own 22dp slot, right-aligned so its center lands exactly on row 3's own dismiss cross — showing how many more entries exist beyond the 5 shown tiles; hidden entirely when nothing's hidden. Computed from each store's TRUE active count (see above), minus the 5 shown and minus 1 more if row 3's own "Dernière notif" is of that same kind (it's shown elsewhere in the widget, not hidden) — row 1's own count never includes Sofascore matches (they could never occupy a generic slot to begin with, and are already counted toward row 2's own badge — counting them here too would double them up). Declared footprint matches the 4×2 exactly (`minHeight=140dp`/`targetCellHeight=2`) even though it renders 3 rows: the content already fits comfortably within the real grid-cell height most launchers give a 4×2 slot, so a 4×3 declaration just meant unused space at the bottom. Own `PendingIntent` request-code range (4900/5000), distinct from the other two widgets'.
+- `PhoneDataListenerService` receives both `/match` and `/notification` (one service, two `<data>` filters), applies them with `FreshStore.setLive`, and requests the matching complication refresh.
+- `PhoneDataLayer`: shared path-specific re-read of the persisted DataItem (`readMatch`/`readNotification`), asset decoding, complication refresh request. `FreshStore` (base of `MatchScoreStore`/`NotificationInfoStore`) orders values by the phone's send `timestamp`: live pushes always apply, re-reads apply only if not older (covers "cleared" too).
+- Both complications re-read the persisted item on **every** request (local, cheap: codecs reuse the in-memory value — no asset decode — when `syncTimestamp` matches), fall back to memory only if the read fails, and cache the composed bitmap (`ComposedImageCache`). `UPDATE_PERIOD_SECONDS=600` (safety net only; updates are push-driven).
+- **"Score en direct"** (`ScoreComplicationService`, LONG_TEXT / SMALL_IMAGE) — tap opens Sofascore on the watch. `MatchClock` formats status per sport; `ComplicationImageComposer.composeRoundImage` draws image/score/period (320 px).
+- **"Notification"** (`NotificationComplicationService`, SMALL_IMAGE) — tap opens `NotificationDetailActivity`: image + app icon header, title/text or detail lines (conversation messages via MessagingStyle, max 10; Sofascore lines, max 6), action pills + "Aff. sur tél." + delete, all with press feedback, `SwipeDismissFrameLayout` (`androidx.wear:wear`, not Compose).
+- `PhoneRelay` sends `/notifdetail/{action,dismiss,open}` messages (JSON kind/key/postTime/actionIndex). Phone side `WearActionRelayService` → `NowBarWidgetProvider.fireAction` / `dismissEntry` / `openEntry`. `openEntry` can't start an Activity from the background: it posts a high-importance relay notification (channel `open_on_phone_v2`) with content + full-screen intent; auto-cancelled 2.5 s later if the phone was locked. Needs "Use full screen intent" access (button in Accueil, Android 14+).
 
-**Peek** — tapping a Sport/Toutes-notifs tile (any of the three widgets) shows that one notification full-format (`WidgetPeekPrefs`), reusing the same content block Dernière notif renders with (title, text, image, dismiss, actions), without touching which notification Dernière notif itself shows. Opening a peek is a plain broadcast (`ACTION_OPEN_PEEK`) — no Activity involved, since a lock-screen widget host can dismiss the keyguard as a side effect of launching any Activity at all, which an in-place widget update must avoid. Tapping the peek's own content opens the real notification directly (a plain `PendingIntent`, exactly like Dernière notif's own tap) without dismissing it. The peek closes on its own — either when its notification disappears (`closePeekIfShowing`, called from both listeners), or automatically 15 seconds after it opened (`scheduleAutoClosePeek`, an `AlarmManager` one-shot that only fires if the same entry is still being peeked) — closing is never tied to the content tap itself. While peeking, the left column shows the peeked entry's own app icon plus the small arrows glyph, both bound to "close and return to the tile grid".
+## Known issues / limitations
 
-"Actions dans le widget" (off by default) adds up to 3 of the notification's text actions under Dernière notif's title/text — only while this app's process has stayed alive since that notification arrived (a `PendingIntent` can't be reconstructed from storage after a restart; same limitation applies to any tap-to-open, in all views alike, and to ALL-mode mirror tracking). A "silent" action (mark as read/delete/archive/mute, detected from the action's own semantic role) is routed through the same listener service the dismiss button uses instead of firing its captured `PendingIntent` directly: replaying that `PendingIntent` alone does trigger the source app's real handling, but not the notification's disappearance — that only happens for a genuine notification tap, as a system side effect of that specific dispatch path, not of the `PendingIntent` itself. So after firing, this also cancels the source notification the same way the dismiss button does, matching what tapping that same action for real (Now Bar/shade) already looks like. Every other action (Répondre, Appeler…) still fires its `PendingIntent` directly, unchanged. Same mechanism on the watch's notification-detail screen (`WearActionRelayService`).
-
-## Sport tab — live scores on the watch
-
-Sofascore is the source of truth for match identity (team names, image) — API lookups below never override those. The tab lists every Sofascore match currently in the notification center ("Dernière notification" always first); whichever is active drives the watch complication.
-
-- **Match selection** (`SofascorePrefs`): "Dernière notification" (auto) or a specific match, tap a row to pick. Falls back to auto if the chosen match's notification disappears.
-- **Score/status parsed directly from the notification text** (`SofascoreNotificationParser`, no network call): football/handball (half-time/full-time, extra time — ET1/MTP/ET2 — and penalty shootouts — PEN while awaiting/during the shootout, final score shown as "match (penalties)" once decided), rugby (half-time/full-time, plus period 1/2 on scoring lines that carry no minute), basketball (quarters), tennis (shown by set number like the set-tally sports below, not a "live" label), set-tally sports (table tennis, volleyball) — sport detected from wording since Sofascore doesn't flag it explicitly. Team names split on the title's " - ", or on "@" for American-sports notifications ("Away @ Home").
-- **Optional per-match API override** ("API" button): TheSportsDB (multi-sport) or the Live Tennis API (needs a locally-stored key), independently for score and/or period. `ApiOverrideFollowService` polls in the background while active; cleared automatically when the match's notification disappears.
-- Own `NotificationListenerService` (`sport.SofascoreNotificationListenerService`), separate from the Accueil tab's — see [Two separate notification-access toggles](#two-separate-notification-access-toggles).
-
-### Watch complications (`wear/`)
-
-Two independent complications, assignable separately on the watch face:
-
-- **"Score en direct"** (`ScoreComplicationService`, `LONG_TEXT`/`SMALL_IMAGE`) — the active Sofascore match. `WatchSync` pushes it to the watch (`MatchListenerService`) over the Wear Data Layer API (path `/match`) whenever it changes; `MatchClock` formats status/period per sport, `ComplicationImageComposer` composes the `SMALL_IMAGE` bitmap. `ScoreComplicationService.fetchPersistedMatch` re-reads the Data Layer item directly as a fallback when the watch process was killed and restarted since the last push (`onDataChanged` doesn't re-fire on its own for a DataItem already synced before that restart) — decoding shared with `MatchListenerService` via `MatchDataCodec`. Tapping opens Sofascore on the watch. When both complications are assigned, this one avoids duplicating whatever match the "Notification" complication is currently showing: `SofascoreNotificationListenerService.pickLatestAvoidingDuplicate` picks the next most recent match instead whenever the most recent one is the same match already shown as "Dernière notif" — but only when at least 2 matches are active; the sole active match is always shown here regardless, even if it duplicates "Dernière notif".
-- **"Notification"** (`NotificationComplicationService`, `SMALL_IMAGE` only) — the same "dernière notif" the lock-screen widget shows (any mirrored app, ALL/LATEST/Sofascore, no distinction), kept as its own complication rather than folded into "Score en direct" so the two can be assigned to different slots. `WatchNotificationSync` (phone, path `/notification`) is called from `NowBarWidgetProvider.syncWatchToLatest()`, on every widget rebuild, reading the same `WidgetAllNotificationsStore` entry the widget's own "Dernière notif" view derives from — one source of truth, no separate store to drift out of sync. `NotificationDataListenerService` receives live updates; `NotificationComplicationService.fetchPersistedNotification` re-reads the `/notification` Data Layer item directly, decoding shared with `NotificationDataListenerService` via `NotificationDataCodec`. Unlike `ScoreComplicationService` below, this re-read now runs on EVERY `onComplicationRequest` (not just when the in-memory `NotificationInfoStore` is empty) — a purely local call, no network — so the complication can't get stuck on a stale in-memory value just because this process's own `onDataChanged` happened to miss a live update. This re-read writes through `NotificationInfoStore.updateIfNotOlder` (see below) rather than overwriting the store unconditionally, so it can't regress to an older notification if it races a live push that already landed. Tapping opens a full-screen detail screen — see below.
-
-### Notification detail screen (`NotificationDetailActivity`)
-
-Full-screen view opened by tapping the "Notification" complication, matching the real Wear OS/Galaxy Watch notification look, inside a `SwipeDismissFrameLayout` (swipe-to-dismiss the screen itself, `androidx.wear:wear`):
-- Header: the notification's own image and the source app's icon side by side, centered as one group (each shows only its own picture, no falling back of one onto the other).
-- Title, then text/detail lines, in the system's own text appearance (`?android:attr/textAppearanceLarge`/`Medium`, unconditional — not a hardcoded size) and no background behind the text, same as a real system notification's body.
-- One full-width pill per notification action (single line, ellipsized if too long, system text size/font), always followed by an "Aff. sur tél." pill (never a "Bloquer notifications" one, unlike the real system menu), then a round grey delete button. All of these (action pills, "Aff. sur tél.", delete) give immediate touch feedback — a slight shrink plus a lighter fill on press, matching a real system notification's buttons — since a plain shape background has no press state of its own.
-
-For a messaging conversation or a Sofascore match, the body instead lists every line Android's own notification already bundles for that one notification — no separate history is built or persisted anywhere:
-- Sofascore groups several updates into one `InboxStyle` notification; `SofascoreNotificationListenerService.collectLines` reads its `EXTRA_TEXT_LINES` (`detailLines`), same lines Android's own notification shade would show, capped at 6 by Android itself.
-- A conversation notification carries its own message list via `NotificationCompat.MessagingStyle`; `MirrorNotificationListener.messageLinesFor` reads `.messages`/`.historicMessages` (capped at 10, newest first).
-
-`WatchNotificationSync.send` carries these lines plus the action labels and the entry's identity (`entryKey`/`entryPostTimeMillis`/`kind`) to the watch alongside the usual title/text/images (`NotificationInfo`, decoded by `NotificationDataCodec`). A `PendingIntent` can't cross devices, so only the labels travel — tapping an action button, the delete button, or "Aff. sur tél." sends a one-way message back to the phone (`PhoneRelay`, `MessageClient`, paths `/notifdetail/action`, `/notifdetail/dismiss`, `/notifdetail/open`) identifying the entry; the phone's `WearActionRelayService` receives it and calls `NowBarWidgetProvider.fireAction` (fires the real `PendingIntent` from its live in-memory action cache), `.dismissEntry` (routes to the right listener's own `ACTION_DISMISS_WIDGET`, Sofascore vs. generic, by `kind`), or `.openEntry` for "Aff. sur tél.".
-
-`.openEntry` doesn't fire the entry's own `PendingIntent` directly: a plain background service reacting to a Bluetooth message from the watch (no visible window) is blocked by Android's background-activity-launch restrictions from starting an Activity that way — especially the app's own fallback `PendingIntent` (`launchAppPendingIntent`, used whenever the entry has no `contentIntent` of its own, which is the common case for a Sofascore match). Instead it posts a dismissible, high-importance relay notification (its own channel, `open_on_phone_v2`, vibration on; the `_v2` suffix because a channel's importance is fixed at first creation and can't be changed in place afterwards) carrying the resolved open target both as its `contentIntent` (manual tap) and as a `setFullScreenIntent` (auto-launch), reusing the same title/text/image resolution the widget's "Dernière notif" and the watch sync already compute (`resolveAllNotifEntryContent`). Silently does nothing if the entry has already aged out of the phone's capped "Toutes notifs" history (6 per kind, 5 shown) by the time the watch's request arrives.
-
-The full-screen intent only actually auto-launches while the phone is locked/screen off (Android's own rule for every app, call/alarm-style apps included — a device already unlocked always falls back to a plain tappable heads-up instead, so a manual tap keeps working there exactly as before) and only once Yann has granted the app "Use full screen intent" access: on Android 14+ this isn't auto-granted to a non-telephony/alarm app, so `MainActivity`'s Accueil tab has a dedicated button (`full_screen_intent_button`, hidden below API 34) opening `Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT`, plus a status line reading `NotificationManager.canUseFullScreenIntent()`. When the phone was locked at post time, `openEntry` also schedules `ACTION_AUTO_CANCEL_OPEN_ON_PHONE` (`NowBarWidgetProvider`'s own `onReceive`, an `AlarmManager` one-shot ~2.5s out) to cancel the relay notification itself, since the full-screen launch has done its job by then and there's no point in it lingering in the shade; when the phone was unlocked, it's left alone since it's then the only way left to open the target.
-
-`NotificationDetailActivity` applies the same always-re-read-the-persisted-item logic as the "Notification" complication above: it paints whatever's in `NotificationInfoStore.current` instantly, then immediately re-reads the persisted `/notification` DataItem in the background and applies that once it resolves — so a tap always ends up showing exactly what a concurrent complication refresh would also compute, instead of two independently stale in-memory snapshots.
-
-Both re-reads write through `NotificationInfoStore.updateIfNotOlder` (comparing `entryPostTimeMillis`) instead of overwriting `current` unconditionally: a direct Data Layer re-read isn't guaranteed to be at least as fresh as what's already in memory — a notification that just arrived can already be correctly reflected via the live `onDataChanged` push while a concurrent re-read still sees an older, not-yet-propagated synced item. Without this guard, that re-read could silently regress a correct, freshly-pushed display back to an older notification; `null` ("cleared", see `WatchNotificationSync.sendCleared`) is always accepted, since it's an explicit signal rather than a competing older notification.
-
-**Known issue**: none of the above fixes the case where the phone-side push itself never happens at all — if Samsung battery/background-app management freezes the two `NotificationListenerService`s, nothing new ever reaches the watch's Data Layer for either re-read to find, and force-stopping the phone app (which reconnects the listeners) remains the only known recovery. Not yet root-caused; check the phone app's battery settings (unrestricted / not in sleeping-apps list) before assuming the watch side is still at fault. `ScoreComplicationService` ("Score en direct") still has the OLD blind-cache pattern (`MatchScoreStore.current ?: fetchPersistedMatch()`, only re-reads when the in-memory cache is empty, no freshness guard against regressing) and hasn't been updated to match — same class of bug could still show there.
-
-Setup: assign "Score en direct" to a `LONG_TEXT` and/or round `SMALL_IMAGE` slot, and/or "Notification" to another round `SMALL_IMAGE` slot, on the watch face.
-
-**Signing**: phone and watch apps must share `applicationId` (`com.yann.nowbarmirror`) and signing key, or the phone-side send silently goes nowhere. `wear/build.gradle.kts` mirrors `app/build.gradle.kts` on both, reusing the `DEBUG_KEYSTORE_B64` secret. Also depends on `androidx.wear:wear:1.3.0` (classic Wear support library, for `SwipeDismissFrameLayout` in the notification detail screen) — deliberately not Compose for Wear, to avoid adding the Compose Compiler Gradle plugin.
-
-## Architecture
-
-The two tabs stay deliberately separate (different problems: verbatim mirroring vs. structured match parsing) but share:
-
-- **`NotificationImageExtractor`** (top-level) — used by both listeners: MessagingStyle contact photo → `EXTRA_PICTURE` → `getLargeIcon()` → `EXTRA_LARGE_ICON`.
-- **`WatchNotificationSync`** (top-level) — mirrors "Dernière notif" (`WidgetAllNotificationsStore`'s most recent entry) to the watch's "Notification" complication, called from `NowBarWidgetProvider.syncWatchToLatest()` on every widget rebuild — same derived value the widget itself renders, so the two never drift independently. Also carries what the watch's notification detail screen needs (detail lines, action labels, entry identity) — see [Notification detail screen](#notification-detail-screen-notificationdetailactivity).
-- **Catch-up on listener (re)connect** — both listeners mirror/refresh from whatever's already active at connect time, not just what arrives afterward; `PackageUpdateReceiver` forces a reconnect right after an in-place app update so this still fires then too.
-- **The widget's Sport/Toutes-notifs stores** — `sport.SofascoreNotificationListenerService` pushes match data straight into `widget.NowBarWidgetProvider`/`WidgetAllNotificationsStore`, the one deliberate cross-package exception. `SofascoreMatchPresentation` duplicates (can't share — `:wear` isn't reachable from `:app`) the formatting in `wear/MatchScore.kt`/`MatchClock.kt`.
-- **Batched "Toutes notifs" refills** — both listeners' post-dismissal top-up (`MirrorNotificationListener.refillAllNotifsHistory`, `SofascoreNotificationListenerService`'s equivalent) builds every candidate entry first, then hands the whole list to `NowBarWidgetProvider.pushToAllNotificationsBatch` in one call; that single-entry `pushToAllNotifications` is just this with a one-element list, so both call sites share the same store merge (`WidgetAllNotificationsStore.pushAll`) and live-PendingIntent bookkeeping instead of two versions of it.
-
-Otherwise: separate `NotificationListenerService`s, separate preference stores, separate packages (`com.yann.nowbarmirror` for Accueil + widget, `com.yann.nowbarmirror.sport` for Sport). The `sport/` code and the `wear/` module originated from a separate repo (`Sport-watch-complication`) later merged into this one.
-
-### Two separate notification-access toggles
-
-Two independent `NotificationListenerService`s → two separate system switches in **Paramètres > Notifications > Accès aux notifications** ("Now Bar Mirror notification listener" for Accueil, "Now Bar Mirror — Sport (Sofascore)" for Sport), each with its own in-app button to open that screen.
-
-## Style
-
-Samsung One UI look: rounded cards, bold large-title header with an Accueil/Sport tab switcher, light/dark palette follows the system theme. Accueil's app list uses a segmented Aucun/Dernière/Toutes control per row (active mode filled blue), row tinted when actively mirrored. Launcher icon: a stylized Now Bar capsule (avatar dot + two content lines) on blue, with a themed-icon layer for Android 13+/One UI.
+- If Samsung battery management freezes the phone listeners, nothing reaches the watch or widgets until the app is force-stopped. Check the app is "Unrestricted" and not in sleeping apps before debugging watch code.
+- Inline-reply `RemoteInput` not reconstructed. PendingIntent-dependent features (tap-to-open, actions, ALL-mode tracking) degrade after a process restart until new events arrive.
+- Widget Sport tiles never show API overrides or tennis game score.
+- Sport parsing depends on Sofascore's wording; "Match commencé" briefly shows football-style 0-0 on every sport.
+- `<queries>` for LAUNCHER apps and `com.sofascore.results` required (API 30+).
+- The `settings` package's folder should be lowercase `settings/`; if an uppercase `Settings/` folder is still present in the repo, the move hasn't been finished.
 
 ## Project layout
 
 ```
 app/src/main/java/com/yann/nowbarmirror/
-├── MainActivity.kt                    entry screen: Accueil/Sport tabs + permissions + app selection link
-├── MirrorNotificationListener.kt      Accueil tab's NotificationListenerService
-├── NotificationImageExtractor.kt      image extraction shared between both listeners
-├── PackageUpdateReceiver.kt           forces both listeners to rebind right after an app update
-├── WatchNotificationSync.kt           sends "Dernière notif" to the watch's "Notification" complication, incl. detail lines/actions/entry identity (Wear Data Layer API)
-├── WearActionRelayService.kt          receives action-button-tap/dismiss/"Aff. sur tél." requests from the watch's detail screen (paths /notifdetail/action, /notifdetail/dismiss, /notifdetail/open), relays to NowBarWidgetProvider.fireAction/dismissEntry/openEntry
-├── settings/                          Accueil tab preferences and screen
-│   ├── MirrorMode.kt                  NONE / LATEST / ALL
-│   ├── AppMirrorPrefs.kt              per-package mode + invert-title/text storage
-│   ├── ServicePrefs.kt                service on/off flag
-│   ├── LatestModePrefs.kt             "revenir à la précédente" fallback flag
-│   ├── WidgetActionsPrefs.kt          widget action-buttons on/off flag
-│   ├── SettingsBackup.kt              JSON export/import
-│   ├── AppSelectionActivity.kt        the settings screen
-│   └── AppSelectionAdapter.kt         RecyclerView adapter for the app list
-├── sport/                             Sport tab — Sofascore + watch complication
-│   ├── SofascoreNotificationListenerService.kt  its own NotificationListenerService
-│   ├── SofascoreNotificationParser.kt  notification text -> MatchResult
-│   ├── SofascorePrefs.kt              LATEST / CHOSEN fallback choice
-│   ├── SofascoreApiOverridePrefs.kt   per-match score/period override
-│   ├── ApiOverrideCache.kt            latest polled result per override
-│   ├── ApiOverrideFollowService.kt    background polling for the active override
-│   ├── SportsDbApi.kt / LiveTennisApi.kt
-│   ├── TennisApiKeyPrefs.kt           locally-stored Live Tennis API key
-│   ├── WatchSync.kt                   sends match data to the watch (Wear Data Layer API)
-│   ├── Models.kt                      TeamResult / PlayerResult / LeagueResult / MatchResult
-│   └── SofascoreHomeAdapter.kt / SimpleListAdapter.kt / MatchesAdapter.kt
-└── widget/
-    ├── NowBarWidgetProvider.kt         the 4x1 lock-screen widget — all three views + the peek overlay; derives "Dernière notif" from WidgetAllNotificationsStore and syncs the watch (syncWatchToLatest); most rendering functions are internal so NowBarWidgetProviderCompact/NowBarWidgetProviderTriple reuse them verbatim
-    ├── NowBarWidgetProviderCompact.kt  the 4x2 lock-screen widget — row 1 Sport/Toutes-notifs icon strip (dernière notif excluded), row 2 Dernière notif/peek; reuses NowBarWidgetProvider's own rendering functions, own PendingIntent request-code range
-    ├── NowBarWidgetProviderTriple.kt   the 4x2 double-icon-row lock-screen widget — row 1 "Dernière notif" (generic only, no Sofascore), row 2 Sofascore matches, row 3 Dernière notif/peek, all three always visible, no toggle; reuses NowBarWidgetProvider's own rendering functions, own PendingIntent request-code range
-    ├── SofascoreWidgetStore.kt         persists up to 6 Sofascore matches (MAX_SLOTS) — the 4x1 only ever renders the first 5, the 6th is reserve for a row's "exclude dernière notif" filter
-    ├── WidgetAllNotificationsStore.kt  persists up to 6 recently received notifications PER KIND (MAX_SLOTS_PER_KIND — generic and Sofascore capped independently, then re-merged by recency, so a burst of one kind can never crowd the other out) — also the sole source for "Dernière notif" (most-recent entry, any kind); same "6th slot per kind" reserve as above
-    ├── SofascoreMatchPresentation.kt   phone-side score/period formatting, shared by Sport + Sofascore-in-Toutes-notifs
-    ├── WidgetPeekPrefs.kt              which tile (if any) is currently peeked full-format
-    └── WidgetViewModePrefs.kt          which of the three views is showing, + which of Sport/Toutes-notifs was shown last (shared by both widgets)
+├── MainActivity.kt                 Accueil/Sport tabs, permission buttons, Sofascore match list
+├── MirrorNotificationListener.kt   Accueil listener (mirrors + generic history feed)
+├── NotificationImageExtractor.kt   image extraction, shared by both listeners
+├── BitmapUtils.kt                  shared bitmap helpers + icon/image caches
+├── PackageUpdateReceiver.kt        rebinds both listeners after an app update
+├── WatchNotificationSync.kt        "/notification" sender
+├── WearActionRelayService.kt       receives /notifdetail/* from the watch
+├── settings/                       MirrorMode, AppMirrorPrefs, ServicePrefs, LatestModePrefs,
+│                                   WidgetActionsPrefs, SettingsBackup, AppSelectionActivity/Adapter
+├── sport/                          SofascoreNotificationListenerService, SofascoreNotificationParser,
+│                                   SofascorePrefs, SofascoreApiOverridePrefs, ApiOverrideCache,
+│                                   ApiOverrideFollowService, SportsDbApi, LiveTennisApi, TennisApiKeyPrefs,
+│                                   WatchSync ("/match" sender + bitmapToAsset), Models, adapters
+└── widget/                         NowBarWidgetProvider (4x1 + all shared rendering/refresh),
+                                    NowBarWidgetProviderCompact, NowBarWidgetProviderTriple,
+                                    WidgetAllNotificationsStore, SofascoreWidgetStore, WidgetImageFiles,
+                                    SofascoreMatchPresentation (phone copy of wear score/period formatting),
+                                    WidgetPeekPrefs, WidgetViewModePrefs
 
 wear/src/main/kotlin/com/yann/nowbarmirror/wear/
-├── ScoreComplicationService.kt        "Score en direct" — LONG_TEXT / SMALL_IMAGE complication data source, with a persisted-DataItem fallback for a freshly-restarted watch process
-├── MatchListenerService.kt            receives match data from the phone (path /match)
-├── MatchDataCodec.kt                  shared decode of the /match DataMap
-├── MatchClock.kt                      formats status/period per sport
-├── MatchScore.kt                      score text, incl. the "who just scored" bracket, + in-memory MatchScoreStore
-├── ComplicationImageComposer.kt       composes the SMALL_IMAGE bitmap for both complications
-├── NotificationComplicationService.kt "Notification" — SMALL_IMAGE-only complication data source, with a persisted-DataItem fallback for a freshly-restarted watch process
-├── NotificationDataListenerService.kt receives "Dernière notif" updates from the phone (path /notification)
-├── NotificationDataCodec.kt           shared decode of the /notification DataMap (incl. detail lines/actions/entry identity)
-├── NotificationInfo.kt                decoded payload + in-memory NotificationInfoStore
-├── NotificationDetailActivity.kt      full-screen Galaxy Watch-style detail screen opened by tapping "Notification" (image/icon header, title/text or detail lines, action pills + "Aff. sur tél.", delete) — see Notification detail screen
-└── PhoneRelay.kt                      sends action-tap/dismiss/"Aff. sur tél." requests from the detail screen back to the phone (Wear Data Layer API messages)
+├── PhoneDataListenerService.kt     /match + /notification receiver
+├── PhoneDataLayer.kt               shared re-read/decode/refresh + FreshStore + ComposedImageCache
+├── ScoreComplicationService.kt     "Score en direct"
+├── NotificationComplicationService.kt  "Notification"
+├── NotificationDetailActivity.kt   detail screen
+├── PhoneRelay.kt                   watch → phone messages
+├── MatchDataCodec.kt / NotificationDataCodec.kt
+├── MatchScore.kt (+ MatchScoreStore) / NotificationInfo.kt (+ NotificationInfoStore)
+├── MatchClock.kt                   per-sport status labels
+└── ComplicationImageComposer.kt    SMALL_IMAGE bitmaps
+
+tools/compile-check/                sandbox type-check (check.sh, genR.py, stubs/) — not part of any build
 ```
-
-## Limitations
-
-- Uses only public Android notification-listener APIs plus the Samsung ongoing-activity hint — doesn't depend on undocumented Samsung internals; Samsung ultimately controls whether/how a notification appears in the actual Now Bar.
-- Inline-reply `RemoteInput` actions aren't reconstructed anywhere (system mirror or widget).
-- Any tap-to-open, in all widget views and the peek alike, plus ALL-mode mirror tracking, relies on a live `PendingIntent`/in-memory state held since the notification was mirrored — these reset if the app's process is killed and restarted (tap-to-open then falls back to opening the source app, or Sofascore itself for a match), until the next relevant notification/event repopulates them. A Toutes-notifs tile stays otherwise intact across a rebuild as long as it's stayed in the capped history (6 per kind, 5 shown) the whole time.
-- Widget Sport view / a Sofascore entry in Toutes notifs never show the API override or a live tennis set's game score — kept simple to fit small tiles.
-- Toutes-notifs is a "recently received" list capped at 6 per kind (generic and Sofascore independently — 5 shown, one extra kept in reserve for whichever row's "exclude dernière notif" filter applies, see the widget section above), not a log — an entry drops as soon as its source notification is gone (shade, source app, "effacer tout"), not kept for reference.
-- Declares `<queries>` for `MAIN`/`LAUNCHER` (app-selection screen) and `com.sofascore.results` (Sport tab), required on API 30+ package-visibility rules.
-- Sport tab depends entirely on Sofascore's own notification wording — a wording change on their end could break parsing until updated here. "Match commencé" briefly shows 0-0 with football-style status on every sport until sport-specific vocabulary kicks in (cosmetic, no functional impact).
-- Both watch complications only update live while both devices are reachable over the Wear Data Layer API (paired, Bluetooth/Wi-Fi connected); both also re-read the last persisted Data Layer item on their own if the watch process restarted since the last live push (`ScoreComplicationService.fetchPersistedMatch`, `NotificationComplicationService.fetchPersistedNotification`) — see the Known issue under [Watch complications](#watch-complications-wear) for a case this doesn't fully cover.
 
 ## Build
 
-Built via GitHub Actions (`.github/workflows/build.yml`), not locally in Android Studio (phone-only day-to-day workflow):
+GitHub Actions `.github/workflows/build.yml` ("Build debug APK", on push to `main` or manual): JDK 17, Gradle 8.13, AGP 8.13, Kotlin 2.2.20, compileSdk/targetSdk 36 (min 26 phone, 30 watch). Signs both APKs with the `DEBUG_KEYSTORE_B64` secret (generated once by the "Generate debug keystore" workflow).
 
-1. Push to `main`, or trigger manually from **Actions** → "Build debug APK" → **Run workflow**.
-2. Download the `NowBarMirror-debug-apk` artifact (phone) and, if the watch app changed, `NowBarMirror-wear-debug-apk` too.
-3. Install `app-debug.apk`.
-4. In **Now Bar Mirror**: Accueil tab — enable notification access, allow the app's own notifications (Android 13+), on Android 14+ grant "Use full screen intent" access (see [Notification detail screen](#notification-detail-screen-notificationdetailactivity) for what it unlocks), pick apps to mirror. Sport tab — grant notification access separately for Sofascore.
-5. Place any of the three widgets (4x1, 4x2, or 4x2 double-row) from the home-screen widget picker — the picker preview now shows each one pre-filled with sample content — or a lock-widget host (LockStar) for the lock screen.
-6. For the watch: install `wear-debug.apk` (e.g. via GeminiMan WearOS Manager), then assign "Score en direct" and/or "Notification" on the watch face.
-
-Debug signing key: generated once via the separate "Generate debug keystore" workflow, stored as the `DEBUG_KEYSTORE_B64` repo secret.
-
-To build locally instead (Android Studio, JDK 17): open the folder, let Gradle sync, `app`/`wear` → `assembleDebug`.
+1. Download artifacts `NowBarMirror-debug-apk` (phone) and, if the watch changed, `NowBarMirror-wear-debug-apk`.
+2. Phone: install; Accueil → notification access, app notifications, full-screen-intent access (14+), pick apps; Sport → its own notification access.
+3. Place widgets (picker or LockStar). Watch: install via GeminiMan WearOS Manager, assign "Score en direct" (LONG_TEXT / round SMALL_IMAGE) and/or "Notification" (round SMALL_IMAGE).
