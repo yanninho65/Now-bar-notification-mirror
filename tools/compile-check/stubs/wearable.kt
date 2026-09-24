@@ -19,6 +19,7 @@ class DataMap {
     fun getLong(k: String): Long = 0
     fun getLong(k: String, d: Long): Long = d
     fun getInt(k: String): Int = 0
+    fun getInt(k: String, d: Int): Int = d
     fun getBoolean(k: String, d: Boolean): Boolean = d
     fun getAsset(k: String): Asset? = null
     fun getStringArrayList(k: String): ArrayList<String>? = null

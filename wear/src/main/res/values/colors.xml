@@ -22,4 +22,6 @@
          voir NotificationDetailActivity.addPressFeedback pour l'effet complet (fond + scale). -->
     <color name="detail_chip_bg_pressed">#4A4A4D</color>
     <color name="detail_delete_bg_pressed">#58585A</color>
+    <!-- NEW 24/09/2026 : pastille de nombre (bg_count_badge.xml) -->
+    <color name="detail_count_badge">#E5372F</color>
 </resources>

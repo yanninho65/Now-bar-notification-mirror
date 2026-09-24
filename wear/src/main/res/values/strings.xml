@@ -9,4 +9,6 @@
     <!-- NEW 24/09/2026, complication/liste "Messages" -->
     <string name="action_view_on_watch">Aff. sur montre</string>
     <string name="messages_empty">Aucun message</string>
+    <string name="messages_apps_on_watch">Sur la montre</string>
+    <string name="messages_apps_on_phone">Sur le téléphone</string>
 </resources>

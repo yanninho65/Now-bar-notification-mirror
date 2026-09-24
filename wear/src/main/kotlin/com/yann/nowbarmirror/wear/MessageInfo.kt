@@ -23,8 +23,11 @@ data class MessageInfo(
     val appIcon: Bitmap?
 )
 
+/** A selected message app installed on the phone, with its unread count (see mobile MessagesWatchSync.unreadCount). */
+data class MessageApp(val packageName: String, val label: String, val count: Int, val icon: Bitmap?)
+
 /** The whole list from one phone push, most recent first; [syncTimestamp] = the phone's send time. */
-class MessageList(val messages: List<MessageInfo>, val syncTimestamp: Long)
+class MessageList(val messages: List<MessageInfo>, val syncTimestamp: Long, val apps: List<MessageApp> = emptyList())
 
 /**
  * Same freshness rules as the other stores (see [FreshStore]). [onChanged] lets an open
@@ -58,6 +61,15 @@ object MessagesDataCodec {
                 appIcon = icons.getOrPut(pkg) { PhoneDataLayer.decodeImageAsset(context, dataMap, "icon_$pkg") }
             )
         }.filter { it.key.isNotBlank() }
-        return MessageList(messages, syncTimestamp)
+        val apps = dataMap.getDataMapArrayList("apps").orEmpty().mapNotNull { item ->
+            val pkg = item.getString("packageName").orEmpty().takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            MessageApp(
+                packageName = pkg,
+                label = item.getString("label").orEmpty(),
+                count = item.getInt("count", 0),
+                icon = icons.getOrPut(pkg) { PhoneDataLayer.decodeImageAsset(context, dataMap, "icon_$pkg") }
+            )
+        }
+        return MessageList(messages, syncTimestamp, apps)
     }
 }

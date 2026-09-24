@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- NEW 24/09/2026 : pastille de nombre de notifications (en haut à droite des icônes d'appli de
+     la liste Messages), rouge façon badge One UI, liseré noir pour la détacher de l'icône. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="@color/detail_count_badge" />
+    <corners android:radius="10dp" />
+    <stroke android:width="2dp" android:color="@color/detail_background" />
+</shape>

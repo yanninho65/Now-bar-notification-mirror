@@ -58,6 +58,11 @@ object PhoneRelay {
         send(context, "/msgdetail/open", JSONObject().put("key", key).toString().toByteArray(Charsets.UTF_8))
     }
 
+    // NEW 24/09/2026 — phone-row app icon of MessagesActivity: open that app on the phone.
+    fun sendOpenAppOnPhone(context: Context, packageName: String) {
+        send(context, "/msgdetail/openapp", JSONObject().put("pkg", packageName).toString().toByteArray(Charsets.UTF_8))
+    }
+
     private inline fun payload(info: NotificationInfo, extra: JSONObject.() -> Unit = {}): ByteArray {
         val json = JSONObject().apply {
             put("kind", info.kind)

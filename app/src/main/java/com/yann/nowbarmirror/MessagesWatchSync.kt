@@ -21,6 +21,8 @@ import com.yann.nowbarmirror.widget.WidgetAction
  * non-summary notification of an app chosen in [MessageAppsPrefs], most recent first, capped at
  * [MAX_MESSAGES]. Sent on "/messages" as one DataMap:
  * - "messages": DataMap list (key, postTimeMillis, packageName, title, text, detailLines, actionLabels);
+ * - "apps": DataMap list (packageName, label, count) — every selected message app installed on the
+ *   phone, with its unread count ([unreadCount]); the watch splits them into "on watch"/"on phone" rows;
  * - images as TOP-LEVEL assets ("img_<index>", "icon_<package>") — not nested in the list items;
  * - "timestamp" (freshness key, see wear/PhoneDataLayer.FreshStore).
  * The "exclude the message already shown by the Notification complication" rule is applied on the
@@ -41,16 +43,79 @@ object MessagesWatchSync {
     private val imageAssets = LruCache<String, Any>(MAX_MESSAGES * 2)   // Asset, or NO_IMAGE
     private val NO_IMAGE = Any()
 
-    /** Message-app notifications currently in the shade, most recent first. */
-    fun collect(context: Context, active: Array<StatusBarNotification>?): List<StatusBarNotification> {
+    // Mail apps: counted per distinct subject instead of per sender (24/09/2026). A package is also
+    // treated as mail when one of its notifications has CATEGORY_EMAIL.
+    private val EMAIL_PACKAGES = setOf(
+        "com.google.android.gm",
+        "com.samsung.android.email.provider",
+        "com.microsoft.office.outlook",
+        "ch.protonmail.android",
+        "com.yahoo.mobile.client.android.mail"
+    )
+
+    private fun isSummary(sbn: StatusBarNotification) =
+        sbn.notification.flags and Notification.FLAG_GROUP_SUMMARY != 0
+
+    /** Every non-ongoing notification (summaries included) of the selected message apps. */
+    private fun messageAppNotifications(context: Context, active: Array<StatusBarNotification>?): List<StatusBarNotification> {
         val apps = MessageAppsPrefs.get(context)
         if (active == null || apps.isEmpty()) return emptyList()
-        return active.asSequence()
-            .filter { it.packageName in apps && it.packageName != context.packageName }
-            .filter { !it.isOngoing && it.notification.flags and Notification.FLAG_GROUP_SUMMARY == 0 }
+        return active.filter { it.packageName in apps && it.packageName != context.packageName && !it.isOngoing }
+    }
+
+    /** Message-app notifications currently in the shade (no group summaries), most recent first. */
+    fun collect(context: Context, active: Array<StatusBarNotification>?): List<StatusBarNotification> =
+        messageAppNotifications(context, active)
+            .filterNot(::isSummary)
             .sortedByDescending { it.postTime }
             .take(MAX_MESSAGES)
-            .toList()
+
+    /**
+     * Badge count of one app (24/09/2026, Yann : "3 messages de la même personne comptent pour un
+     * hormis pour les mails où ça dépend du nombre d'objets différents"):
+     * - messaging: distinct conversations (shortcutId, else conversation title, else title);
+     * - mail: distinct subjects — InboxStyle lines when present, else EXTRA_TEXT (Gmail: the subject).
+     * Group summaries are ignored unless they're all the app posted (then their lines are used).
+     */
+    private fun unreadCount(pkg: String, notifs: List<StatusBarNotification>): Int {
+        if (notifs.isEmpty()) return 0
+        val children = notifs.filterNot(::isSummary)
+        val email = pkg in EMAIL_PACKAGES || notifs.any { it.notification.category == Notification.CATEGORY_EMAIL }
+        if (!email) {
+            return children.map { sbn ->
+                val extras = sbn.notification.extras
+                sbn.notification.shortcutId
+                    ?: extras.getCharSequence(Notification.EXTRA_CONVERSATION_TITLE)?.toString()?.takeIf { it.isNotBlank() }
+                    ?: extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.takeIf { it.isNotBlank() }
+                    ?: sbn.key
+            }.toSet().size
+        }
+        val source = children.ifEmpty { notifs }
+        return source.flatMap { sbn ->
+            val extras = sbn.notification.extras
+            val lines = extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES)
+                ?.mapNotNull { it?.toString()?.trim()?.takeIf { l -> l.isNotEmpty() } }
+                .orEmpty()
+            lines.ifEmpty {
+                listOf(
+                    extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()?.trim()?.takeIf { it.isNotEmpty() }
+                        ?: extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.trim()?.takeIf { it.isNotEmpty() }
+                        ?: sbn.key
+                )
+            }
+        }.toSet().size
+    }
+
+    private data class AppEntry(val packageName: String, val label: String, val count: Int)
+
+    /** Selected message apps installed (launchable) on the phone, with counts; most unread first, then by name. */
+    private fun appEntries(context: Context, active: Array<StatusBarNotification>?): List<AppEntry> {
+        val pm = context.packageManager
+        val notifs = messageAppNotifications(context, active).groupBy { it.packageName }
+        return MessageAppsPrefs.get(context)
+            .filter { it != context.packageName && pm.getLaunchIntentForPackage(it) != null }
+            .map { pkg -> AppEntry(pkg, appName(context, pkg), unreadCount(pkg, notifs[pkg].orEmpty())) }
+            .sortedWith(compareBy<AppEntry>({ -it.count }, { it.label.lowercase() }))
     }
 
     /**
@@ -92,7 +157,9 @@ object MessagesWatchSync {
 
     /** Builds and pushes the current list (no-op if unchanged since the last push). Call on the listener's main thread. */
     fun sync(context: Context, active: Array<StatusBarNotification>?) {
-        val messages = if (ServicePrefs.isEnabled(context)) collect(context, active) else emptyList()
+        val enabled = ServicePrefs.isEnabled(context)
+        val messages = if (enabled) collect(context, active) else emptyList()
+        val apps = appEntries(context, if (enabled) active else null)
 
         data class Item(val sbn: StatusBarNotification, val title: String, val text: String, val lines: List<String>, val actions: List<String>)
         val items = messages.map { sbn ->
@@ -102,7 +169,7 @@ object MessagesWatchSync {
         val signature = items.joinToString("\u0001") {
             listOf(it.sbn.key, it.sbn.postTime, it.title, it.text, it.lines.joinToString("\u0002"), it.actions.joinToString("\u0002"))
                 .joinToString("\u0003")
-        }
+        } + "\u0004" + apps.joinToString("\u0001") { "${it.packageName}\u0003${it.label}\u0003${it.count}" }
         if (signature == lastSignature) return
 
         try {
@@ -122,6 +189,16 @@ object MessagesWatchSync {
                     imageAsset(context, item.sbn)?.let { dataMap.putAsset("img_$index", it) }
                     iconPackages.add(item.sbn.packageName)
                 }
+                val appList = ArrayList<DataMap>()
+                apps.forEach { app ->
+                    appList.add(DataMap().apply {
+                        putString("packageName", app.packageName)
+                        putString("label", app.label)
+                        putInt("count", app.count)
+                    })
+                    iconPackages.add(app.packageName)
+                }
+                dataMap.putDataMapArrayList("apps", appList)
                 iconPackages.forEach { pkg ->
                     BitmapUtils.AppIcons.get(context, pkg)?.let { dataMap.putAsset("icon_$pkg", WatchSync.bitmapToAsset(it)) }
                 }

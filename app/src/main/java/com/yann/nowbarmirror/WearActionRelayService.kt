@@ -1,5 +1,6 @@
 package com.yann.nowbarmirror
 
+import android.app.PendingIntent
 import com.google.android.gms.wearable.MessageEvent
 import com.google.android.gms.wearable.WearableListenerService
 import com.yann.nowbarmirror.widget.NowBarWidgetProvider
@@ -42,6 +43,10 @@ class WearActionRelayService : WearableListenerService() {
             val json = JSONObject(String(event.data, Charsets.UTF_8))
             // NEW 24/09/2026 — watch "Messages" list: addressed by notification key alone, handled
             // by the connected MirrorNotificationListener against the live notification center.
+            if (event.path == MSG_OPEN_APP_PATH) {
+                openAppOnPhone(json.optString("pkg"))
+                return
+            }
             if (event.path.startsWith(MSG_PREFIX)) {
                 val msgKey = json.optString("key")
                 if (msgKey.isBlank()) return
@@ -90,7 +95,29 @@ class WearActionRelayService : WearableListenerService() {
         }
     }
 
+    /**
+     * NEW 24/09/2026 — app icon of the watch "Messages" list's phone row: opens that app on the
+     * phone through the same relay notification + full-screen intent as "Aff. sur tél."
+     * (NowBarWidgetProvider.postOpenOnPhone; a background service can't start an Activity itself).
+     */
+    private fun openAppOnPhone(pkg: String) {
+        if (pkg.isBlank()) return
+        val launch = packageManager.getLaunchIntentForPackage(pkg) ?: return
+        val pendingIntent = PendingIntent.getActivity(
+            this, OPEN_APP_REQUEST_CODE_BASE + (pkg.hashCode() and 0xFFFF), launch,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        val label = try {
+            packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString()
+        } catch (_: Exception) {
+            pkg
+        }
+        NowBarWidgetProvider.postOpenOnPhone(applicationContext, label, "", BitmapUtils.AppIcons.get(applicationContext, pkg), pendingIntent)
+    }
+
     companion object {
+        private const val OPEN_APP_REQUEST_CODE_BASE = 6_000_000
+        const val MSG_OPEN_APP_PATH = "/msgdetail/openapp"
         const val ACTION_PATH = "/notifdetail/action"
         const val DISMISS_PATH = "/notifdetail/dismiss"
         const val OPEN_PATH = "/notifdetail/open"

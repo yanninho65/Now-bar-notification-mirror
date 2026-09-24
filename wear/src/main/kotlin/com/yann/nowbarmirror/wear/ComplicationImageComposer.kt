@@ -341,8 +341,9 @@ object ComplicationImageComposer {
         val canvas = Canvas(bitmap)
         val shown = messages.take(4)
         if (shown.isEmpty()) {
-            drawPlaceholder(canvas, ROUND_CENTER, ROUND_CENTER - 30f, TOP_PLACEHOLDER_RADIUS)
-            drawFittedText(canvas, "Aucun message", ROUND_CENTER, ROUND_CENTER + 50f, 30f, 20f, 230f, 3f, ellipsizeIfNeeded = true)
+            // UPDATED 24/09/2026 (Yann : "une enveloppe en haut et en dessous un zéro").
+            drawEnvelope(canvas, ROUND_CENTER, ROUND_CENTER - 48f, 150f, 100f)
+            drawFittedText(canvas, "0", ROUND_CENTER, ROUND_CENTER + 76f, 96f, 60f, 200f, 6f)
             return bitmap
         }
         // (dx, dy) offsets from the center + contact radius — all fit inside the 160 px round.
@@ -371,6 +372,28 @@ object ComplicationImageComposer {
             }
         }
         return bitmap
+    }
+
+    /** White outlined envelope (body + flap "V"), with a thin dark outline so it reads on any watch face. */
+    private fun drawEnvelope(canvas: Canvas, cx: Float, cy: Float, width: Float, height: Float) {
+        val rect = RectF(cx - width / 2f, cy - height / 2f, cx + width / 2f, cy + height / 2f)
+        val flap = android.graphics.Path().apply {
+            moveTo(rect.left + 6f, rect.top + 6f)
+            lineTo(cx, cy + height * 0.12f)
+            lineTo(rect.right - 6f, rect.top + 6f)
+        }
+        val outline = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeJoin = Paint.Join.ROUND
+            strokeCap = Paint.Cap.ROUND
+            color = Color.BLACK
+            strokeWidth = 16f
+        }
+        val stroke = Paint(outline).apply { color = Color.WHITE; strokeWidth = 9f }
+        listOf(outline, stroke).forEach { paint ->
+            canvas.drawRoundRect(rect, 14f, 14f, paint)
+            canvas.drawPath(flap, paint)
+        }
     }
 
     private val INITIAL_COLORS = intArrayOf(
