@@ -229,7 +229,14 @@ object ComplicationImageComposer {
 
         drawBlackBackground(canvas)
 
-        val notifImage = match?.notifImage
+        // NEW 24/09/2026 — no match: the widget's football-pitch glyph with "0" below, same
+        // format as the empty "Messages" complication.
+        if (match == null) {
+            drawEmptyState(canvas, EmptyGlyph.PITCH)
+            return bitmap
+        }
+
+        val notifImage = match.notifImage
         if (notifImage != null) {
             drawFittedBitmap(canvas, notifImage, ROUND_CENTER, TOP_ROW_CENTER_Y, TOP_NOTIF_MAX_WIDTH, TOP_NOTIF_MAX_HEIGHT)
         } else {
@@ -237,12 +244,12 @@ object ComplicationImageComposer {
         }
 
         drawFittedText(
-            canvas, match?.scoreText() ?: "vs",
+            canvas, match.scoreText(),
             ROUND_CENTER, SCORE_CENTER_Y,
             SCORE_MAX_TEXT_SIZE, SCORE_MIN_TEXT_SIZE, SCORE_MAX_TEXT_WIDTH, SCORE_STROKE_WIDTH
         )
 
-        val periodLabel = match?.let { MatchClock.label(it) }.orEmpty()
+        val periodLabel = MatchClock.label(match)
         if (periodLabel.isNotBlank()) {
             drawFittedText(
                 canvas, periodLabel,
@@ -280,8 +287,15 @@ object ComplicationImageComposer {
 
         drawBlackBackground(canvas)
 
-        val notifImage = notification?.image
-        val appIcon = notification?.appIcon
+        // NEW 24/09/2026 — no notification: the widget's bell glyph with "0" below, same format
+        // as the empty "Messages" complication.
+        if (notification == null) {
+            drawEmptyState(canvas, EmptyGlyph.BELL)
+            return bitmap
+        }
+
+        val notifImage = notification.image
+        val appIcon = notification.appIcon
         when {
             notifImage != null && appIcon != null -> {
                 // Les deux existent : côte à côte, image à gauche / icône à droite — l'icône ne
@@ -302,7 +316,7 @@ object ComplicationImageComposer {
             else -> drawPlaceholder(canvas, ROUND_CENTER, NOTIF_IMAGE_CENTER_Y, TOP_PLACEHOLDER_RADIUS)
         }
 
-        val title = notification?.title.orEmpty()
+        val title = notification.title
         if (title.isNotBlank()) {
             drawFittedText(
                 canvas, title,
@@ -312,7 +326,7 @@ object ComplicationImageComposer {
             )
         }
 
-        val body = notification?.text.orEmpty()
+        val body = notification.text
         if (body.isNotBlank()) {
             drawWrappedBodyText(
                 canvas, body,
@@ -320,13 +334,6 @@ object ComplicationImageComposer {
                 NOTIF_BODY_MAX_WIDTH, NOTIF_BODY_MAX_LINES, NOTIF_BODY_MAX_HEIGHT_PX,
                 NOTIF_BODY_MAX_TEXT_SIZE, NOTIF_BODY_MIN_TEXT_SIZE,
                 NOTIF_BODY_LINE_SPACING_MULT, NOTIF_BODY_STROKE_WIDTH
-            )
-        } else if (notification == null) {
-            drawFittedText(
-                canvas, "Aucune notification",
-                ROUND_CENTER, NOTIF_TITLE_CENTER_Y + 44f,
-                26f, 20f, NOTIF_BODY_MAX_WIDTH, 3f,
-                ellipsizeIfNeeded = true
             )
         }
 
@@ -345,11 +352,7 @@ object ComplicationImageComposer {
         drawBlackBackground(canvas)
         val shown = messages.take(4)
         if (shown.isEmpty()) {
-            // UPDATED 24/09/2026 (Yann: the WhatsApp outline without the handset, same size as
-            // WhatsApp's own complication — measured on his screenshot: glyph ~0.6 r wide, centered
-            // 0.39 r above the middle; count ~0.43 r tall, 0.33 r below).
-            drawChatBubble(canvas, ROUND_CENTER, ROUND_CENTER - 62f, 43f)
-            drawFittedText(canvas, "0", ROUND_CENTER, ROUND_CENTER + 53f, 96f, 70f, 200f, 6f)
+            drawEmptyState(canvas, EmptyGlyph.BUBBLE)
             return bitmap
         }
         // (dx, dy) offsets from the center + contact radius — all fit inside the 160 px round.
@@ -385,6 +388,94 @@ object ComplicationImageComposer {
         canvas.drawCircle(ROUND_CENTER, ROUND_CENTER, ROUND_RADIUS, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK })
     }
 
+    private enum class EmptyGlyph { BUBBLE, PITCH, BELL }
+
+    // Empty-state layout shared by the three SMALL_IMAGE complications (24/09/2026). Sized on
+    // Yann's screenshot of WhatsApp's own complication: glyph ~90 px tall centered 62 px above the
+    // middle, "0" ~0.43 r tall centered 53 px below it.
+    private const val EMPTY_GLYPH_CENTER_Y = ROUND_CENTER - 62f
+    private const val EMPTY_GLYPH_HEIGHT = 88f
+
+    /** Glyph at the top, "0" below — "Messages" (bubble), "Score en direct" (pitch), "Notification" (bell). */
+    private fun drawEmptyState(canvas: Canvas, glyph: EmptyGlyph) {
+        when (glyph) {
+            EmptyGlyph.BUBBLE -> drawChatBubble(canvas, ROUND_CENTER, EMPTY_GLYPH_CENTER_Y, 43f)
+            EmptyGlyph.PITCH -> drawPitch(canvas, ROUND_CENTER, EMPTY_GLYPH_CENTER_Y, EMPTY_GLYPH_HEIGHT)
+            EmptyGlyph.BELL -> drawBell(canvas, ROUND_CENTER, EMPTY_GLYPH_CENTER_Y, EMPTY_GLYPH_HEIGHT)
+        }
+        drawFittedText(canvas, "0", ROUND_CENTER, ROUND_CENTER + 53f, 96f, 70f, 200f, 6f)
+    }
+
+    /** White line stroke with a thin dark outline under it — same style for every empty-state glyph. */
+    private fun glyphPaints(strokeWidth: Float): Pair<Paint, Paint> {
+        val outline = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeJoin = Paint.Join.ROUND
+            strokeCap = Paint.Cap.ROUND
+            color = Color.BLACK
+            this.strokeWidth = strokeWidth + 5f
+        }
+        return outline to Paint(outline).apply { color = Color.WHITE; this.strokeWidth = strokeWidth }
+    }
+
+    /**
+     * Phone widget's ic_football_pitch.xml, redrawn (24-unit viewport: border 3..21 × 2..22,
+     * halfway line, center circle r 3.2, both penalty areas) scaled to [height], centered on ([cx], [cy]).
+     */
+    private fun drawPitch(canvas: Canvas, cx: Float, cy: Float, height: Float) {
+        val k = height / 20f
+        fun x(u: Float) = cx + (u - 12f) * k
+        fun y(u: Float) = cy + (u - 12f) * k
+        val path = android.graphics.Path().apply {
+            addRect(x(3f), y(2f), x(21f), y(22f), android.graphics.Path.Direction.CW)
+            moveTo(x(3f), y(12f)); lineTo(x(21f), y(12f))
+            addCircle(cx, cy, 3.2f * k, android.graphics.Path.Direction.CW)
+            moveTo(x(7f), y(2f)); lineTo(x(7f), y(7f)); lineTo(x(17f), y(7f)); lineTo(x(17f), y(2f))
+            moveTo(x(7f), y(22f)); lineTo(x(7f), y(17f)); lineTo(x(17f), y(17f)); lineTo(x(17f), y(22f))
+        }
+        val (outline, stroke) = glyphPaints(1.4f * k)
+        canvas.drawPath(path, outline)
+        canvas.drawPath(path, stroke)
+    }
+
+    /**
+     * Phone widget's ic_notification_bell.xml (Material "notifications" glyph), filled white,
+     * scaled so its 19.5-unit height becomes [height], centered on ([cx], [cy]).
+     */
+    private fun drawBell(canvas: Canvas, cx: Float, cy: Float, height: Float) {
+        val k = height / 19.5f
+        val path = android.graphics.Path().apply {
+            // Clapper: M12,22 c1.1,0 2,-0.9 2,-2 h-4 C10,21.1 10.9,22 12,22 z
+            moveTo(12f, 22f)
+            cubicTo(13.1f, 22f, 14f, 21.1f, 14f, 20f)
+            lineTo(10f, 20f)
+            cubicTo(10f, 21.1f, 10.9f, 22f, 12f, 22f)
+            close()
+            // Body (the source path's relative commands, made absolute).
+            moveTo(18f, 16f)
+            lineTo(18f, 11f)
+            cubicTo(18f, 7.93f, 16.36f, 5.36f, 13.5f, 4.68f)
+            lineTo(13.5f, 4f)
+            cubicTo(13.5f, 3.17f, 12.83f, 2.5f, 12f, 2.5f)
+            cubicTo(11.17f, 2.5f, 10.5f, 3.17f, 10.5f, 4f)
+            lineTo(10.5f, 4.68f)
+            cubicTo(7.63f, 5.36f, 6f, 7.92f, 6f, 11f)
+            lineTo(6f, 16f)
+            lineTo(4f, 18f)
+            lineTo(4f, 19f)
+            lineTo(20f, 19f)
+            lineTo(20f, 18f)
+            close()
+            // Viewport bell spans y 2.5..22 (center 12.25), x 4..20 (center 12).
+            transform(Matrix().apply {
+                setTranslate(-12f, -12.25f)
+                postScale(k, k)
+                postTranslate(cx, cy)
+            })
+        }
+        canvas.drawPath(path, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE })
+    }
+
     /**
      * WhatsApp-style chat bubble outline without the handset: a circle of [radius] around
      * ([cx], [cy]) whose bottom-left opens into a small pointed tail. White stroke with a thin
@@ -405,14 +496,7 @@ object ComplicationImageComposer {
             arcTo(RectF(cx - radius, cy - radius, cx + radius, cy + radius), 152f, 320f, false)
             close()
         }
-        val outline = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.STROKE
-            strokeJoin = Paint.Join.ROUND
-            strokeCap = Paint.Cap.ROUND
-            color = Color.BLACK
-            strokeWidth = 12f
-        }
-        val stroke = Paint(outline).apply { color = Color.WHITE; strokeWidth = 7f }
+        val (outline, stroke) = glyphPaints(7f)
         canvas.drawPath(bubble, outline)
         canvas.drawPath(bubble, stroke)
     }
