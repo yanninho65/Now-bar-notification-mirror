@@ -40,6 +40,19 @@ class WearActionRelayService : WearableListenerService() {
     override fun onMessageReceived(event: MessageEvent) {
         try {
             val json = JSONObject(String(event.data, Charsets.UTF_8))
+            // NEW 24/09/2026 — watch "Messages" list: addressed by notification key alone, handled
+            // by the connected MirrorNotificationListener against the live notification center.
+            if (event.path.startsWith(MSG_PREFIX)) {
+                val msgKey = json.optString("key")
+                if (msgKey.isBlank()) return
+                when (event.path) {
+                    MSG_ACTION_PATH -> json.optInt("actionIndex", -1).takeIf { it >= 0 }
+                        ?.let { MirrorNotificationListener.fireMessageAction(msgKey, it) }
+                    MSG_DISMISS_PATH -> MirrorNotificationListener.dismissMessage(msgKey)
+                    MSG_OPEN_PATH -> MirrorNotificationListener.openMessageOnPhone(msgKey)
+                }
+                return
+            }
             val kind = json.optString("kind")
             val key = json.optString("key")
             val postTimeMillis = json.optLong("postTimeMillis", -1L)
@@ -81,5 +94,9 @@ class WearActionRelayService : WearableListenerService() {
         const val ACTION_PATH = "/notifdetail/action"
         const val DISMISS_PATH = "/notifdetail/dismiss"
         const val OPEN_PATH = "/notifdetail/open"
+        const val MSG_PREFIX = "/msgdetail/"
+        const val MSG_ACTION_PATH = "/msgdetail/action"
+        const val MSG_DISMISS_PATH = "/msgdetail/dismiss"
+        const val MSG_OPEN_PATH = "/msgdetail/open"
     }
 }

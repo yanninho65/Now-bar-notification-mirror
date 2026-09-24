@@ -44,6 +44,20 @@ object PhoneRelay {
         send(context, OPEN_PATH, payload(info))
     }
 
+    // NEW 24/09/2026 — "Messages" list (MessagesActivity), addressed by the phone notification key
+    // alone; handled on the phone by WearActionRelayService -> MirrorNotificationListener.
+    fun sendMessageAction(context: Context, key: String, actionIndex: Int) {
+        send(context, "/msgdetail/action", JSONObject().put("key", key).put("actionIndex", actionIndex).toString().toByteArray(Charsets.UTF_8))
+    }
+
+    fun sendMessageDismiss(context: Context, key: String) {
+        send(context, "/msgdetail/dismiss", JSONObject().put("key", key).toString().toByteArray(Charsets.UTF_8))
+    }
+
+    fun sendMessageOpen(context: Context, key: String) {
+        send(context, "/msgdetail/open", JSONObject().put("key", key).toString().toByteArray(Charsets.UTF_8))
+    }
+
     private inline fun payload(info: NotificationInfo, extra: JSONObject.() -> Unit = {}): ByteArray {
         val json = JSONObject().apply {
             put("kind", info.kind)

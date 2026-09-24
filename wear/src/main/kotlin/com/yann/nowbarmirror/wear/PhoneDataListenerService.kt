@@ -42,6 +42,13 @@ class PhoneDataListenerService : WearableListenerService() {
                     PhoneDataLayer.NOTIFICATION_PATH -> {
                         NotificationInfoStore.setLive(NotificationDataCodec.decode(applicationContext, dataMap), timestamp)
                         PhoneDataLayer.requestComplicationRefresh(applicationContext, NotificationComplicationService::class.java)
+                        // "Messages" hides the message already shown here (24/09/2026) — must follow it.
+                        PhoneDataLayer.requestComplicationRefresh(applicationContext, MessagesComplicationService::class.java)
+                    }
+                    PhoneDataLayer.MESSAGES_PATH -> {
+                        MessagesStore.setLive(MessagesDataCodec.decode(applicationContext, dataMap), timestamp)
+                        PhoneDataLayer.requestComplicationRefresh(applicationContext, MessagesComplicationService::class.java)
+                        MessagesStore.onChanged?.invoke()
                     }
                 }
             }

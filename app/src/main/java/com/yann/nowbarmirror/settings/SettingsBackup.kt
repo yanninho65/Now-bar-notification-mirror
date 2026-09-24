@@ -26,6 +26,7 @@ object SettingsBackup {
             put("widget_actions_enabled", WidgetActionsPrefs.isEnabled(context))
             put("modes", modes)
             put("invert_title_text", inverted)
+            put("message_apps", org.json.JSONArray().apply { MessageAppsPrefs.get(context).forEach { put(it) } })
         }.toString(2)
     }
 
@@ -58,6 +59,10 @@ object SettingsBackup {
             for (i in 0 until inverted.length()) {
                 AppMirrorPrefs.setInvertTitleText(context, inverted.getString(i), true)
             }
+        }
+
+        root.optJSONArray("message_apps")?.let { apps ->
+            MessageAppsPrefs.set(context, (0 until apps.length()).map { apps.getString(it) }.toSet())
         }
 
         if (root.has("service_enabled")) {

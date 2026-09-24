@@ -242,17 +242,7 @@ class NotificationDetailActivity : Activity() {
      * le clic normal (OnClickListener, posé séparément par l'appelant) continue de se déclencher
      * comme avant.
      */
-    private fun addPressFeedback(view: View) {
-        view.setOnTouchListener { v, event ->
-            when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN ->
-                    v.animate().scaleX(0.94f).scaleY(0.94f).setDuration(80).start()
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL ->
-                    v.animate().scaleX(1f).scaleY(1f).setDuration(120).start()
-            }
-            false
-        }
-    }
+    private fun addPressFeedback(view: View) = DetailViews.addPressFeedback(view)  // shared since 24/09/2026
 
     /**
      * UPDATED 22/09/2026 (Yann : "Ne pas mettre de fond sur le texte de la notif comme les
@@ -266,21 +256,7 @@ class NotificationDetailActivity : Activity() {
      * setTextAppearance n'existe qu'à partir de l'API 23, celle-ci (Context, Int) fonctionne à
      * toutes les API et évite d'ajouter androidx.core comme dépendance juste pour ça.
      */
-    @Suppress("DEPRECATION")
-    private fun lineCard(text: String): TextView {
-        return TextView(this).apply {
-            this.text = text
-            setTextAppearance(context, android.R.style.TextAppearance_DeviceDefault_Medium)
-            setTextColor(resources.getColor(R.color.detail_text_primary, theme))
-            gravity = android.view.Gravity.CENTER
-            val params = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            )
-            params.bottomMargin = dp(10)
-            layoutParams = params
-        }
-    }
+    private fun lineCard(text: String): TextView = DetailViews.lineCard(this, text)
 
     /**
      * Une pilule d'action PLEINE LARGEUR, empilée verticalement avec les autres — style menu de
@@ -294,49 +270,15 @@ class NotificationDetailActivity : Activity() {
      * de textSize/typeface gras codés en dur ici), et le libellé est forcé sur UNE seule ligne
      * (tronqué avec "…" s'il ne tient pas) plutôt que de pouvoir passer sur plusieurs lignes.
      */
-    private fun actionChip(label: String, onClick: () -> Unit): Button {
-        return Button(this).apply {
-            text = label
-            isAllCaps = false
-            setTextColor(resources.getColor(R.color.detail_text_primary, theme))
-            maxLines = 1
-            ellipsize = android.text.TextUtils.TruncateAt.END
-            gravity = android.view.Gravity.CENTER
-            setBackgroundResource(R.drawable.bg_action_chip)
-            setPadding(dp(20), dp(14), dp(20), dp(14))
-            minWidth = 0
-            minimumWidth = 0
-            minHeight = 0
-            minimumHeight = 0
-            val params = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            )
-            params.bottomMargin = dp(8)
-            layoutParams = params
-            setOnClickListener { onClick() }
-            addPressFeedback(this)
-        }
-    }
+    private fun actionChip(label: String, onClick: () -> Unit): Button = DetailViews.actionChip(this, label, onClick)
 
     /** dp -> px, pour les LayoutParams/paddings construits en code (les layouts XML gèrent ça tout seuls). */
-    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+    private fun dp(value: Int): Int = DetailViews.dp(this, value)
 
     // Le chip a besoin de la même NotificationInfo que celle actuellement rendue pour adresser sa
     // demande — voir PhoneRelay.sendAction. Renseigné juste avant de construire les chips.
     private lateinit var currentInfoForActions: NotificationInfo
 
     /** Recadre [source] en cercle — même algorithme que mobile/widget/NowBarWidgetProvider.circularBitmap (dupliqué, modules Gradle distincts). */
-    private fun circularBitmap(source: Bitmap): Bitmap {
-        val size = minOf(source.width, source.height).coerceAtLeast(1)
-        val output = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(output)
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-        canvas.drawOval(RectF(0f, 0f, size.toFloat(), size.toFloat()), paint)
-        paint.xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_IN)
-        val left = (source.width - size) / 2f
-        val top = (source.height - size) / 2f
-        canvas.drawBitmap(source, -left, -top, paint)
-        return output
-    }
+    private fun circularBitmap(source: Bitmap): Bitmap = DetailViews.circularBitmap(source)
 }

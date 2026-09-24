@@ -27,6 +27,7 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import com.google.android.material.tabs.TabLayout
 import com.yann.nowbarmirror.databinding.ActivityMainBinding
 import com.yann.nowbarmirror.settings.AppSelectionActivity
+import com.yann.nowbarmirror.settings.MessageAppsActivity
 import com.yann.nowbarmirror.sport.LiveTennisApi
 import com.yann.nowbarmirror.sport.MatchResult
 import com.yann.nowbarmirror.sport.MatchesAdapter
@@ -175,6 +176,9 @@ class MainActivity : AppCompatActivity() {
 
         binding.appSelectionButton.setOnClickListener {
             startActivity(Intent(this, AppSelectionActivity::class.java))
+        }
+        binding.messageAppsButton.setOnClickListener {
+            startActivity(Intent(this, MessageAppsActivity::class.java))
         }
     }
 

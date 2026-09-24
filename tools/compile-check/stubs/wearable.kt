@@ -13,6 +13,8 @@ class DataMap {
     fun putBoolean(k: String, v: Boolean) {}
     fun putAsset(k: String, v: Asset) {}
     fun putStringArrayList(k: String, v: ArrayList<String>) {}
+    fun putDataMapArrayList(k: String, v: ArrayList<DataMap>) {}
+    fun getDataMapArrayList(k: String): ArrayList<DataMap>? = null
     fun getString(k: String): String? = null
     fun getLong(k: String): Long = 0
     fun getLong(k: String, d: Long): Long = d

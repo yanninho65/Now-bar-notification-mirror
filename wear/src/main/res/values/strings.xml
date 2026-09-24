@@ -6,4 +6,7 @@
     <string name="action_delete">Supprimer</string>
     <!-- NEW 22/09/2026, pill "ouvrir sur le téléphone" (voir NotificationDetailActivity.kt / PhoneRelay.sendOpen) -->
     <string name="action_view_on_phone">Aff. sur tél.</string>
+    <!-- NEW 24/09/2026, complication/liste "Messages" -->
+    <string name="action_view_on_watch">Aff. sur montre</string>
+    <string name="messages_empty">Aucun message</string>
 </resources>

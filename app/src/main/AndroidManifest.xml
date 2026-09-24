@@ -66,6 +66,12 @@
             android:label="@string/app_selection_title"
             android:exported="false" />
 
+        <!-- NEW 24/09/2026 : choix des applis de messagerie (complication montre "Messages"). -->
+        <activity
+            android:name=".settings.MessageAppsActivity"
+            android:label="@string/message_apps_title"
+            android:exported="false" />
+
         <!--
             PeekOpenTrampolineActivity and OpenPeekTrampolineActivity (18/09 and 20/09/2026) were
             REMOVED 20/09/2026 — see NowBarWidgetProvider's class doc, "REWORKED 20/09/2026"
@@ -155,6 +161,11 @@
                     android:scheme="wear"
                     android:host="*"
                     android:pathPrefix="/notifdetail" />
+                <!-- NEW 24/09/2026 : liste "Messages" de la montre -->
+                <data
+                    android:scheme="wear"
+                    android:host="*"
+                    android:pathPrefix="/msgdetail" />
             </intent-filter>
         </service>
 

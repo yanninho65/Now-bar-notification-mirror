@@ -90,8 +90,7 @@ object ComplicationImageComposer {
     // "SMALL_IMAGE : fond plein + tout sur une ligne").
     private const val ROUND_SIZE = 320
     private const val ROUND_CENTER = ROUND_SIZE / 2f
-    private const val ROUND_RADIUS = ROUND_SIZE / 2f
-    private const val ROUND_BACKGROUND_COLOR = "#1B1F27"
+    // Background disc (#1B1F27) REMOVED 24/09/2026: every SMALL_IMAGE is now transparent.
 
     // Ligne du HAUT — image de notif Sofascore (ratio conservé, voir
     // drawFittedBitmap) ou, à défaut (extraction échouée côté téléphone),
@@ -225,10 +224,7 @@ object ComplicationImageComposer {
         val bitmap = Bitmap.createBitmap(ROUND_SIZE, ROUND_SIZE, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
 
-        val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor(ROUND_BACKGROUND_COLOR)
-        }
-        canvas.drawCircle(ROUND_CENTER, ROUND_CENTER, ROUND_RADIUS, backgroundPaint)
+        // UPDATED 24/09/2026 (Yann : "mettre un fond transparent") — no background disc any more.
 
         val notifImage = match?.notifImage
         if (notifImage != null) {
@@ -279,10 +275,7 @@ object ComplicationImageComposer {
         val bitmap = Bitmap.createBitmap(ROUND_SIZE, ROUND_SIZE, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
 
-        val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor(ROUND_BACKGROUND_COLOR)
-        }
-        canvas.drawCircle(ROUND_CENTER, ROUND_CENTER, ROUND_RADIUS, backgroundPaint)
+        // UPDATED 24/09/2026 (Yann : "mettre un fond transparent") — no background disc any more.
 
         val notifImage = notification?.image
         val appIcon = notification?.appIcon
@@ -335,6 +328,69 @@ object ComplicationImageComposer {
         }
 
         return bitmap
+    }
+
+    /**
+     * NEW 24/09/2026 — "Messages" complication: up to 4 contact circles (most recent first: top-left,
+     * top-right, bottom-left, bottom-right; 1–3 messages are laid out centered), each with the source
+     * app's icon as a badge at its bottom-right. Transparent background. A message without a contact
+     * photo gets a colored disc with its title's initial.
+     */
+    fun composeMessagesImage(messages: List<MessageInfo>): Bitmap {
+        val bitmap = Bitmap.createBitmap(ROUND_SIZE, ROUND_SIZE, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        val shown = messages.take(4)
+        if (shown.isEmpty()) {
+            drawPlaceholder(canvas, ROUND_CENTER, ROUND_CENTER - 30f, TOP_PLACEHOLDER_RADIUS)
+            drawFittedText(canvas, "Aucun message", ROUND_CENTER, ROUND_CENTER + 50f, 30f, 20f, 230f, 3f, ellipsizeIfNeeded = true)
+            return bitmap
+        }
+        // (dx, dy) offsets from the center + contact radius — all fit inside the 160 px round.
+        val (slots, radius) = when (shown.size) {
+            1 -> listOf(0f to 0f) to 100f
+            2 -> listOf(-72f to 0f, 72f to 0f) to 64f
+            3 -> listOf(-68f to -58f, 68f to -58f, 0f to 66f) to 60f
+            else -> listOf(-68f to -68f, 68f to -68f, -68f to 68f, 68f to 68f) to 60f
+        }
+        shown.forEachIndexed { index, message ->
+            val cx = ROUND_CENTER + slots[index].first
+            val cy = ROUND_CENTER + slots[index].second
+            val image = message.image
+            if (image != null) {
+                drawCircularIcon(canvas, image, cx, cy, radius)
+            } else {
+                drawInitialDisc(canvas, message.title, cx, cy, radius)
+            }
+            message.appIcon?.let { icon ->
+                val badgeRadius = radius * 0.34f
+                val bx = cx + radius * 0.48f
+                val by = cy + radius * 0.48f
+                val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK }
+                canvas.drawCircle(bx, by, badgeRadius + 3f, ring)
+                drawCircularIcon(canvas, icon, bx, by, badgeRadius)
+            }
+        }
+        return bitmap
+    }
+
+    private val INITIAL_COLORS = intArrayOf(
+        Color.parseColor("#3F7CF4"), Color.parseColor("#2FA86B"), Color.parseColor("#E0803A"),
+        Color.parseColor("#9A5BD6"), Color.parseColor("#D65B7C"), Color.parseColor("#3AA6B9")
+    )
+
+    private fun drawInitialDisc(canvas: Canvas, title: String, cx: Float, cy: Float, radius: Float) {
+        val color = INITIAL_COLORS[(title.hashCode() and 0x7fffffff) % INITIAL_COLORS.size]
+        canvas.drawCircle(cx, cy, radius, Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = color })
+        val initial = title.trim().firstOrNull { it.isLetterOrDigit() }?.uppercaseChar()?.toString() ?: "?"
+        val paint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+            this.color = Color.WHITE
+            isFakeBoldText = true
+            textAlign = Paint.Align.CENTER
+            textSize = radius
+        }
+        val bounds = Rect()
+        paint.getTextBounds(initial, 0, initial.length, bounds)
+        canvas.drawText(initial, cx, cy - bounds.exactCenterY(), paint)
     }
 
     /**
@@ -505,7 +561,7 @@ object ComplicationImageComposer {
      * Yann — "le logo de l'application ne doit pas être sur l'image"). BitmapShader plutôt qu'un
      * simple drawBitmap : pas de coins carrés qui dépasseraient du cercle pour une icône non déjà
      * circulaire. Pas d'anneau de fond ici (contrairement à l'ancien badge) : l'icône est posée
-     * directement sur le fond plein du rond ([ROUND_BACKGROUND_COLOR]), pas sur l'image, donc
+     * directement sur le fond du rond (transparent depuis le 24/09/2026), pas sur l'image, donc
      * rien à détacher visuellement.
      */
     private fun drawCircularIcon(canvas: Canvas, bitmap: Bitmap, centerX: Float, centerY: Float, radius: Float) {

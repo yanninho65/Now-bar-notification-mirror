@@ -754,14 +754,22 @@ class NowBarWidgetProvider : AppWidgetProvider() {
                 .firstOrNull { it.key == key && it.postTimeMillis == postTimeMillis } ?: return false
             val content = resolveAllNotifEntryContent(context, entry)
             val openIntent = content.openIntent ?: return false
+            return postOpenOnPhone(context, content.title, content.text, content.image, openIntent)
+        }
 
+        /**
+         * The relay-notification + full-screen-intent mechanism of [openEntry] (see its doc),
+         * extracted 24/09/2026 so the watch "Messages" list can reuse it
+         * (MirrorNotificationListener.openMessageOnPhone).
+         */
+        fun postOpenOnPhone(context: Context, title: String, text: String, image: Bitmap?, openIntent: PendingIntent): Boolean {
             return try {
                 ensureOpenOnPhoneChannel(context)
                 val builder = NotificationCompat.Builder(context, OPEN_ON_PHONE_CHANNEL_ID)
                     .setSmallIcon(R.drawable.ic_stat_mirror)
-                    .setContentTitle(content.title.ifBlank { context.getString(R.string.app_name) })
-                    .setContentText(content.text)
-                    .setStyle(NotificationCompat.BigTextStyle().bigText(content.text))
+                    .setContentTitle(title.ifBlank { context.getString(R.string.app_name) })
+                    .setContentText(text)
+                    .setStyle(NotificationCompat.BigTextStyle().bigText(text))
                     .setPriority(NotificationCompat.PRIORITY_HIGH)
                     .setCategory(NotificationCompat.CATEGORY_STATUS)
                     .setAutoCancel(true)
@@ -770,7 +778,7 @@ class NowBarWidgetProvider : AppWidgetProvider() {
                     // accordée (voir doc juste au-dessus) ; se dégrade tout seul en heads-up
                     // normal sinon, d'où setContentIntent conservé ci-dessus comme repli.
                     .setFullScreenIntent(openIntent, /* highPriority = */ true)
-                content.image?.let { builder.setLargeIcon(it) }
+                image?.let { builder.setLargeIcon(it) }
                 NotificationManagerCompat.from(context).notify(OPEN_ON_PHONE_NOTIFICATION_ID, builder.build())
                 if (isDeviceLocked(context)) scheduleAutoCancelOpenOnPhone(context)
                 true

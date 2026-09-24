@@ -152,6 +152,19 @@
                 android:textStyle="bold"
                 android:textSize="16sp" />
 
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/message_apps_button"
+                style="@style/Widget.MaterialComponents.Button.TextButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="start|center_vertical"
+                android:padding="16dp"
+                android:text="@string/message_apps_title"
+                android:textAllCaps="false"
+                android:textColor="@color/one_ui_primary"
+                android:textStyle="bold"
+                android:textSize="16sp" />
+
         </LinearLayout>
 
         <TextView

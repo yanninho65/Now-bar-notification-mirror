@@ -1,6 +1,7 @@
 package com.yann.nowbarmirror.wear
 
 import android.app.PendingIntent
+import android.content.Context
 import android.content.Intent
 import android.graphics.drawable.Icon
 import androidx.wear.watchface.complications.data.*
@@ -60,10 +61,21 @@ class NotificationComplicationService : ComplicationDataSourceService() {
             )
         }
 
+    // NEW 24/09/2026 — lets "Messages" know whether this complication is on the watch face (see
+    // [Presence]). A request also marks the instance active, for slots placed before this tracking existed.
+    override fun onComplicationActivated(complicationInstanceId: Int, type: ComplicationType) {
+        Presence.add(this, complicationInstanceId)
+    }
+
+    override fun onComplicationDeactivated(complicationInstanceId: Int) {
+        Presence.remove(this, complicationInstanceId)
+    }
+
     override fun onComplicationRequest(
         request: ComplicationRequest,
         listener: ComplicationRequestListener
     ) {
+        Presence.add(this, request.complicationInstanceId)
         // Re-read on every request (see the class doc, FIXED 21/09 / UPDATED 22/09/2026), now
         // through the shared PhoneDataLayer.readNotification (AUDIT 23/09/2026): path-specific
         // query instead of listing every DataItem, and no image decoding when the item hasn't
@@ -120,5 +132,30 @@ class NotificationComplicationService : ComplicationDataSourceService() {
 
     companion object {
         private val smallImageCache = ComposedImageCache()
+    }
+
+    /** Instance ids of this complication currently placed on a watch face (persisted). */
+    object Presence {
+        private const val PREFS = "notification_complication_presence"
+        private const val KEY_IDS = "ids"
+
+        private fun prefs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+
+        fun isActive(context: Context): Boolean = prefs(context).getStringSet(KEY_IDS, null).orEmpty().isNotEmpty()
+
+        fun add(context: Context, id: Int) {
+            if (id < 0) return
+            val ids = prefs(context).getStringSet(KEY_IDS, null).orEmpty()
+            if (id.toString() in ids) return
+            prefs(context).edit().putStringSet(KEY_IDS, ids + id.toString()).apply()
+            PhoneDataLayer.requestComplicationRefresh(context, MessagesComplicationService::class.java)
+        }
+
+        fun remove(context: Context, id: Int) {
+            val ids = prefs(context).getStringSet(KEY_IDS, null).orEmpty()
+            if (id.toString() !in ids) return
+            prefs(context).edit().putStringSet(KEY_IDS, ids - id.toString()).apply()
+            PhoneDataLayer.requestComplicationRefresh(context, MessagesComplicationService::class.java)
+        }
     }
 }

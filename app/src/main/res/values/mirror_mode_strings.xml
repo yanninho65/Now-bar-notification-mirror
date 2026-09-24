@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_selection_title">Applications à mirrorer</string>
+    <string name="message_apps_title">Applications de messagerie (montre)</string>
+    <string name="message_apps_hint">Leurs notifications alimentent la complication montre « Messages ».</string>
     <string name="installed_apps_section_label">Applications installées</string>
 
     <!-- Order must match MirrorMode enum ordinals: NONE, LATEST, ALL -->

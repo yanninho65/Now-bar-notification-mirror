@@ -5,6 +5,12 @@
 
     <queries>
         <package android:name="com.sofascore.results" />
+        <!-- NEW 24/09/2026 : "Aff. sur montre" de la liste Messages — voir si l'appli source
+             existe aussi sur la montre (getLaunchIntentForPackage). -->
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
     </queries>
 
     <application
@@ -21,6 +27,12 @@
              plein écran, sans barre de titre (style Galaxy Watch). -->
         <activity
             android:name=".NotificationDetailActivity"
+            android:exported="true"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+
+        <!-- NEW 24/09/2026 : liste ouverte par un tap sur la complication "Messages". -->
+        <activity
+            android:name=".MessagesActivity"
             android:exported="true"
             android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
 
@@ -57,6 +69,7 @@
                 <action android:name="com.google.android.gms.wearable.DATA_CHANGED" />
                 <data android:scheme="wear" android:host="*" android:pathPrefix="/match" />
                 <data android:scheme="wear" android:host="*" android:pathPrefix="/notification" />
+                <data android:scheme="wear" android:host="*" android:pathPrefix="/messages" />
             </intent-filter>
         </service>
 
@@ -81,6 +94,25 @@
                  téléphone (PhoneDataListenerService -> requestUpdateAll) ; le rappel périodique
                  ne sert que de filet de sécurité, et à 60 s il réveillait la montre chaque minute,
                  jour et nuit, pour relire l'item Data Layer et recomposer l'image. -->
+            <meta-data
+                android:name="android.support.wearable.complications.UPDATE_PERIOD_SECONDS"
+                android:value="600" />
+        </service>
+
+        <!-- Complication "Messages" (24/09/2026) : 4 derniers messages (photo de contact + badge
+             appli), SMALL_IMAGE uniquement — voir MessagesComplicationService.kt. -->
+        <service
+            android:name=".MessagesComplicationService"
+            android:exported="true"
+            android:label="Messages"
+            android:icon="@drawable/ic_messages"
+            android:permission="com.google.android.wearable.permissions.BIND_COMPLICATION_PROVIDER">
+            <intent-filter>
+                <action android:name="android.support.wearable.complications.ACTION_COMPLICATION_UPDATE_REQUEST" />
+            </intent-filter>
+            <meta-data
+                android:name="android.support.wearable.complications.SUPPORTED_TYPES"
+                android:value="SMALL_IMAGE" />
             <meta-data
                 android:name="android.support.wearable.complications.UPDATE_PERIOD_SECONDS"
                 android:value="600" />

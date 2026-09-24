@@ -9,6 +9,8 @@ import android.graphics.drawable.AdaptiveIconDrawable
 import android.graphics.drawable.Icon
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.service.notification.NotificationListenerService
 import android.service.notification.NotificationListenerService.RankingMap
 import android.service.notification.StatusBarNotification
@@ -16,6 +18,7 @@ import androidx.core.app.NotificationCompat
 import android.widget.Toast
 import com.yann.nowbarmirror.settings.AppMirrorPrefs
 import com.yann.nowbarmirror.settings.LatestModePrefs
+import com.yann.nowbarmirror.settings.MessageAppsPrefs
 import com.yann.nowbarmirror.settings.MirrorMode
 import com.yann.nowbarmirror.settings.ServicePrefs
 import com.yann.nowbarmirror.settings.WidgetActionsPrefs
@@ -54,6 +57,77 @@ class MirrorNotificationListener : NotificationListenerService() {
 
         // NEW 21/09/2026, watch detail screen — see [messageLinesFor]'s doc.
         private const val MAX_DETAIL_LINES = 10
+
+        // NEW 24/09/2026, watch "Messages" complication (see MessagesWatchSync). The connected
+        // instance, so the settings screen and WearActionRelayService can reach
+        // getActiveNotifications()/cancelNotification() directly (no startService from background).
+        @Volatile
+        private var connected: MirrorNotificationListener? = null
+        private const val MESSAGES_SYNC_DELAY_MILLIS = 400L
+
+        /** Re-pushes the message list (e.g. after the message-app selection changed). */
+        fun requestMessagesSync() {
+            connected?.let { it.mainHandler.post { it.scheduleMessagesSync() } }
+        }
+
+        /** Watch "Messages" list: fires action [actionIndex] of MessagesWatchSync.actionsFor for notification [key]. */
+        fun fireMessageAction(key: String, actionIndex: Int) {
+            connected?.let { it.mainHandler.post { it.doFireMessageAction(key, actionIndex) } }
+        }
+
+        fun dismissMessage(key: String) {
+            connected?.let { it.mainHandler.post { it.cancelOriginal(key) } }
+        }
+
+        fun openMessageOnPhone(key: String) {
+            connected?.let { it.mainHandler.post { it.doOpenMessageOnPhone(key) } }
+        }
+    }
+
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val messagesSyncRunnable = Runnable {
+        if (ready.get()) {
+            try {
+                MessagesWatchSync.sync(applicationContext, activeNotifications)
+            } catch (_: Throwable) {
+            }
+        }
+    }
+
+    /** Coalesced (bursts of posts/updates → one push). */
+    private fun scheduleMessagesSync() {
+        mainHandler.removeCallbacks(messagesSyncRunnable)
+        mainHandler.postDelayed(messagesSyncRunnable, MESSAGES_SYNC_DELAY_MILLIS)
+    }
+
+    private fun isMessageApp(pkg: String) =
+        pkg != packageName && MessageAppsPrefs.isMessageApp(applicationContext, pkg)
+
+    private fun findActive(key: String): StatusBarNotification? =
+        try { activeNotifications?.firstOrNull { it.key == key } } catch (_: Throwable) { null }
+
+    private fun doFireMessageAction(key: String, actionIndex: Int) {
+        val sbn = findActive(key) ?: return
+        val action = MessagesWatchSync.actionsFor(sbn.notification).getOrNull(actionIndex) ?: return
+        try {
+            action.pendingIntent.send()
+            // Same reason as WidgetAction.dismissesOnFire: replaying a mark-read/delete action
+            // doesn't auto-cancel the notification like a real tap in the shade would.
+            if (action.dismissesOnFire) cancelOriginal(key)
+        } catch (_: Throwable) {
+        }
+    }
+
+    private fun doOpenMessageOnPhone(key: String) {
+        val sbn = findActive(key) ?: return
+        val openIntent = sbn.notification.contentIntent ?: return
+        NowBarWidgetProvider.postOpenOnPhone(
+            applicationContext,
+            title = MessagesWatchSync.titleOf(applicationContext, sbn),
+            text = MessagesWatchSync.textOf(sbn),
+            image = NotificationImageExtractor.extract(applicationContext, sbn),
+            openIntent = openIntent
+        )
     }
 
     private val ready = AtomicBoolean(false)
@@ -79,6 +153,8 @@ class MirrorNotificationListener : NotificationListenerService() {
     override fun onListenerConnected() {
         super.onListenerConnected()
         ready.set(true)
+        connected = this
+        scheduleMessagesSync()
         createChannel()
         // This service is not a foreground service, so Android (One UI in particular) can and
         // does kill its process in the background. When it comes back, onListenerConnected()
@@ -407,10 +483,17 @@ class MirrorNotificationListener : NotificationListenerService() {
         }
     }
 
+    override fun onListenerDisconnected() {
+        super.onListenerDisconnected()
+        if (connected === this) connected = null
+    }
+
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         if (!ready.get()) return
         if (!ServicePrefs.isEnabled(applicationContext)) return
         if (sbn.packageName == packageName) return
+        // NEW 24/09/2026 — watch "Messages" complication, independent of the mirror mode below.
+        if (isMessageApp(sbn.packageName)) scheduleMessagesSync()
         if (sbn.isOngoing) return
         // Group-summary notifications (e.g. WhatsApp's "X new messages" bundle) carry no
         // per-conversation photo or actions — skip them so they don't overwrite the real one.
@@ -460,6 +543,7 @@ class MirrorNotificationListener : NotificationListenerService() {
         reason: Int
     ) {
         if (!ready.get()) return
+        if (isMessageApp(sbn.packageName)) scheduleMessagesSync()
 
         if (sbn.packageName == packageName) {
             // Only react to a *genuine* dismissal of one of our mirrors (user swipe, or
@@ -723,16 +807,9 @@ class MirrorNotificationListener : NotificationListenerService() {
      * Capped at [MAX_DETAIL_LINES] messages, same reasoning as Sofascore's own 6-line Android cap
      * — this is a quick glance on a watch screen, not a full chat history browser.
      */
-    private fun messageLinesFor(sbn: StatusBarNotification, conversationTitle: String): List<String> {
-        val style = NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(sbn.notification)
-            ?: return emptyList()
-        val all = (style.historicMessages + style.messages)
-        return all.takeLast(MAX_DETAIL_LINES).reversed().mapNotNull { message ->
-            val text = message.text?.toString()?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
-            val sender = message.person?.name?.toString()?.takeIf { it.isNotBlank() && it != conversationTitle }
-            if (sender != null) "$sender : $text" else text
-        }
-    }
+    private fun messageLinesFor(sbn: StatusBarNotification, conversationTitle: String): List<String> =
+        // Single implementation shared with the "Messages" sync (24/09/2026).
+        MessagesWatchSync.messageLines(sbn, conversationTitle, MAX_DETAIL_LINES)
 
     private fun mirror(sbn: StatusBarNotification, mirrorId: Int) {
         val n = sbn.notification
