@@ -90,7 +90,10 @@ object ComplicationImageComposer {
     // "SMALL_IMAGE : fond plein + tout sur une ligne").
     private const val ROUND_SIZE = 320
     private const val ROUND_CENTER = ROUND_SIZE / 2f
-    // Background disc (#1B1F27) REMOVED 24/09/2026: every SMALL_IMAGE is now transparent.
+    // UPDATED 24/09/2026: every SMALL_IMAGE is drawn on a pure black disc ([drawBlackBackground])
+    // — a transparent image let the watch face's default grey slot background show through (Yann,
+    // capture à l'appui). The old #1B1F27 disc is gone too.
+    private const val ROUND_RADIUS = ROUND_SIZE / 2f
 
     // Ligne du HAUT — image de notif Sofascore (ratio conservé, voir
     // drawFittedBitmap) ou, à défaut (extraction échouée côté téléphone),
@@ -224,7 +227,7 @@ object ComplicationImageComposer {
         val bitmap = Bitmap.createBitmap(ROUND_SIZE, ROUND_SIZE, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
 
-        // UPDATED 24/09/2026 (Yann : "mettre un fond transparent") — no background disc any more.
+        drawBlackBackground(canvas)
 
         val notifImage = match?.notifImage
         if (notifImage != null) {
@@ -275,7 +278,7 @@ object ComplicationImageComposer {
         val bitmap = Bitmap.createBitmap(ROUND_SIZE, ROUND_SIZE, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
 
-        // UPDATED 24/09/2026 (Yann : "mettre un fond transparent") — no background disc any more.
+        drawBlackBackground(canvas)
 
         val notifImage = notification?.image
         val appIcon = notification?.appIcon
@@ -333,17 +336,18 @@ object ComplicationImageComposer {
     /**
      * NEW 24/09/2026 — "Messages" complication: up to 4 contact circles (most recent first: top-left,
      * top-right, bottom-left, bottom-right; 1–3 messages are laid out centered), each with the source
-     * app's icon as a badge at its bottom-right. Transparent background. A message without a contact
+     * app's icon as a badge at its bottom-right. Black background. A message without a contact
      * photo gets a colored disc with its title's initial.
      */
     fun composeMessagesImage(messages: List<MessageInfo>): Bitmap {
         val bitmap = Bitmap.createBitmap(ROUND_SIZE, ROUND_SIZE, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
+        drawBlackBackground(canvas)
         val shown = messages.take(4)
         if (shown.isEmpty()) {
             // UPDATED 24/09/2026 (Yann : "une enveloppe en haut et en dessous un zéro").
-            drawEnvelope(canvas, ROUND_CENTER, ROUND_CENTER - 48f, 150f, 100f)
-            drawFittedText(canvas, "0", ROUND_CENTER, ROUND_CENTER + 76f, 96f, 60f, 200f, 6f)
+            drawEnvelope(canvas, ROUND_CENTER, ROUND_CENTER - 40f, 108f, 72f)
+            drawFittedText(canvas, "0", ROUND_CENTER, ROUND_CENTER + 58f, 88f, 60f, 200f, 6f)
             return bitmap
         }
         // (dx, dy) offsets from the center + contact radius — all fit inside the 160 px round.
@@ -374,6 +378,11 @@ object ComplicationImageComposer {
         return bitmap
     }
 
+    /** Pure black full disc behind every SMALL_IMAGE (hides the watch face's grey slot background). */
+    private fun drawBlackBackground(canvas: Canvas) {
+        canvas.drawCircle(ROUND_CENTER, ROUND_CENTER, ROUND_RADIUS, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK })
+    }
+
     /** White outlined envelope (body + flap "V"), with a thin dark outline so it reads on any watch face. */
     private fun drawEnvelope(canvas: Canvas, cx: Float, cy: Float, width: Float, height: Float) {
         val rect = RectF(cx - width / 2f, cy - height / 2f, cx + width / 2f, cy + height / 2f)
@@ -387,11 +396,11 @@ object ComplicationImageComposer {
             strokeJoin = Paint.Join.ROUND
             strokeCap = Paint.Cap.ROUND
             color = Color.BLACK
-            strokeWidth = 16f
+            strokeWidth = 12f
         }
-        val stroke = Paint(outline).apply { color = Color.WHITE; strokeWidth = 9f }
+        val stroke = Paint(outline).apply { color = Color.WHITE; strokeWidth = 7f }
         listOf(outline, stroke).forEach { paint ->
-            canvas.drawRoundRect(rect, 14f, 14f, paint)
+            canvas.drawRoundRect(rect, 10f, 10f, paint)
             canvas.drawPath(flap, paint)
         }
     }
@@ -584,7 +593,7 @@ object ComplicationImageComposer {
      * Yann — "le logo de l'application ne doit pas être sur l'image"). BitmapShader plutôt qu'un
      * simple drawBitmap : pas de coins carrés qui dépasseraient du cercle pour une icône non déjà
      * circulaire. Pas d'anneau de fond ici (contrairement à l'ancien badge) : l'icône est posée
-     * directement sur le fond du rond (transparent depuis le 24/09/2026), pas sur l'image, donc
+     * directement sur le fond du rond (noir depuis le 24/09/2026), pas sur l'image, donc
      * rien à détacher visuellement.
      */
     private fun drawCircularIcon(canvas: Canvas, bitmap: Bitmap, centerX: Float, centerY: Float, radius: Float) {
