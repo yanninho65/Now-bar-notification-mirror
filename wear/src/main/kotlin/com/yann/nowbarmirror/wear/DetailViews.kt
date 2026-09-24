@@ -1,6 +1,7 @@
 package com.yann.nowbarmirror.wear
 
 import android.content.Context
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
@@ -20,6 +21,16 @@ import android.widget.TextView
  * feedback = scale 0.94 + lighter state_pressed background).
  */
 object DetailViews {
+
+    /** Launch intent of the source app's own watch version, if installed (same package name as on the phone). */
+    fun watchLaunchIntent(context: Context, packageName: String): Intent? {
+        if (packageName.isBlank()) return null
+        return try {
+            context.packageManager.getLaunchIntentForPackage(packageName)?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        } catch (_: Exception) {
+            null
+        }
+    }
 
     fun dp(context: Context, value: Int): Int = (value * context.resources.displayMetrics.density).toInt()
 

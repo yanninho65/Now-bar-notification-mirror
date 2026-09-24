@@ -245,13 +245,6 @@ class MessagesActivity : Activity() {
         null
     }
 
-    /** The source app's own watch version, if installed (same package name as on the phone). */
-    private fun watchLaunchIntent(packageName: String): Intent? {
-        if (packageName.isBlank()) return null
-        return try {
-            packageManager.getLaunchIntentForPackage(packageName)?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        } catch (_: Exception) {
-            null
-        }
-    }
+    /** The source app's own watch version, if installed (shared helper, also used by NotificationDetailActivity). */
+    private fun watchLaunchIntent(packageName: String): Intent? = DetailViews.watchLaunchIntent(this, packageName)
 }

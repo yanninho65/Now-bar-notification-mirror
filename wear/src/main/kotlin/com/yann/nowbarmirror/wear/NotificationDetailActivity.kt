@@ -207,6 +207,18 @@ class NotificationDetailActivity : Activity() {
                 actionChip(label) { PhoneRelay.sendAction(applicationContext, currentInfoForActions, index) }
             )
         }
+        // "Aff. sur montre" (24/09/2026): only when the source app is installed on the watch
+        // (same package name), placed just above "Aff. sur tél." — same rule as MessagesActivity.
+        DetailViews.watchLaunchIntent(this, info.packageName)?.let { launch ->
+            actionsContainer.addView(
+                actionChip(getString(R.string.action_view_on_watch)) {
+                    try {
+                        startActivity(launch)
+                    } catch (_: Exception) {
+                    }
+                }
+            )
+        }
         actionsContainer.addView(
             actionChip(getString(R.string.action_view_on_phone)) {
                 PhoneRelay.sendOpen(applicationContext, currentInfoForActions)
