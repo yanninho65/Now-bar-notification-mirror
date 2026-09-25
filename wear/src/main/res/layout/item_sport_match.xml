@@ -69,7 +69,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:gravity="center"
-        android:textColor="@color/detail_text_primary"
+        android:textColor="@android:color/white"
         android:textSize="15sp"
         android:maxLines="1"
         android:ellipsize="end"
