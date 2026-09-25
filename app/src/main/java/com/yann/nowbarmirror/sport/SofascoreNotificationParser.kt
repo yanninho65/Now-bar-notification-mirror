@@ -598,7 +598,9 @@ object SofascoreNotificationParser {
                 val isGoal = isGoalLabel(eventLabel)
                 return build(
                     homeTeam, awayTeam, home, away, "$minute+", lastScorer = bracketedSide(m.groupValues, 2, 4),
-                    periodLabel = if (isGoal || eventLabel.isBlank()) "Min $minute" else "Min $minute · $eventLabel",
+                    // A goal's minute is already in the scorer list: show the current period instead.
+                    periodLabel = if (isGoal) goalPeriod(minute, lines, i)
+                        else if (eventLabel.isBlank()) "Min $minute" else "Min $minute · $eventLabel",
                     eventKind = if (isGoal) GOAL else OTHER
                 )
             }
@@ -772,6 +774,16 @@ object SofascoreNotificationParser {
             lastScorer = lastSetWinner,
             status = status
         )
+    }
+
+    /** Period of a timed goal: past 90' = extra time, past 45' = 2nd half, else from the half markers. */
+    private fun goalPeriod(minute: String, lines: List<String>, index: Int): String {
+        val m = minute.toIntOrNull() ?: 0
+        return when {
+            m > 90 -> "Prolongation"
+            m > 45 -> "2ème mi-temps"
+            else -> halfLabel(currentHalfStatus(lines, index))
+        }
     }
 
     private fun halfLabel(status: String) = if (status == "2H") "2ème mi-temps" else "1ère mi-temps"

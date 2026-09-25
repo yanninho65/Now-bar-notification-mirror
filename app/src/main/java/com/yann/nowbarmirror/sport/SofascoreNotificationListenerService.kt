@@ -126,8 +126,7 @@ class SofascoreNotificationListenerService : NotificationListenerService() {
             val all = activeNotifications
             val items = all.orEmpty().filter { it.packageName == SOFASCORE_PACKAGE }.mapNotNull { sbn ->
                 val match = toMatchResult(sbn) ?: return@mapNotNull null
-                val (title, lastLine) = rawTitleAndText(sbn, match)
-                SportWatchSync.Item(sbn, title, lastLine, match)
+                SportWatchSync.Item(sbn, rawTitleAndText(sbn, match).first, match)
             }
             val followedKey = SofascorePrefs.loadChosenKey(this)
                 ?.takeIf { SofascorePrefs.loadMode(this) == SofascorePrefs.Mode.CHOSEN }
