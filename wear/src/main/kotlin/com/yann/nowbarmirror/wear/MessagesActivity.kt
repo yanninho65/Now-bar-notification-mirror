@@ -27,8 +27,9 @@ import androidx.wear.widget.SwipeDismissFrameLayout
  *
  * UPDATED 24/09/2026 — round screen: paddings are fractions of the screen (DetailViews.applyRoundInsets).
  *
- * REWORKED 25/09/2026 — each message in a pill like the Sport screen: image top-left, app icon
- * under it, title on its right, text below; actions as round icon buttons on one line (mark read =
+ * REWORKED 25/09/2026 — each message in a pill like the Sport screen: image top-left with the app
+ * icon as a badge at its bottom-right, title on its right, text below (truncated text gets a
+ * clickable blue "•••" that shows it all); actions as round icon buttons on one line (mark read =
  * open envelope, silence = bell off, delete = bin, watch, phone; "Répondre" dropped), the "delete on
  * the phone" button under them.
  *
@@ -42,6 +43,9 @@ class MessagesActivity : Activity() {
 
     // Deleted from here but not yet confirmed by a phone push: hidden meanwhile.
     private val pendingDismissed = mutableSetOf<String>()
+
+    // Texts expanded with their "•••" ("<message key>|<line index>", -1 = the plain text), kept across re-renders.
+    private val expanded = mutableSetOf<String>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -79,6 +83,8 @@ class MessagesActivity : Activity() {
     private fun render(list: MessageList?) {
         val all = list?.messages.orEmpty()
         pendingDismissed.retainAll(all.map { it.key }.toSet())
+        val keys = all.map { it.key }.toSet()
+        expanded.retainAll { it.substringBeforeLast('|') in keys }
         val messages = all.filterNot { it.key in pendingDismissed }
 
         container.removeAllViews()
@@ -99,7 +105,7 @@ class MessagesActivity : Activity() {
     }
 
     private fun bind(item: View, message: MessageInfo) {
-        // Top-left: the notification image, else the app icon; the app icon goes under an image.
+        // Top-left: the notification image, else the app icon; with an image, the app icon is a badge at its bottom-right.
         val image = message.image ?: message.appIcon
         item.findViewById<ImageView>(R.id.message_image).apply {
             if (image != null) {
@@ -123,10 +129,15 @@ class MessagesActivity : Activity() {
         val lines = item.findViewById<LinearLayout>(R.id.message_lines_container)
         if (message.detailLines.isNotEmpty()) {
             lines.visibility = View.VISIBLE
-            message.detailLines.forEach { lines.addView(detailLine(it)) }
+            message.detailLines.forEachIndexed { i, line ->
+                val view = detailLine(line)
+                lines.addView(view)
+                makeExpandable(view, "${message.key}|$i")
+            }
         } else if (message.text.isNotBlank()) {
             textView.visibility = View.VISIBLE
             textView.text = message.text
+            makeExpandable(textView, "${message.key}|-1")
         }
 
         // Round icon buttons on one line (25/09/2026); "Répondre" ignored; labels with no known
@@ -178,6 +189,50 @@ class MessagesActivity : Activity() {
                 pendingDismissed.add(message.key)
                 render(MessagesStore.current)
             }
+        }
+    }
+
+    /**
+     * Truncated text (25/09/2026): a blue "•••" pill is added right under it once laid out; a tap
+     * on it (or on the text) shows the whole text. Remembered per message/line across re-renders.
+     */
+    private fun makeExpandable(textView: TextView, id: String) {
+        if (id in expanded) {
+            textView.maxLines = Int.MAX_VALUE
+            return
+        }
+        textView.post {
+            val layout = textView.layout ?: return@post
+            val last = layout.lineCount - 1
+            if (last < 0 || layout.getEllipsisCount(last) == 0) return@post
+            val parent = textView.parent as? LinearLayout ?: return@post
+            val more = TextView(this).apply {
+                text = "•••"
+                setTextColor(getColor(R.color.detail_accent_pressed))
+                setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 16f)
+                setTypeface(typeface, android.graphics.Typeface.BOLD)
+                includeFontPadding = false
+                setBackgroundResource(R.drawable.bg_more_chip)
+                val h = DetailViews.dp(this@MessagesActivity, 14)
+                val v = DetailViews.dp(this@MessagesActivity, 3)
+                setPadding(h, v, h, v)
+                contentDescription = getString(R.string.action_show_more)
+                layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                    topMargin = DetailViews.dp(this@MessagesActivity, 4)
+                    gravity = android.view.Gravity.CENTER_HORIZONTAL
+                }
+            }
+            val expand = {
+                expanded.add(id)
+                textView.maxLines = Int.MAX_VALUE
+                parent.removeView(more)
+                textView.setOnClickListener(null)
+                textView.isClickable = false
+            }
+            more.setOnClickListener { expand() }
+            DetailViews.addPressFeedback(more)
+            textView.setOnClickListener { expand() }
+            parent.addView(more, parent.indexOfChild(textView) + 1)
         }
     }
 

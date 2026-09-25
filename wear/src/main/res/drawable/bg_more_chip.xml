@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- NEW 25/09/2026, écran Messages : petite pilule "•••" sous un texte tronqué, tap = tout afficher. -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_pressed="true">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/detail_chip_bg_pressed" />
+            <corners android:radius="12dp" />
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@color/detail_chip_bg" />
+            <corners android:radius="12dp" />
+        </shape>
+    </item>
+</selector>

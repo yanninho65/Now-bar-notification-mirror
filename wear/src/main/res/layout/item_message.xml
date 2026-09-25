@@ -1,7 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- REWORKED 25/09/2026 (Yann) — un message de la liste "Messages", même pilule que l'écran Sport
      (item_sport_match.xml) :
-     - en haut à gauche l'image de la notif (sinon l'icône de l'appli), l'icône de l'appli dessous ;
+     - en haut à gauche l'image de la notif (sinon l'icône de l'appli), l'icône de l'appli en
+       pastille en bas à droite de l'image (comme la miniature) ;
+     - texte tronqué : "•••" bleu cliquable dessous pour tout afficher (MessagesActivity.makeExpandable) ;
      - le titre à droite de l'image ;
      - le texte / l'historique de la conversation dessous ;
      - les actions en boutons ronds sur une ligne (icônes, voir MessagesActivity.iconFor), plus
@@ -27,17 +29,15 @@
         android:paddingStart="8dp"
         android:paddingEnd="8dp">
 
-        <LinearLayout
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:gravity="center_horizontal"
+        <FrameLayout
+            android:layout_width="40dp"
+            android:layout_height="40dp"
             android:layout_marginEnd="8dp">
 
             <ImageView
                 android:id="@+id/message_image"
-                android:layout_width="34dp"
-                android:layout_height="34dp"
+                android:layout_width="36dp"
+                android:layout_height="36dp"
                 android:scaleType="centerCrop"
                 android:contentDescription="@null" />
 
@@ -45,10 +45,12 @@
                 android:id="@+id/message_app_icon"
                 android:layout_width="18dp"
                 android:layout_height="18dp"
-                android:layout_marginTop="4dp"
+                android:layout_gravity="bottom|end"
+                android:padding="1dp"
+                android:background="@drawable/bg_app_badge"
                 android:visibility="gone"
                 android:contentDescription="@null" />
-        </LinearLayout>
+        </FrameLayout>
 
         <TextView
             android:id="@+id/message_title"

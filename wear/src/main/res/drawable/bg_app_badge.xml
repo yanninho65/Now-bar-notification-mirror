@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- NEW 25/09/2026, écran Messages : liseré (couleur de la pilule) autour de la pastille d'appli posée en bas à
+     droite de l'image (item_message.xml). -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="oval">
+    <solid android:color="@color/detail_card_bg" />
+</shape>

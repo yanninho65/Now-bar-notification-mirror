@@ -836,7 +836,8 @@ object SofascoreNotificationParser {
      * last 6 events), most recent first. Each entry is encoded "side\tminute\tname\tkind" for the
      * watch Sport screen (wear SportActivity.ScorerLine): side = "home"/"away"/"" (unknown), minute
      * without the "'" ("" when the line has none), name = scorer ("" when absent), kind =
-     * [SCORER_GOAL] / [SCORER_PENALTY_MISSED]. Empty for non-football sports.
+     * [SCORER_GOAL] / [SCORER_PENALTY_MISSED]. Goals without a minute are left out (the name is the
+     * team's, see below). Empty for non-football sports.
      * A "Correction du score" line removes the goal(s) it cancelled: those of the side whose count
      * went down (side = bracket on the goal line, else deduced from the previous score).
      */
@@ -897,7 +898,9 @@ object SofascoreNotificationParser {
                 )
             }
         }
-        return goals.asReversed().map { g ->
+        // A goal line without minute ("But: [2] - 0 Kasuka FC") names the team, not the scorer: kept
+        // above for side/correction bookkeeping only, not shown — the timed line comes later.
+        return goals.asReversed().filter { it.kind != SCORER_GOAL || it.minute.isNotBlank() }.map { g ->
             listOf(g.side.orEmpty(), g.minute, g.name.replace('\t', ' '), g.kind).joinToString("\t")
         }
     }
