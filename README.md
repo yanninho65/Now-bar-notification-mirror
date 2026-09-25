@@ -5,15 +5,15 @@ Android app for Yann's Samsung Galaxy phone + Galaxy Watch. Two-module Gradle pr
 Two independent jobs:
 
 1. **Notification mirroring** — mirrors selected apps' notifications into persistent notifications eligible for the Samsung Now Bar, feeds three lock-screen widgets and the watch's **"Notification"** complication. The same listener also feeds the watch's **"Messages"** complication from the apps chosen in **Applications de messagerie (montre)** (independent of mirror modes).
-2. **Live sport scores** — parses Sofascore's own notifications (the only source; no sport API any more) and drives the watch's **"Score en direct"** complication.
+2. **Live sport scores** — parses Sofascore's own notifications (the only source; no sport API any more) and drives the watch's **"Score en direct"** complication, whose tap opens the watch **Sport** screen (every active Sofascore match + the sport apps chosen on the phone).
 
 ## Phone UI
 
 `MainActivity` = one card with 5 entries (no tabs) + a status line (`PermissionsActivity.missingCount`):
 - **Applications à mirrorer** → `settings.AppSelectionActivity` — full-screen list (mode Aucun/Dernière/Toutes + "Titre ↔ texte" per app).
-- **Sport** → `sport.SportActivity` — active Sofascore matches, "Dernière notification (auto)" first; tap = match followed by the watch (`SofascorePrefs`).
-- **Applications de messagerie (montre)** → `settings.MessageAppsActivity` — code-built; selected apps first with ▲/▼ (order saved, sent to the watch), then the others alphabetically.
-- **Paramètres** → `settings.SettingsActivity` — "Service actif", "Revenir à la précédente", "Actions dans le widget", export/import JSON (`SettingsBackup`, incl. ordered message apps).
+- **Sport** → `sport.SportActivity` — card button **Applications sport (montre)** (→ `MessageAppsActivity` with `EXTRA_KIND=sport`), then active Sofascore matches, "Dernière notification (auto)" first; tap = match followed by the watch (`SofascorePrefs`).
+- **Applications de messagerie (montre)** → `settings.MessageAppsActivity` — code-built; selected apps first with ▲/▼ (order saved, sent to the watch), then the others alphabetically. Same screen for the sport apps (kind extra): backing prefs = `OrderedAppsPrefs` base (in MessageAppsPrefs.kt) → `MessageAppsPrefs` / `SportAppsPrefs` (default Sofascore only).
+- **Paramètres** → `settings.SettingsActivity` — "Service actif", "Revenir à la précédente", "Actions dans le widget", export/import JSON (`SettingsBackup`, incl. ordered message apps `message_apps` and sport apps `sport_apps`).
 - **Autorisations** → `settings.PermissionsActivity` — notification access (status of both listeners, one system screen), app notifications, **Associer la montre** (`WatchCompanionLink`), full-screen intent (Android 14+, optional when associated).
 Shared styles `MainMenuButton` / `MainMenuDivider` / `MenuStatusText` (themes.xml). No viewBinding.
 
@@ -35,7 +35,8 @@ Phone                                                         Watch
 MirrorNotificationListener ──┐                                PhoneDataListenerService
   (apps set LATEST/ALL)      ├─► WidgetAllNotificationsStore      ├─ /match        → MatchScoreStore       → ScoreComplicationService
 SofascoreNotificationListener┘    (history, 6/kind)               ├─ /notification → NotificationInfoStore → NotificationComplicationService
-MirrorNotificationListener ──► MessagesWatchSync (/messages) ───► └─ /messages     → MessagesStore         → MessagesComplicationService
+MirrorNotificationListener ──► MessagesWatchSync (/messages) ───► ├─ /messages     → MessagesStore         → MessagesComplicationService
+SofascoreNotificationListener ─► SportWatchSync (/sport) ───────► └─ /sport        → SportStore            → SportActivity (tap on Score en direct)
   (message apps, active notifs)                                                                              → MessagesActivity
   (com.sofascore.results)  ──► SofascoreWidgetStore (6 matches)                                              → NotificationDetailActivity
                                    │                                                                         PhoneRelay (action/dismiss/open)
@@ -44,7 +45,8 @@ MirrorNotificationListener ──► MessagesWatchSync (/messages) ───► 
             refreshAllNow(): syncWatchToLatest() → WatchNotificationSync (/notification)                           │
                              4x1 + Compact 4x2 + Triple 4x2 widgets                                                │
             SofascoreNotificationListenerService.refresh() → WatchSync (/match)                                    │
-            WearActionRelayService ◄── /notifdetail/{action,dismiss,open}, /msgdetail/{action,dismiss,open,openapp} ┘
+            WearActionRelayService ◄── /notifdetail/{action,dismiss,open}, /msgdetail/{action,dismiss,open,openapp},
+                                       /sportdetail/{follow,dismiss,open} ┘
 ```
 
 Single source of truth: **"Dernière notif"** (widget LATEST view, the watch "Notification" complication, the detail screen) is always `WidgetAllNotificationsStore.get().first()` — never a separate store.
@@ -66,6 +68,7 @@ Single source of truth: **"Dernière notif"** (widget LATEST view, the watch "No
 - Listener hooks: `onNotificationPosted`/`onNotificationRemoved` of a message app (before the mirror-mode gating) and `onListenerConnected` → `scheduleMessagesSync()` (coalesced 400 ms, main thread). "Service actif" off → empty list sent.
 - `/messages` DataMap: `messages` (key, postTime, pkg, title, text, detailLines = MessagingStyle lines via shared `messageLines`, actionLabels), `apps` (every selected app launchable on the phone, in Yann's order: pkg, label, count), top-level assets `img_<i>` (contact photo, `NotificationImageExtractor`, cached per posting) and `icon_<pkg>`. Deduped by a text signature.
 - `actionsFor`: the notification's actions minus those with a RemoteInput (inline reply not relayed), max 3; the watch's index refers to this filtered list, recomputed at fire time.
+- `appEntries`/`appsSignature`/`putApps`/`putIcons` are public and shared with `SportWatchSync` (same "apps" format and counting rules for both watch screens).
 - Unread count per app: distinct conversations (shortcutId → conversation title → title); mail apps (known packages or CATEGORY_EMAIL) count distinct subjects (InboxStyle lines, else EXTRA_TEXT). Summaries only used if the app posted nothing else.
 - Watch → phone: `/msgdetail/{action,dismiss,open}` (JSON `key`) → `MirrorNotificationListener.fireMessageAction` / `dismissMessage` / `openMessageOnPhone` (static entry points on the connected instance, run on its main thread, against the live notification). `/msgdetail/openapp` (JSON `pkg`) → `WearActionRelayService.openAppOnPhone`. Both "open" paths reuse `NowBarWidgetProvider.postOpenOnPhone` (see "Aff. sur tél." in the Watch section).
 
@@ -73,9 +76,12 @@ Single source of truth: **"Dernière notif"** (widget LATEST view, the watch "No
 
 - Separate listener with its own system toggle ("Now Bar Mirror — Sport (Sofascore)"). One Sofascore notification = one match, updated in place (`InboxStyle`, `EXTRA_TEXT_LINES` most recent first, max 6). Never groups by `groupKey` (Sofascore puts all matches in one group).
 - Teams from title split on `" - "` or `"@"` (American sports, order kept). Score/status parsed from text by `SofascoreNotificationParser` (football/handball incl. ET/penalties, rugby, basketball quarters, tennis sets, table tennis/volleyball); unknown wording → raw-line fallback. Wording-dependent.
-- Watched match (`SofascorePrefs`, picked in `SportActivity`): LATEST (auto) or CHOSEN (falls back to auto when its notification disappears). In auto mode `pickLatestAvoidingDuplicate` skips the match already shown as "Dernière notif" when ≥ 2 matches are active. Order matters: the history push runs **before** `refresh()` in every caller.
+- Watched match (`SofascorePrefs`, picked in `SportActivity` or with the pin of the watch Sport screen): LATEST (auto) or CHOSEN (falls back to auto when its notification disappears). In auto mode `pickLatestAvoidingDuplicate` skips the match already shown as "Dernière notif" when ≥ 2 matches are active. Order matters: the history push runs **before** `refresh()` in every caller.
 - `MatchResult` (Models.kt) = homeTeam, awayTeam, homeScore, awayScore, lastScorer, status. `/match` always sends `apiSource="SPORTS_DB"` (the watch still reads the key); no currentSet/kickoff sent. Sport APIs (TheSportsDB / Live Tennis API, overrides, follow service, INTERNET/foreground permissions, coroutines/lifecycle deps) were removed 24/09/2026; `PackageUpdateReceiver` deletes their leftover prefs (`sofascore_api_overrides`, `tennis_api_key`).
-- `refresh()` sends `/match` only when `key|postTime|MatchResult` changed (`lastWatchSignature`); `sendCleared` also deduped.
+- `refresh()` sends `/match` only when `key|postTime|MatchResult` changed (`lastWatchSignature`); `sendCleared` also deduped. Match fields written by `WatchSync.putMatch` (shared by `/match` and each `/sport` item).
+- `MatchResult` also carries, for the watch Sport screen only: `periodLabel` (long French label set by the football parser: "Match commencé", "Mi-temps", "2ème mi-temps" (after a goal: current half from the minute, >45 → 2ème, >90 → Prolongation), "Min 23 · Carton rouge", "Correction du score", "1ère/2ème prolongation", "Tirs au but", "Match terminé"…), `eventKind` (PERIOD/GOAL/OTHER, sent but currently unused on the watch) and `goals` (`goalsOf`: every goal still in the 6 lines, most recent first, "52' Name"; a "Correction du score" line removes the cancelled goal(s) — side from the bracket, else deduced from the previous score).
+- **`/sport`** (`SportWatchSync`, coalesced 400 ms on the listener's main thread, deduped by signature, images cached per posting): `matches` (every active Sofascore notif, max 20: key, postTimeMillis, title + putMatch fields, asset `img_<i>`), `followedKey` (CHOSEN and still active), `apps` (SportAppsPrefs with counts, same format as `/messages`), `icon_<pkg>`. Triggered by every `refresh()`, by posts/removals of a sport app, and `requestSportSync()` (app selection change, import).
+- Watch → phone `/sportdetail/{follow,dismiss,open}` (JSON `key`; follow with blank key = back to auto) → `SofascoreNotificationListenerService.followFromWatch` / `dismissFromWatch` (same path as the widget dismiss) / `openOnPhoneFromWatch` (`postOpenOnPhone`, contentIntent else Sofascore launch; doesn't dismiss).
 
 ## Phone — widgets (`widget/`)
 
@@ -103,10 +109,11 @@ Three background-less widgets (lock screen via LockStar, or home screen), all re
 - `PhoneDataListenerService` receives both `/match` and `/notification` (one service, two `<data>` filters), applies them with `FreshStore.setLive`, and requests the matching complication refresh.
 - `PhoneDataLayer`: shared path-specific re-read of the persisted DataItem (`readMatch`/`readNotification`), asset decoding, complication refresh request. `FreshStore` (base of `MatchScoreStore`/`NotificationInfoStore`) orders values by the phone's send `timestamp`: live pushes always apply, re-reads apply only if not older (covers "cleared" too).
 - Both complications re-read the persisted item on **every** request (local, cheap: codecs reuse the in-memory value — no asset decode — when `syncTimestamp` matches), fall back to memory only if the read fails, and cache the composed bitmap (`ComposedImageCache`). `UPDATE_PERIOD_SECONDS=600` (safety net only; updates are push-driven).
-- **"Score en direct"** (`ScoreComplicationService`, LONG_TEXT / SMALL_IMAGE) — tap opens Sofascore on the watch. `MatchClock` formats status per sport; `ComplicationImageComposer.composeRoundImage` draws image/score/period (320 px).
+- **"Score en direct"** (`ScoreComplicationService`, LONG_TEXT / SMALL_IMAGE) — tap opens `SportActivity` (watch). `MatchClock` formats status per sport; `ComplicationImageComposer.composeRoundImage` draws image/score/period (320 px).
 - **"Notification"** (`NotificationComplicationService`, SMALL_IMAGE) — tap opens `NotificationDetailActivity`: image + app icon header, title/text or detail lines (conversation messages via MessagingStyle, max 10; Sofascore lines, max 6), action pills + "Aff. sur montre" (only if the source package is launchable on the watch, `DetailViews.watchLaunchIntent`, shared with `MessagesActivity`) + "Aff. sur tél." + delete, all with press feedback, `SwipeDismissFrameLayout` (`androidx.wear:wear`, not Compose).
 - **"Messages"** (`MessagesComplicationService`, SMALL_IMAGE) — `ComplicationImageComposer.composeMessagesImage`: up to 4 contact circles (most recent top-left; 1–3 laid out centered), app-icon badge bottom-right, initial on a colored disc when no photo. If the "Notification" complication is placed (`NotificationComplicationService.Presence`: instance ids persisted from onComplicationActivated/Deactivated + every request) and its entry key equals a message's key, that message is left out (`visibleMessages`) — **except when it is the only message** (then shown in both). Tap opens `MessagesActivity`.
-- `MessagesActivity` — round-screen insets as fractions of the display (`applyRoundInsets`: sides 10 %, top 13 %, bottom 25 %); same look as the detail screen (`item_message.xml` mirrors `activity_notification_detail.xml`; `DetailViews` = shared pills/lines/press feedback/circular crop, also used by `NotificationDetailActivity`). Top: "Sur la montre" row (selected apps whose package is launchable on the watch → open there) and "Sur le téléphone" row (the others → `/msgdetail/openapp`); an app on both is only in the watch row; app order = phone order; icons wrap in rows of max 4 (`ICONS_PER_ROW`, cell = 78 % of screen width / 4, capped 50dp), no horizontal scroll; red count badge top-right. Then every message (unfiltered): action pills, "Aff. sur montre" only if the package exists on the watch, "Aff. sur tél.", delete (hidden locally until the next push). Live re-render via `MessagesStore.onChanged`.
+- `MessagesActivity` — round-screen insets as fractions of the display (`DetailViews.applyRoundInsets`: sides 10 %, top 13 %, bottom 25 %); same look as the detail screen (`item_message.xml` mirrors `activity_notification_detail.xml`; `DetailViews` = shared pills/lines/press feedback/circular crop, also used by `NotificationDetailActivity`). Top: ONE horizontally scrollable app row (`DetailViews.appIconRow`, shared with SportActivity; no watch/phone split): tap opens the app on the watch if installed there, else on the phone (`/msgdetail/openapp`); red count badge. Then every message (unfiltered): action pills, "Aff. sur montre" only if the package exists on the watch, "Aff. sur tél.", delete (hidden locally until the next push). Live re-render via `MessagesStore.onChanged`.
+- `SportActivity` (watch) — reuses `activity_messages.xml`, sides 3 % (pills near full width like the watch's own notification cards; app row keeps +7 % margins). App row (SportAppsPrefs), then one pill per active Sofascore match (`item_sport_match.xml`, `bg_notif_pill`): small notif image + title, score 34sp bold (raw strings `homeScoreText`/`awayScoreText`, brackets on `lastScorer`), period right under it in white, not bold (`MatchClock.longLabel`: phone `periodLabel`, else Q<n>/S<n>/1H/2H/HT/FT spelled out), scorers one line each (white 14sp, ellipsized, no icon), then 36dp round buttons pin / phone / delete. Followed match first (blue outline `bg_notif_pill_followed`, blue pin `bg_follow_active`; tap again = auto), then most recent first. Taps optimistic until the next push. Nothing filtered against "Dernière notif". Compact so a 4-scorer match fits the screen.
 - All SMALL_IMAGE bitmaps are drawn on a **pure black disc** (`drawBlackBackground`) — transparent let the watch face's default grey slot show through.
 - **Empty states** (`drawEmptyState`, same layout for all three, sized on WhatsApp's own complication: glyph ~88 px centered 62 px above the middle, "0" below): Messages = WhatsApp-style bubble without handset (`drawChatBubble`), Score en direct = football pitch (`drawPitch`, copy of the phone widget's `ic_football_pitch`), Notification = bell (`drawBell`, copy of `ic_notification_bell`). "Score en direct" LONG_TEXT still says "Aucun match".
 - **Complication picker icons** (manifest `android:icon`, shown in Galaxy Wearable): `ic_messages` = bubble, `ic_score_complication` = pitch, `ic_notification` = bell — same drawings as the empty states.
@@ -133,15 +140,17 @@ app/src/main/java/com/yann/nowbarmirror/
 ├── BitmapUtils.kt                  shared bitmap helpers + icon/image caches
 ├── PackageUpdateReceiver.kt        rebinds both listeners after an app update
 ├── WatchNotificationSync.kt        "/notification" sender
-├── MessagesWatchSync.kt            "/messages" sender (message apps, counts)
+├── MessagesWatchSync.kt            "/messages" sender (message apps, counts; app-row helpers shared with /sport)
 ├── WearActionRelayService.kt       receives /notifdetail/* from the watch
 ├── settings/                       MirrorMode, AppMirrorPrefs, ServicePrefs, LatestModePrefs,
 │                                   WidgetActionsPrefs, SettingsBackup, AppSelectionActivity/Adapter,
-│                                   MessageAppsPrefs, MessageAppsActivity, SettingsActivity,
+│                                   MessageAppsPrefs (+ OrderedAppsPrefs base), SportAppsPrefs,
+│                                   MessageAppsActivity, SettingsActivity,
 │                                   PermissionsActivity
 ├── sport/                          SofascoreNotificationListenerService, SofascoreNotificationParser,
 │                                   SofascorePrefs, SportActivity + SofascoreHomeAdapter,
-│                                   WatchSync ("/match" sender + bitmapToAsset), Models (MatchResult)
+│                                   WatchSync ("/match" sender + putMatch + bitmapToAsset),
+│                                   SportWatchSync ("/sport" sender), Models (MatchResult)
 └── widget/                         NowBarWidgetProvider (4x1 + all shared rendering/refresh),
                                     NowBarWidgetProviderCompact, NowBarWidgetProviderTriple,
                                     WidgetAllNotificationsStore, SofascoreWidgetStore, WidgetImageFiles,
@@ -149,14 +158,16 @@ app/src/main/java/com/yann/nowbarmirror/
                                     WidgetPeekPrefs, WidgetViewModePrefs
 
 wear/src/main/kotlin/com/yann/nowbarmirror/wear/
-├── PhoneDataListenerService.kt     /match + /notification + /messages receiver
+├── PhoneDataListenerService.kt     /match + /notification + /messages + /sport receiver
 ├── PhoneDataLayer.kt               shared re-read/decode/refresh + FreshStore + ComposedImageCache
 ├── ScoreComplicationService.kt     "Score en direct"
 ├── NotificationComplicationService.kt  "Notification"
 ├── NotificationDetailActivity.kt   detail screen
 ├── MessagesComplicationService.kt  "Messages"
 ├── MessagesActivity.kt             messages list screen (app rows + messages)
-├── MessageInfo.kt                  MessageInfo/MessageApp/MessageList + MessagesStore + MessagesDataCodec
+├── MessageInfo.kt                  MessageInfo/MessageApp/MessageList + MessagesStore + MessagesDataCodec (decodeApps shared)
+├── SportActivity.kt                Sport screen (app row + match pills)
+├── SportInfo.kt                    SportMatch/SportList + SportStore + SportDataCodec
 ├── DetailViews.kt                  shared Galaxy Watch-style views of both screens
 ├── PhoneRelay.kt                   watch → phone messages
 ├── MatchDataCodec.kt / NotificationDataCodec.kt
