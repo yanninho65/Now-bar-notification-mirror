@@ -475,7 +475,7 @@ object SofascoreNotificationParser {
      */
     fun parse(homeTeam: String, awayTeam: String, lines: List<String>): MatchResult? =
         parseStatus(homeTeam, awayTeam, lines)?.let { result ->
-            val goals = goalsOf(lines)
+            val goals = goalsOf(lines, homeTeam, awayTeam)
             if (goals.isEmpty()) result else result.copy(goals = goals)
         }
 
@@ -817,35 +817,56 @@ object SofascoreNotificationParser {
     private fun isGoalLabel(label: String) =
         label.startsWith("But", ignoreCase = true) && !label.contains("annul", ignoreCase = true)
 
-    private class Goal(val text: String, val home: Int, val away: Int, val side: String?)
+    private class Goal(val side: String?, val minute: String, val name: String, val kind: String, val home: Int, val away: Int)
+
+    // Kinds of a scorer line sent to the watch (4th field of the encoded line, see [goalsOf]).
+    const val SCORER_GOAL = "goal"
+    const val SCORER_PENALTY_MISSED = "penmiss"
+
+    // In-match missed penalty (25/09/2026, Géorgie - Irlande du Nord): "65' Penalty manqué : Géorgie
+    // Khvicha Kvaratskhelia" — no score, the team name then the player. Shoot-out misses have no
+    // minute and a score ([missedPenalty]) so they never match. "Penalty accordé" is ignored.
+    private val missedPenaltyInMatch = Regex(
+        """^(\d{1,3}(?:\+\d{1,2})?)'\s*P[ée]nalty\s+(?:manqu|rat)[ée]\s*:\s*(.*)$""",
+        RegexOption.IGNORE_CASE
+    )
 
     /**
-     * Every goal still in the notification's lines (Sofascore keeps the last 6 events), most recent
-     * first = minutes in decreasing order: "16' Ehsan Kari" ("16' But" when no name follows); a goal
-     * line without minute gives just the name (or "But"). Empty for non-football sports.
+     * Every goal and in-match missed penalty still in the notification's lines (Sofascore keeps the
+     * last 6 events), most recent first. Each entry is encoded "side\tminute\tname\tkind" for the
+     * watch Sport screen (wear SportActivity.ScorerLine): side = "home"/"away"/"" (unknown), minute
+     * without the "'" ("" when the line has none), name = scorer ("" when absent), kind =
+     * [SCORER_GOAL] / [SCORER_PENALTY_MISSED]. Empty for non-football sports.
      * A "Correction du score" line removes the goal(s) it cancelled: those of the side whose count
      * went down (side = bracket on the goal line, else deduced from the previous score).
      */
-    private fun goalsOf(lines: List<String>): List<String> {
+    private fun goalsOf(lines: List<String>, homeTeam: String, awayTeam: String): List<String> {
         val goals = mutableListOf<Goal>()
-        fun add(text: String, home: Int?, away: Int?, bracketSide: String?) {
+        fun add(minute: String, name: String, home: Int?, away: Int?, bracketSide: String?) {
             if (home == null || away == null) return
-            val prev = goals.lastOrNull()
+            val prev = goals.lastOrNull { it.kind == SCORER_GOAL }
             val side = bracketSide ?: when {
                 home > (prev?.home ?: 0) -> "home"
                 away > (prev?.away ?: 0) -> "away"
                 else -> null
             }
-            goals.add(Goal(text, home, away, side))
+            goals.add(Goal(side, minute, name, SCORER_GOAL, home, away))
         }
         for (raw in lines.asReversed()) {   // oldest first
             val line = raw.trim()
+            val missed = missedPenaltyInMatch.find(line)
+            if (missed != null) {
+                val (side, name) = splitTeamPrefix(missed.groupValues[2].trim(), homeTeam, awayTeam)
+                goals.add(Goal(side, missed.groupValues[1], name, SCORER_PENALTY_MISSED, -1, -1))
+                continue
+            }
             val timed = timedEvent.find(line)
             if (timed != null) {
                 val label = line.substringAfter("'").substringBefore(":").trim()
                 if (isGoalLabel(label)) {
                     add(
-                        "${timed.groupValues[1]}' ${restAfter(line, timed).ifEmpty { "But" }}",
+                        timed.groupValues[1],
+                        restAfter(line, timed),
                         timed.groupValues[2].ifBlank { timed.groupValues[3] }.toIntOrNull(),
                         timed.groupValues[4].ifBlank { timed.groupValues[5] }.toIntOrNull(),
                         bracketedSide(timed.groupValues, 2, 4)
@@ -858,7 +879,7 @@ object SofascoreNotificationParser {
                 val home = correction.groupValues[1].ifBlank { correction.groupValues[2] }.toIntOrNull() ?: continue
                 val away = correction.groupValues[3].ifBlank { correction.groupValues[4] }.toIntOrNull() ?: continue
                 goals.removeAll { goal ->
-                    when (goal.side) {
+                    goal.kind == SCORER_GOAL && when (goal.side) {
                         "home" -> goal.home > home
                         "away" -> goal.away > away
                         else -> goal.home > home || goal.away > away
@@ -868,14 +889,26 @@ object SofascoreNotificationParser {
             }
             goalNoMinute.find(line)?.let { m ->
                 add(
-                    restAfter(line, m).ifEmpty { "But" },
+                    "",
+                    restAfter(line, m),
                     m.groupValues[1].ifBlank { m.groupValues[2] }.toIntOrNull(),
                     m.groupValues[3].ifBlank { m.groupValues[4] }.toIntOrNull(),
                     bracketedSide(m.groupValues, 1, 3)
                 )
             }
         }
-        return goals.asReversed().map { it.text }
+        return goals.asReversed().map { g ->
+            listOf(g.side.orEmpty(), g.minute, g.name.replace('\t', ' '), g.kind).joinToString("\t")
+        }
+    }
+
+    /** "Géorgie Khvicha Kvaratskhelia" → ("home", "Khvicha Kvaratskhelia"); longest matching team wins. */
+    private fun splitTeamPrefix(rest: String, homeTeam: String, awayTeam: String): Pair<String?, String> {
+        val candidates = listOf("home" to homeTeam.trim(), "away" to awayTeam.trim())
+            .filter { (_, team) -> team.isNotEmpty() && rest.startsWith(team, ignoreCase = true) }
+            .maxByOrNull { it.second.length }
+            ?: return null to rest
+        return candidates.first to rest.substring(candidates.second.length).trim()
     }
 
     private fun restAfter(line: String, m: kotlin.text.MatchResult) = line.substring(m.range.last + 1).trim().replace(Regex("""\s+"""), " ")

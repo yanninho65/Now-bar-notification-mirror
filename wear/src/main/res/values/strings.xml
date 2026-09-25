@@ -13,4 +13,8 @@
     <string name="sport_empty">Aucun match</string>
     <string name="sport_follow">Suivre dans Score en direct</string>
     <string name="sport_unfollow">Ne plus suivre (auto)</string>
+    <!-- NEW 25/09/2026, écran Sport : ligne "Penalty manqué" sous le nom du tireur -->
+    <string name="sport_penalty_missed">Pénalty X</string>
+    <!-- NEW 25/09/2026, écran Messages : descriptions des boutons ronds -->
+    <string name="action_delete_on_phone">Supprimer sur le téléphone</string>
 </resources>

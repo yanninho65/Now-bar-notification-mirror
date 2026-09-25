@@ -20,7 +20,8 @@ import androidx.wear.widget.SwipeDismissFrameLayout
  * - below: EVERY active Sofascore notification (SportStore, "/sport") — the one also shown by the
  *   "Notification" complication included — one near-full-width pill per match (item_sport_match.xml,
  *   reworked 25/09/2026): small notification image + title, big score, the period right under it,
- *   the scorers (football, most recent first, one line each, cancelled ones removed on the phone),
+ *   the scorers (football, most recent first, cancelled ones removed on the phone; since 25/09/2026
+ *   minute centered, home scorer left / away scorer right, missed penalties shown as "Pénalty X"),
  *   then pin / "Aff. sur tél." (opens, doesn't dismiss) / delete. Compact so 4 scorers fit. The pin makes "Score en direct" follow only this match.
  *   The followed match is listed first (blue outline, blue pin); tapping its pin again goes back
  *   to automatic. Order otherwise: most recent first.
@@ -115,23 +116,12 @@ class SportActivity : Activity() {
             visibility = if (period.isBlank()) View.GONE else View.VISIBLE
         }
 
-        // Scorers: one line each, full width, single line (ellipsized) so 4 scorers fit the screen.
+        // Scorers (25/09/2026): minute in the middle, home scorer on its left, away scorer on its
+        // right, name on up to 2 lines; in-match missed penalties too ("Pénalty X" under the name).
         val goals = row.findViewById<LinearLayout>(R.id.sport_goals)
         goals.removeAllViews()
         goals.visibility = if (match.goals.isEmpty()) View.GONE else View.VISIBLE
-        match.goals.forEach { goal ->
-            goals.addView(TextView(this).apply {
-                text = goal   // "52' Name" — no ball icon (25/09/2026)
-                setTextColor(android.graphics.Color.WHITE)
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
-                gravity = Gravity.CENTER
-                maxLines = 1
-                ellipsize = android.text.TextUtils.TruncateAt.END
-                includeFontPadding = false
-            }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-                topMargin = DetailViews.dp(this@SportActivity, 3)
-            })
-        }
+        match.goals.forEach { goals.addView(scorerRow(it)) }
 
         row.findViewById<ImageButton>(R.id.sport_follow_button).apply {
             setBackgroundResource(if (isFollowed) R.drawable.bg_follow_active else R.drawable.bg_delete_button)
@@ -157,6 +147,71 @@ class SportActivity : Activity() {
                 render(SportStore.current)
             }
         }
+    }
+
+    private fun scorerRow(line: ScorerLine): View {
+        val rowView = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                topMargin = DetailViews.dp(this@SportActivity, 4)
+            }
+        }
+        val minute = TextView(this).apply {
+            text = if (line.minute.isBlank()) "" else "${line.minute}'"
+            setTextColor(android.graphics.Color.WHITE)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            gravity = Gravity.CENTER
+            includeFontPadding = false
+            val margin = DetailViews.dp(this@SportActivity, if (line.minute.isBlank()) 2 else 6)
+            setPadding(margin, 0, margin, 0)
+        }
+        if (line.side == null) {
+            // Side unknown (older phone build, or no bracket to deduce it): centered as before.
+            rowView.gravity = Gravity.CENTER
+            rowView.addView(minute)
+            rowView.addView(scorerColumn(line, Gravity.CENTER), LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+            return rowView
+        }
+        val home = line.side == "home"
+        val left = if (home) scorerColumn(line, Gravity.END) else View(this)
+        val right = if (home) View(this) else scorerColumn(line, Gravity.START)
+        rowView.addView(left, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        rowView.addView(minute, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+        rowView.addView(right, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        return rowView
+    }
+
+    /** Scorer name (max 2 lines), plus "Pénalty X" under it for a missed penalty. */
+    private fun scorerColumn(line: ScorerLine, align: Int): View {
+        val column = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = align
+        }
+        val name = line.name.ifBlank { if (line.missedPenalty) "" else "But" }
+        if (name.isNotBlank()) {
+            column.addView(TextView(this).apply {
+                text = name
+                setTextColor(android.graphics.Color.WHITE)
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+                gravity = align
+                maxLines = 2
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                includeFontPadding = false
+            })
+        }
+        if (line.missedPenalty) {
+            column.addView(TextView(this).apply {
+                text = getString(R.string.sport_penalty_missed)
+                setTextColor(getColor(R.color.detail_text_secondary))
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+                gravity = align
+                maxLines = 1
+                includeFontPadding = false
+            })
+        }
+        return column
     }
 
     /** "0 - [1]": raw score strings as sent, brackets on the side that just scored; "vs" before any score. */

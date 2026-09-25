@@ -54,7 +54,9 @@ object MatchDataCodec {
             syncTimestamp = syncTimestamp,
             periodLabel = item.getString("periodLabel")?.takeIf { it.isNotBlank() },
             eventKind = item.getString("eventKind"),
-            goals = item.getStringArrayList("goals") ?: emptyList()
+            goals = item.getStringArrayList("scorers")?.map { ScorerLine.decode(it) }
+                ?: item.getStringArrayList("goals")?.map { ScorerLine.legacy(it) }
+                ?: emptyList()
         )
     }
 }

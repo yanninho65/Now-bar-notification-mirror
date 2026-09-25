@@ -63,11 +63,38 @@ data class MatchScore(
     // changed. 0 for preview data.
     val syncTimestamp: Long = 0L,
     // 25/09/2026, Sport screen only (see mobile Models.MatchResult): long period label, kind of the
-    // last event ("period"/"goal"/"other"), every goal most recent first ("16' Ehsan Kari").
+    // last event ("period"/"goal"/"other"), every goal / in-match missed penalty most recent first.
     val periodLabel: String? = null,
     val eventKind: String? = null,
-    val goals: List<String> = emptyList()
+    val goals: List<ScorerLine> = emptyList()
 )
+
+/**
+ * One scorer line of the watch Sport screen (25/09/2026): [side] "home"/"away"/null (unknown →
+ * centered), [minute] without "'" (blank when Sofascore gave none), [name] (blank when absent),
+ * [missedPenalty] = "Penalty manqué" line rather than a goal.
+ */
+data class ScorerLine(val side: String?, val minute: String, val name: String, val missedPenalty: Boolean) {
+    companion object {
+        /** Phone "scorers" line "side\tminute\tname\tkind" (mobile SofascoreNotificationParser.goalsOf). */
+        fun decode(line: String): ScorerLine {
+            val parts = line.split('\t')
+            return ScorerLine(
+                side = parts.getOrNull(0)?.takeIf { it == "home" || it == "away" },
+                minute = parts.getOrNull(1).orEmpty(),
+                name = parts.getOrNull(2).orEmpty(),
+                missedPenalty = parts.getOrNull(3) == "penmiss"
+            )
+        }
+
+        /** Legacy "goals" line from an older phone build: "52' Name", no side. */
+        fun legacy(line: String): ScorerLine {
+            val minute = line.substringBefore("'", "").takeIf { it.isNotEmpty() && it.all { c -> c.isDigit() || c == '+' } }
+            return if (minute != null) ScorerLine(null, minute, line.substringAfter("'").trim(), false)
+            else ScorerLine(null, "", line.trim(), false)
+        }
+    }
+}
 
 /**
  * "2-1" (ou "vs" si le score n'est pas encore connu) — entoure de

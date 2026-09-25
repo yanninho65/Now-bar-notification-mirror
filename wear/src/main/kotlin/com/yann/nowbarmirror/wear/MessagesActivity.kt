@@ -27,6 +27,11 @@ import androidx.wear.widget.SwipeDismissFrameLayout
  *
  * UPDATED 24/09/2026 — round screen: paddings are fractions of the screen (DetailViews.applyRoundInsets).
  *
+ * REWORKED 25/09/2026 — each message in a pill like the Sport screen: image top-left, app icon
+ * under it, title on its right, text below; actions as round icon buttons on one line (mark read =
+ * open envelope, silence = bell off, delete = bin, watch, phone; "Répondre" dropped), the "delete on
+ * the phone" button under them.
+ *
  * UPDATED 25/09/2026 — app row: ONE horizontally scrollable line (DetailViews.appIconRow, shared with
  * SportActivity), no more "Sur la montre" / "Sur le téléphone" split. Tap still opens on the watch
  * when the app is installed there, otherwise on the phone.
@@ -42,7 +47,8 @@ class MessagesActivity : Activity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_messages)
         container = findViewById(R.id.messages_container)
-        DetailViews.applyRoundInsets(container)
+        // Pills almost full width, same as the Sport screen (25/09/2026).
+        DetailViews.applyRoundInsets(container, sideFraction = 0.03f)
         findViewById<SwipeDismissFrameLayout>(R.id.swipe_layout).addCallback(object : SwipeDismissFrameLayout.Callback() {
             override fun onDismissed(layout: SwipeDismissFrameLayout) {
                 layout.visibility = View.GONE
@@ -78,33 +84,33 @@ class MessagesActivity : Activity() {
         container.removeAllViews()
         val apps = list?.apps.orEmpty()
         if (apps.isNotEmpty()) {
-            container.addView(DetailViews.appIconRow(this, apps))
+            container.addView(DetailViews.appIconRow(this, apps, extraSideFraction = 0.07f))
             container.addView(DetailViews.separator(this))
         }
         if (messages.isEmpty()) {
             container.addView(DetailViews.emptyText(this, getString(R.string.messages_empty)))
             return
         }
-        messages.forEachIndexed { index, message ->
+        messages.forEach { message ->
             val item = layoutInflater.inflate(R.layout.item_message, container, false)
             bind(item, message)
-            item.findViewById<View>(R.id.message_separator).visibility =
-                if (index == messages.lastIndex) View.GONE else View.VISIBLE
             container.addView(item)
         }
     }
 
     private fun bind(item: View, message: MessageInfo) {
+        // Top-left: the notification image, else the app icon; the app icon goes under an image.
+        val image = message.image ?: message.appIcon
         item.findViewById<ImageView>(R.id.message_image).apply {
-            if (message.image != null) {
-                setImageBitmap(DetailViews.circularBitmap(message.image))
+            if (image != null) {
+                setImageBitmap(DetailViews.circularBitmap(image))
                 visibility = View.VISIBLE
             } else {
                 visibility = View.GONE
             }
         }
         item.findViewById<ImageView>(R.id.message_app_icon).apply {
-            if (message.appIcon != null) {
+            if (message.image != null && message.appIcon != null) {
                 setImageBitmap(DetailViews.circularBitmap(message.appIcon))
                 visibility = View.VISIBLE
             } else {
@@ -117,37 +123,92 @@ class MessagesActivity : Activity() {
         val lines = item.findViewById<LinearLayout>(R.id.message_lines_container)
         if (message.detailLines.isNotEmpty()) {
             lines.visibility = View.VISIBLE
-            message.detailLines.forEach { lines.addView(DetailViews.lineCard(this, it)) }
+            message.detailLines.forEach { lines.addView(detailLine(it)) }
         } else if (message.text.isNotBlank()) {
             textView.visibility = View.VISIBLE
             textView.text = message.text
         }
 
-        val actions = item.findViewById<LinearLayout>(R.id.message_actions_container)
+        // Round icon buttons on one line (25/09/2026); "Répondre" ignored; labels with no known
+        // icon stay text pills above the row. The index sent is the phone's action index.
+        val buttons = mutableListOf<Triple<Int, String, () -> Unit>>()
+        val textActions = item.findViewById<LinearLayout>(R.id.message_text_actions_container)
         message.actionLabels.forEachIndexed { index, label ->
-            actions.addView(DetailViews.actionChip(this, label) {
-                PhoneRelay.sendMessageAction(applicationContext, message.key, index)
-            })
+            if (isReply(label)) return@forEachIndexed
+            val send = { PhoneRelay.sendMessageAction(applicationContext, message.key, index) }
+            val icon = iconFor(label)
+            if (icon != null) {
+                buttons.add(Triple(icon, label, send))
+            } else {
+                textActions.visibility = View.VISIBLE
+                textActions.addView(DetailViews.actionChip(this, label) { send() })
+            }
         }
         watchLaunchIntent(message.packageName)?.let { launch ->
-            actions.addView(DetailViews.actionChip(this, getString(R.string.action_view_on_watch)) {
+            buttons.add(Triple(R.drawable.ic_watch, getString(R.string.action_view_on_watch)) {
                 try {
                     startActivity(launch)
                 } catch (_: Exception) {
                 }
             })
         }
-        actions.addView(DetailViews.actionChip(this, getString(R.string.action_view_on_phone)) {
+        buttons.add(Triple(R.drawable.ic_phone, getString(R.string.action_view_on_phone)) {
             PhoneRelay.sendMessageOpen(applicationContext, message.key)
         })
 
+        // Sized so up to 5 buttons fit the pill width on one line.
+        val size = when {
+            buttons.size <= 3 -> 36
+            buttons.size == 4 -> 32
+            else -> 28
+        }
+        val gap = DetailViews.dp(this, if (buttons.size <= 3) 14 else 6)
+        val row = item.findViewById<LinearLayout>(R.id.message_actions_container)
+        buttons.forEachIndexed { i, (icon, description, onClick) ->
+            val button = DetailViews.roundIconButton(this, icon, description, size, onClick)
+            if (i > 0) (button.layoutParams as LinearLayout.LayoutParams).marginStart = gap
+            row.addView(button)
+        }
+
         item.findViewById<ImageButton>(R.id.message_delete_button).apply {
+            contentDescription = getString(R.string.action_delete_on_phone)
             DetailViews.addPressFeedback(this)
             setOnClickListener {
                 PhoneRelay.sendMessageDismiss(applicationContext, message.key)
                 pendingDismissed.add(message.key)
                 render(MessagesStore.current)
             }
+        }
+    }
+
+    /** One conversation line inside the pill: plain left-aligned text. */
+    private fun detailLine(text: String): TextView = TextView(this).apply {
+        this.text = text
+        setTextColor(getColor(R.color.detail_text_primary))
+        setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 14f)
+        maxLines = 4
+        ellipsize = android.text.TextUtils.TruncateAt.END
+        layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+            topMargin = DetailViews.dp(this@MessagesActivity, 4)
+        }
+    }
+
+    private fun normalized(label: String): String =
+        java.text.Normalizer.normalize(label.lowercase(), java.text.Normalizer.Form.NFD).replace(Regex("\\p{M}+"), "")
+
+    private fun isReply(label: String): Boolean {
+        val l = normalized(label)
+        return "repond" in l || "reply" in l
+    }
+
+    /** Icon of a known action label (French/English wordings), null = keep it as a text pill. */
+    private fun iconFor(label: String): Int? {
+        val l = normalized(label)
+        return when {
+            Regex("\\blu\\b").containsMatchIn(l) || "read" in l -> R.drawable.ic_mark_read
+            "silenc" in l || "mute" in l || "sourdine" in l || "muet" in l -> R.drawable.ic_mute
+            "suppr" in l || "delete" in l || "corbeille" in l || "effacer" in l -> R.drawable.ic_delete
+            else -> null
         }
     }
 

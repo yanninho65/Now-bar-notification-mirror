@@ -71,7 +71,8 @@ object WatchSync {
         dataMap.putString("status", match.status)
         match.periodLabel?.let { dataMap.putString("periodLabel", it) }
         match.eventKind?.let { dataMap.putString("eventKind", it) }
-        if (match.goals.isNotEmpty()) dataMap.putStringArrayList("goals", ArrayList(match.goals))
+        // "scorers" (25/09/2026) replaces "goals": "side\tminute\tname\tkind" lines, see SofascoreNotificationParser.goalsOf.
+        if (match.goals.isNotEmpty()) dataMap.putStringArrayList("scorers", ArrayList(match.goals))
     }
 
     /**

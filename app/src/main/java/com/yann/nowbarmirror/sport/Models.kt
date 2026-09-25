@@ -10,7 +10,8 @@ package com.yann.nowbarmirror.sport
  * Watch Sport screen only (25/09/2026): [periodLabel] = long French label of the event the status
  * came from ("Match commencé", "Mi-temps", "2ème mi-temps", "Min 23 · Carton rouge"…, null → the watch spells [status]);
  * [eventKind] = kind of that event (SofascoreNotificationParser.PERIOD/GOAL/OTHER); [goals] = every
- * goal still in the notification, most recent first ("16' Ehsan Kari").
+ * goal / in-match missed penalty still in the notification, most recent first, encoded
+ * "side\tminute\tname\tkind" (see SofascoreNotificationParser.goalsOf).
  */
 data class MatchResult(
     val homeTeam: String,
