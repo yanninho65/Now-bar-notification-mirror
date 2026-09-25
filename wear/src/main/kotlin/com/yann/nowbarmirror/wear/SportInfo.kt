@@ -17,9 +17,7 @@ data class SportMatch(
     val match: MatchScore,
     // Raw score strings as sent (e.g. "1 ([4])" after a shoot-out), which the Int fields of [match] can't hold.
     val homeScoreText: String,
-    val awayScoreText: String,
-    // The notification's most recent line, as-is (e.g. "16' But : 0 - [1] Ehsan Kari").
-    val lastLine: String = ""
+    val awayScoreText: String
 )
 
 /** The whole "/sport" push: matches most recent first, the sport-app row (same [MessageApp] as Messages), the followed match key. */
@@ -52,8 +50,7 @@ object SportDataCodec {
                 title = item.getString("title").orEmpty().ifBlank { "${match.homeTeam} - ${match.awayTeam}" },
                 match = match,
                 homeScoreText = item.getString("homeScore").orEmpty().trim(),
-                awayScoreText = item.getString("awayScore").orEmpty().trim(),
-                lastLine = item.getString("lastLine").orEmpty().trim()
+                awayScoreText = item.getString("awayScore").orEmpty().trim()
             )
         }
         return SportList(

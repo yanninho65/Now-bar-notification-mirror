@@ -19,10 +19,9 @@ import androidx.wear.widget.SwipeDismissFrameLayout
  * - top: the sport apps chosen on the phone (SportAppsPrefs), ONE scrollable line with count badges;
  * - below: EVERY active Sofascore notification (SportStore, "/sport") — the one also shown by the
  *   "Notification" complication included — one near-full-width pill per match (item_sport_match.xml,
- *   reworked 25/09/2026): small notification image + title, big score, period (above the score when
- *   the last event is a period change), the latest line as-is, the scorers (football, most recent
- *   first, cancelled ones removed on the phone), then pin / "Aff. sur tél." (opens, doesn't dismiss) /
- *   delete. The pin makes "Score en direct" follow only this match.
+ *   reworked 25/09/2026): small notification image + title, big score, the period right under it,
+ *   the scorers (football, most recent first, one line each, cancelled ones removed on the phone),
+ *   then pin / "Aff. sur tél." (opens, doesn't dismiss) / delete. Compact so 4 scorers fit. The pin makes "Score en direct" follow only this match.
  *   The followed match is listed first (blue outline, blue pin); tapping its pin again goes back
  *   to automatic. Order otherwise: most recent first.
  * Taps are optimistic (hidden / pinned locally) until the next phone push confirms them.
@@ -109,30 +108,14 @@ class SportActivity : Activity() {
         row.findViewById<TextView>(R.id.sport_match_title).text = item.title
         row.findViewById<TextView>(R.id.sport_score).text = scoreText(item)
 
-        // Period above the score when the last event IS a period change; below otherwise, except
-        // after a goal (the scorer list already shows its minute).
-        val period = MatchClock.longLabel(match)
-        val top = row.findViewById<TextView>(R.id.sport_period_top)
-        val bottom = row.findViewById<TextView>(R.id.sport_period_bottom)
-        top.visibility = View.GONE
-        bottom.visibility = View.GONE
-        if (period.isNotBlank()) {
-            when (match.eventKind) {
-                EVENT_PERIOD -> top.apply { text = period; visibility = View.VISIBLE }
-                EVENT_GOAL -> Unit
-                else -> bottom.apply { text = period; visibility = View.VISIBLE }
-            }
+        // Period always right under the score, not bold (25/09/2026).
+        row.findViewById<TextView>(R.id.sport_period).apply {
+            val period = MatchClock.longLabel(match)
+            text = period
+            visibility = if (period.isBlank()) View.GONE else View.VISIBLE
         }
 
-        row.findViewById<TextView>(R.id.sport_last_line).apply {
-            if (item.lastLine.isNotBlank()) {
-                text = item.lastLine
-                visibility = View.VISIBLE
-            } else {
-                visibility = View.GONE
-            }
-        }
-
+        // Scorers: one line each, full width, single line (ellipsized) so 4 scorers fit the screen.
         val goals = row.findViewById<LinearLayout>(R.id.sport_goals)
         goals.removeAllViews()
         goals.visibility = if (match.goals.isEmpty()) View.GONE else View.VISIBLE
@@ -140,11 +123,13 @@ class SportActivity : Activity() {
             goals.addView(TextView(this).apply {
                 text = "⚽ $goal"
                 setTextColor(getColor(R.color.detail_text_primary))
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
                 gravity = Gravity.CENTER
-                maxLines = 2
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                includeFontPadding = false
             }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-                topMargin = DetailViews.dp(this@SportActivity, 2)
+                topMargin = DetailViews.dp(this@SportActivity, 3)
             })
         }
 
@@ -184,9 +169,4 @@ class SportActivity : Activity() {
         return "$h - $a"
     }
 
-    private companion object {
-        // mobile SofascoreNotificationParser.PERIOD / GOAL
-        const val EVENT_PERIOD = "period"
-        const val EVENT_GOAL = "goal"
-    }
 }
