@@ -473,7 +473,13 @@ object SofascoreNotificationParser {
      * SofascoreNotificationListenerService retombe sur un repli neutre qui
      * affiche le texte brut de la ligne la plus récente.
      */
-    fun parse(homeTeam: String, awayTeam: String, lines: List<String>): MatchResult? {
+    fun parse(homeTeam: String, awayTeam: String, lines: List<String>): MatchResult? =
+        parseStatus(homeTeam, awayTeam, lines)?.let { result ->
+            val goals = goalsOf(lines)
+            if (goals.isEmpty()) result else result.copy(goals = goals)
+        }
+
+    private fun parseStatus(homeTeam: String, awayTeam: String, lines: List<String>): MatchResult? {
         // Score final AVEC séance de tirs au but — DOIT être vérifié AVANT le [matchFinished]
         // générique juste en dessous, qui matcherait déjà le préfixe "H - A" de cette même ligne
         // sans capturer la partie tirs au but entre parenthèses ni le marqueur "(AP)". Voir la doc
@@ -486,7 +492,7 @@ object SofascoreNotificationParser {
             val penAway = finishedWithShootout.groupValues[5].ifBlank { finishedWithShootout.groupValues[6] }
             val penHomeText = if (finishedWithShootout.groupValues[3].isNotBlank()) "[$penHome]" else penHome
             val penAwayText = if (finishedWithShootout.groupValues[5].isNotBlank()) "[$penAway]" else penAway
-            return build(homeTeam, awayTeam, "$home ($penHomeText)", "$away ($penAwayText)", "AP")
+            return build(homeTeam, awayTeam, "$home ($penHomeText)", "$away ($penAwayText)", "AP", periodLabel = "Terminé aux tirs au but", eventKind = PERIOD)
         }
 
         // Score final toujours prioritaire dès qu'il est présent, peu
@@ -498,7 +504,7 @@ object SofascoreNotificationParser {
         if (finished != null) {
             val home = finished.groupValues[1].ifBlank { finished.groupValues[2] }
             val away = finished.groupValues[3].ifBlank { finished.groupValues[4] }
-            return build(homeTeam, awayTeam, home, away, "FT")
+            return build(homeTeam, awayTeam, home, away, "FT", periodLabel = "Match terminé", eventKind = PERIOD)
         }
 
         // Séance de tirs au but EN COURS, ou attente d'icelle (match pas encore fini) — statut
@@ -515,10 +521,10 @@ object SofascoreNotificationParser {
             if (tick != null) {
                 val home = tick.groupValues[1].ifBlank { tick.groupValues[2] }
                 val away = tick.groupValues[3].ifBlank { tick.groupValues[4] }
-                return build(homeTeam, awayTeam, home, away, "TAB", lastScorer = bracketedSide(tick.groupValues, 1, 3))
+                return build(homeTeam, awayTeam, home, away, "TAB", lastScorer = bracketedSide(tick.groupValues, 1, 3), periodLabel = "Tirs au but")
             }
             awaitingPenalties.find(trimmed)?.let { m ->
-                return build(homeTeam, awayTeam, m.groupValues[1], m.groupValues[2], "TAB")
+                return build(homeTeam, awayTeam, m.groupValues[1], m.groupValues[2], "TAB", periodLabel = "Tirs au but à venir", eventKind = PERIOD)
             }
         }
 
@@ -553,29 +559,29 @@ object SofascoreNotificationParser {
             // déjà avant d'arriver dans cette fonction, pour tous les
             // sports (voir sa doc).
             halfTime.find(line)?.let { m ->
-                return build(homeTeam, awayTeam, m.groupValues[1], m.groupValues[2], "HT")
+                return build(homeTeam, awayTeam, m.groupValues[1], m.groupValues[2], "HT", periodLabel = "Mi-temps", eventKind = PERIOD)
             }
             secondHalfStarted.find(line)?.let { m ->
-                return build(homeTeam, awayTeam, m.groupValues[1], m.groupValues[2], "2H")
+                return build(homeTeam, awayTeam, m.groupValues[1], m.groupValues[2], "2H", periodLabel = "Début 2ème mi-temps", eventKind = PERIOD)
             }
             firstHalfStarted.find(line)?.let { m ->
                 val home = m.groupValues[1].ifBlank { "0" }
                 val away = m.groupValues[2].ifBlank { "0" }
-                return build(homeTeam, awayTeam, home, away, "1H")
+                return build(homeTeam, awayTeam, home, away, "1H", periodLabel = "Début du match", eventKind = PERIOD)
             }
             // Prolongation — voir doc de classe pour l'exemple réel confirmé (Italie U20 (F) -
             // Chine U20 (F), 20/09/2026) et la séquence complète.
             awaitingExtraTime.find(line)?.let { m ->
-                return build(homeTeam, awayTeam, m.groupValues[1], m.groupValues[2], "ET")
+                return build(homeTeam, awayTeam, m.groupValues[1], m.groupValues[2], "ET", periodLabel = "Prolongation à venir", eventKind = PERIOD)
             }
             extraTimeFirstStarted.find(line)?.let { m ->
-                return build(homeTeam, awayTeam, m.groupValues[1], m.groupValues[2], "ET1")
+                return build(homeTeam, awayTeam, m.groupValues[1], m.groupValues[2], "ET1", periodLabel = "Début prolongation", eventKind = PERIOD)
             }
             extraTimeHalftime.find(line)?.let { m ->
-                return build(homeTeam, awayTeam, m.groupValues[1], m.groupValues[2], "MTP")
+                return build(homeTeam, awayTeam, m.groupValues[1], m.groupValues[2], "MTP", periodLabel = "Mi-temps prolongation", eventKind = PERIOD)
             }
             extraTimeSecondStarted.find(line)?.let { m ->
-                return build(homeTeam, awayTeam, m.groupValues[1], m.groupValues[2], "ET2")
+                return build(homeTeam, awayTeam, m.groupValues[1], m.groupValues[2], "ET2", periodLabel = "2ème prolongation", eventKind = PERIOD)
             }
             timedEvent.find(line)?.let { m ->
                 val minute = m.groupValues[1]
@@ -587,17 +593,24 @@ object SofascoreNotificationParser {
                 // autre cas — une minute brute parfois renvoyée par
                 // TheSportsDB, sans rapport avec un but) et affiche
                 // directement le format voulu via sa branche `else`.
-                return build(homeTeam, awayTeam, home, away, "$minute+", lastScorer = bracketedSide(m.groupValues, 2, 4))
+                // 25/09/2026, watch Sport screen: "Min XX"; another event keeps its label ("Min 23 · Carton rouge").
+                val eventLabel = line.substringAfter("'").substringBefore(":").trim()
+                val isGoal = isGoalLabel(eventLabel)
+                return build(
+                    homeTeam, awayTeam, home, away, "$minute+", lastScorer = bracketedSide(m.groupValues, 2, 4),
+                    periodLabel = if (isGoal || eventLabel.isBlank()) "Min $minute" else "Min $minute · $eventLabel",
+                    eventKind = if (isGoal) GOAL else OTHER
+                )
             }
             correctionScore.find(line)?.let { m ->
                 val home = m.groupValues[1].ifBlank { m.groupValues[2] }
                 val away = m.groupValues[3].ifBlank { m.groupValues[4] }
-                return build(homeTeam, awayTeam, home, away, "", lastScorer = bracketedSide(m.groupValues, 1, 3))
+                return build(homeTeam, awayTeam, home, away, "", lastScorer = bracketedSide(m.groupValues, 1, 3), periodLabel = "Correction du score", eventKind = OTHER)
             }
             goalNoMinute.find(line)?.let { m ->
                 val home = m.groupValues[1].ifBlank { m.groupValues[2] }
                 val away = m.groupValues[3].ifBlank { m.groupValues[4] }
-                return build(homeTeam, awayTeam, home, away, "", lastScorer = bracketedSide(m.groupValues, 1, 3))
+                return build(homeTeam, awayTeam, home, away, "", lastScorer = bracketedSide(m.groupValues, 1, 3), periodLabel = halfLabel(currentHalfStatus(lines, i)), eventKind = GOAL)
             }
             scoreEvent.find(line)?.let { m ->
                 val home = m.groupValues[1].ifBlank { m.groupValues[2] }
@@ -605,7 +618,7 @@ object SofascoreNotificationParser {
                 // Rugby (pas de minute sur cette ligne, contrairement à [timedEvent]) — voir doc de
                 // classe : détermine 1re/2e période à partir des marqueurs de mi-temps déjà connus.
                 val period = currentHalfStatus(lines, i)
-                return build(homeTeam, awayTeam, home, away, period, lastScorer = bracketedSide(m.groupValues, 1, 3))
+                return build(homeTeam, awayTeam, home, away, period, lastScorer = bracketedSide(m.groupValues, 1, 3), periodLabel = halfLabel(period), eventKind = OTHER)
             }
         }
         return null
@@ -761,19 +774,97 @@ object SofascoreNotificationParser {
         )
     }
 
+    private fun halfLabel(status: String) = if (status == "2H") "2ème mi-temps" else "1ère mi-temps"
+
     private fun build(
         homeTeam: String,
         awayTeam: String,
         homeScore: String,
         awayScore: String,
         status: String,
-        lastScorer: String? = null
+        lastScorer: String? = null,
+        periodLabel: String? = null,
+        eventKind: String? = null
     ) = MatchResult(
         homeTeam = homeTeam,
         awayTeam = awayTeam,
         homeScore = homeScore,
         awayScore = awayScore,
         lastScorer = lastScorer,
-        status = status
+        status = status,
+        periodLabel = periodLabel,
+        eventKind = eventKind
     )
+
+    // --- Watch Sport screen (25/09/2026): kind of the most recent event + every goal scorer ---
+
+    const val PERIOD = "period"   // period change (start, half-time, 2nd half, end, extra time…) → shown above the score
+    const val GOAL = "goal"       // goal → the scorer list already shows it
+    const val OTHER = "other"
+
+    private fun isGoalLabel(label: String) =
+        label.startsWith("But", ignoreCase = true) && !label.contains("annul", ignoreCase = true)
+
+    private class Goal(val text: String, val home: Int, val away: Int, val side: String?)
+
+    /**
+     * Every goal still in the notification's lines (Sofascore keeps the last 6 events), most recent
+     * first = minutes in decreasing order: "16' Ehsan Kari" ("16' But" when no name follows); a goal
+     * line without minute gives just the name (or "But"). Empty for non-football sports.
+     * A "Correction du score" line removes the goal(s) it cancelled: those of the side whose count
+     * went down (side = bracket on the goal line, else deduced from the previous score).
+     */
+    private fun goalsOf(lines: List<String>): List<String> {
+        val goals = mutableListOf<Goal>()
+        fun add(text: String, home: Int?, away: Int?, bracketSide: String?) {
+            if (home == null || away == null) return
+            val prev = goals.lastOrNull()
+            val side = bracketSide ?: when {
+                home > (prev?.home ?: 0) -> "home"
+                away > (prev?.away ?: 0) -> "away"
+                else -> null
+            }
+            goals.add(Goal(text, home, away, side))
+        }
+        for (raw in lines.asReversed()) {   // oldest first
+            val line = raw.trim()
+            val timed = timedEvent.find(line)
+            if (timed != null) {
+                val label = line.substringAfter("'").substringBefore(":").trim()
+                if (isGoalLabel(label)) {
+                    add(
+                        "${timed.groupValues[1]}' ${restAfter(line, timed).ifEmpty { "But" }}",
+                        timed.groupValues[2].ifBlank { timed.groupValues[3] }.toIntOrNull(),
+                        timed.groupValues[4].ifBlank { timed.groupValues[5] }.toIntOrNull(),
+                        bracketedSide(timed.groupValues, 2, 4)
+                    )
+                }
+                continue
+            }
+            val correction = correctionScore.find(line)
+            if (correction != null) {
+                val home = correction.groupValues[1].ifBlank { correction.groupValues[2] }.toIntOrNull() ?: continue
+                val away = correction.groupValues[3].ifBlank { correction.groupValues[4] }.toIntOrNull() ?: continue
+                goals.removeAll { goal ->
+                    when (goal.side) {
+                        "home" -> goal.home > home
+                        "away" -> goal.away > away
+                        else -> goal.home > home || goal.away > away
+                    }
+                }
+                continue
+            }
+            goalNoMinute.find(line)?.let { m ->
+                add(
+                    restAfter(line, m).ifEmpty { "But" },
+                    m.groupValues[1].ifBlank { m.groupValues[2] }.toIntOrNull(),
+                    m.groupValues[3].ifBlank { m.groupValues[4] }.toIntOrNull(),
+                    bracketedSide(m.groupValues, 1, 3)
+                )
+            }
+        }
+        return goals.asReversed().map { it.text }
+    }
+
+    private fun restAfter(line: String, m: kotlin.text.MatchResult) = line.substring(m.range.last + 1).trim().replace(Regex("""\s+"""), " ")
 }

@@ -69,6 +69,9 @@ object WatchSync {
         dataMap.putString("awayScore", match.awayScore ?: "")
         match.lastScorer?.let { dataMap.putString("lastScorer", it) }
         dataMap.putString("status", match.status)
+        match.periodLabel?.let { dataMap.putString("periodLabel", it) }
+        match.eventKind?.let { dataMap.putString("eventKind", it) }
+        if (match.goals.isNotEmpty()) dataMap.putStringArrayList("goals", ArrayList(match.goals))
     }
 
     /**

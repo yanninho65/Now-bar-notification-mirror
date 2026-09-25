@@ -15,7 +15,8 @@ import com.yann.nowbarmirror.settings.SportAppsPrefs
  * NEW 25/09/2026 — feeds the watch "Sport" screen (wear/SportActivity, opened by a tap on "Score en
  * direct"), same model as MessagesWatchSync / "/messages":
  * - "matches": DataMap list, EVERY active Sofascore notification (no "Dernière notif" filtering),
- *   most recent first: key, postTimeMillis, title (the notification's own title) + the match fields
+ *   most recent first: key, postTimeMillis, title (the notification's own title), lastLine (its most
+ *   recent event line, shown as-is) + the match fields
  *   of WatchSync.putMatch; image as top-level asset "img_<index>";
  * - "apps": the sport apps of SportAppsPrefs with their counts (MessagesWatchSync.appEntries/putApps
  *   — same format and rules as the Messages app row), icons "icon_<package>";
@@ -28,7 +29,7 @@ object SportWatchSync {
     const val PATH = "/sport"
     private const val MAX_MATCHES = 20
 
-    class Item(val sbn: StatusBarNotification, val title: String, val match: MatchResult)
+    class Item(val sbn: StatusBarNotification, val title: String, val lastLine: String, val match: MatchResult)
 
     @Volatile
     private var lastSignature: String? = null
@@ -42,7 +43,7 @@ object SportWatchSync {
         val apps = MessagesWatchSync.appEntries(context, active, SportAppsPrefs.getOrdered(context))
 
         val signature = matches.joinToString("\u0001") {
-            listOf(it.sbn.key, it.sbn.postTime, it.title, it.match).joinToString("\u0003")
+            listOf(it.sbn.key, it.sbn.postTime, it.title, it.lastLine, it.match).joinToString("\u0003")
         } + "\u0004" + (followed ?: "") + "\u0004" + MessagesWatchSync.appsSignature(apps)
         if (signature == lastSignature) return
 
@@ -54,6 +55,7 @@ object SportWatchSync {
                         putString("key", item.sbn.key)
                         putLong("postTimeMillis", item.sbn.postTime)
                         putString("title", item.title)
+                        putString("lastLine", item.lastLine)
                         WatchSync.putMatch(this, item.match)
                     })
                     imageAsset(context, item.sbn)?.let { dataMap.putAsset("img_$index", it) }
