@@ -15,6 +15,8 @@
     <string name="sport_unfollow">Ne plus suivre (auto)</string>
     <!-- NEW 25/09/2026, écran Sport : ligne "Penalty manqué" sous le nom du tireur -->
     <string name="sport_penalty_missed">Pénalty X</string>
+    <string name="sport_penalty_missed_long">Pénalty manqué</string>
+    <string name="sport_red_card">Carton rouge</string>
     <!-- NEW 25/09/2026, écran Messages : descriptions des boutons ronds -->
     <string name="action_delete_on_phone">Supprimer sur le téléphone</string>
     <string name="action_show_more">Afficher tout le message</string>

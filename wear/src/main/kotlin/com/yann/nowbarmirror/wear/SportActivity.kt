@@ -21,7 +21,8 @@ import androidx.wear.widget.SwipeDismissFrameLayout
  *   "Notification" complication included — one near-full-width pill per match (item_sport_match.xml,
  *   reworked 25/09/2026): small notification image + title, big score, the period right under it,
  *   the scorers (football, most recent first, cancelled ones removed on the phone; since 25/09/2026
- *   minute centered, home scorer left / away scorer right, missed penalties shown as "Pénalty X"),
+ *   minute centered, home scorer left / away scorer right, missed penalties ("Pénalty manqué", else
+ *   "Pénalty X") and red cards ("Carton rouge", red) the same way),
  *   then pin / bell-off (Sofascore's mute action, only when present — also deletes the notification) / "Aff. sur tél." (opens, doesn't dismiss) / delete. Compact so 4 scorers fit. The pin makes "Score en direct" follow only this match.
  *   The followed match is listed first (blue outline, blue pin); tapping its pin again goes back
  *   to automatic. Order otherwise: most recent first.
@@ -117,7 +118,7 @@ class SportActivity : Activity() {
         }
 
         // Scorers (25/09/2026): minute in the middle, home scorer on its left, away scorer on its
-        // right, name on up to 2 lines; in-match missed penalties too ("Pénalty X" under the name).
+        // right, name on up to 2 lines; in-match missed penalties and red cards too (label under the name).
         val goals = row.findViewById<LinearLayout>(R.id.sport_goals)
         goals.removeAllViews()
         goals.visibility = if (match.goals.isEmpty()) View.GONE else View.VISIBLE
@@ -192,13 +193,16 @@ class SportActivity : Activity() {
         return rowView
     }
 
-    /** Scorer name (max 2 lines), plus "Pénalty X" under it for a missed penalty. */
+    /**
+     * Name (max 2 lines), plus under it: "Pénalty manqué" for a missed penalty ("Pénalty X" when the
+     * long label doesn't fit on one line), "Carton rouge" in red for a red card.
+     */
     private fun scorerColumn(line: ScorerLine, align: Int): View {
         val column = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = align
         }
-        val name = line.name.ifBlank { if (line.missedPenalty) "" else "But" }
+        val name = line.name.ifBlank { if (line.kind == ScorerLine.GOAL) "But" else "" }
         if (name.isNotBlank()) {
             column.addView(TextView(this).apply {
                 text = name
@@ -210,14 +214,19 @@ class SportActivity : Activity() {
                 includeFontPadding = false
             })
         }
-        if (line.missedPenalty) {
+        if (line.missedPenalty || line.redCard) {
             column.addView(TextView(this).apply {
-                text = getString(R.string.sport_penalty_missed)
-                setTextColor(getColor(R.color.detail_text_secondary))
+                text = getString(if (line.redCard) R.string.sport_red_card else R.string.sport_penalty_missed_long)
+                setTextColor(getColor(if (line.redCard) R.color.detail_count_badge else R.color.detail_text_secondary))
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
                 gravity = align
                 maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
                 includeFontPadding = false
+                if (line.missedPenalty) post {
+                    val l = layout ?: return@post
+                    if (l.lineCount > 0 && l.getEllipsisCount(0) > 0) text = getString(R.string.sport_penalty_missed)
+                }
             })
         }
         return column

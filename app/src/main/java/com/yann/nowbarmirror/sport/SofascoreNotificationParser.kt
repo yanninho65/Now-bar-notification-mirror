@@ -851,6 +851,7 @@ object SofascoreNotificationParser {
     // Kinds of a scorer line sent to the watch (4th field of the encoded line, see [goalsOf]).
     const val SCORER_GOAL = "goal"
     const val SCORER_PENALTY_MISSED = "penmiss"
+    const val SCORER_RED_CARD = "red"
 
     // In-match missed penalty (25/09/2026, Géorgie - Irlande du Nord): "65' Penalty manqué : Géorgie
     // Khvicha Kvaratskhelia" — no score, the team name then the player. Shoot-out misses have no
@@ -860,12 +861,19 @@ object SofascoreNotificationParser {
         RegexOption.IGNORE_CASE
     )
 
+    // Red card (25/09/2026, Turquie - France): "87' Carton rouge: Uğurcan Çakır (Turquie)" — player,
+    // then his team in parentheses (used for the side; else a team-name prefix like missed penalties).
+    private val redCard = Regex(
+        """^(\d{1,3}(?:\+\d{1,2})?)'\s*Carton rouge\s*:\s*(.*)$""",
+        RegexOption.IGNORE_CASE
+    )
+
     /**
-     * Every goal and in-match missed penalty still in the notification's lines (Sofascore keeps the
+     * Every goal, in-match missed penalty and red card still in the notification's lines (Sofascore keeps the
      * last 6 events), most recent first. Each entry is encoded "side\tminute\tname\tkind" for the
      * watch Sport screen (wear SportActivity.ScorerLine): side = "home"/"away"/"" (unknown), minute
      * without the "'" ("" when the line has none), name = scorer ("" when absent), kind =
-     * [SCORER_GOAL] / [SCORER_PENALTY_MISSED]. Goals without a minute are left out (the name is the
+     * [SCORER_GOAL] / [SCORER_PENALTY_MISSED] / [SCORER_RED_CARD]. Goals without a minute are left out (the name is the
      * team's, see below). Empty for non-football sports.
      * A "Correction du score" line removes the goal(s) it cancelled: those of the side whose count
      * went down (side = bracket on the goal line, else deduced from the previous score).
@@ -888,6 +896,12 @@ object SofascoreNotificationParser {
             if (missed != null) {
                 val (side, name) = splitTeamPrefix(missed.groupValues[2].trim(), homeTeam, awayTeam)
                 goals.add(Goal(side, missed.groupValues[1], name, SCORER_PENALTY_MISSED, -1, -1))
+                continue
+            }
+            val red = redCard.find(line)
+            if (red != null) {
+                val (side, name) = splitRedCard(red.groupValues[2].trim(), homeTeam, awayTeam)
+                goals.add(Goal(side, red.groupValues[1], name, SCORER_RED_CARD, -1, -1))
                 continue
             }
             val timed = timedEvent.find(line)
@@ -932,6 +946,18 @@ object SofascoreNotificationParser {
         return goals.asReversed().filter { it.kind != SCORER_GOAL || it.minute.isNotBlank() }.map { g ->
             listOf(g.side.orEmpty(), g.minute, g.name.replace('\t', ' '), g.kind).joinToString("\t")
         }
+    }
+
+    /** "Uğurcan Çakır (Turquie)" → ("home", "Uğurcan Çakır"); no/unknown team in parentheses → [splitTeamPrefix]. */
+    private fun splitRedCard(rest: String, homeTeam: String, awayTeam: String): Pair<String?, String> {
+        val paren = Regex("""^(.*?)\s*\(([^()]*)\)\s*$""").find(rest) ?: return splitTeamPrefix(rest, homeTeam, awayTeam)
+        val team = paren.groupValues[2].trim()
+        val side = when {
+            team.equals(homeTeam.trim(), ignoreCase = true) -> "home"
+            team.equals(awayTeam.trim(), ignoreCase = true) -> "away"
+            else -> return splitTeamPrefix(rest, homeTeam, awayTeam)
+        }
+        return side to paren.groupValues[1].trim()
     }
 
     /** "Géorgie Khvicha Kvaratskhelia" → ("home", "Khvicha Kvaratskhelia"); longest matching team wins. */

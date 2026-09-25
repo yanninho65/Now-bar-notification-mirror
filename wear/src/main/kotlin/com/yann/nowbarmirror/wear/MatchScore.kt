@@ -70,12 +70,19 @@ data class MatchScore(
 )
 
 /**
- * One scorer line of the watch Sport screen (25/09/2026): [side] "home"/"away"/null (unknown →
+ * One event line of the watch Sport screen (25/09/2026): [side] "home"/"away"/null (unknown →
  * centered), [minute] without "'" (blank when Sofascore gave none), [name] (blank when absent),
- * [missedPenalty] = "Penalty manqué" line rather than a goal.
+ * [kind] = [GOAL] / [PENALTY_MISSED] / [RED_CARD].
  */
-data class ScorerLine(val side: String?, val minute: String, val name: String, val missedPenalty: Boolean) {
+data class ScorerLine(val side: String?, val minute: String, val name: String, val kind: String = GOAL) {
+    val missedPenalty get() = kind == PENALTY_MISSED
+    val redCard get() = kind == RED_CARD
+
     companion object {
+        const val GOAL = "goal"
+        const val PENALTY_MISSED = "penmiss"
+        const val RED_CARD = "red"
+
         /** Phone "scorers" line "side\tminute\tname\tkind" (mobile SofascoreNotificationParser.goalsOf). */
         fun decode(line: String): ScorerLine {
             val parts = line.split('\t')
@@ -83,15 +90,15 @@ data class ScorerLine(val side: String?, val minute: String, val name: String, v
                 side = parts.getOrNull(0)?.takeIf { it == "home" || it == "away" },
                 minute = parts.getOrNull(1).orEmpty(),
                 name = parts.getOrNull(2).orEmpty(),
-                missedPenalty = parts.getOrNull(3) == "penmiss"
+                kind = parts.getOrNull(3)?.takeIf { it == PENALTY_MISSED || it == RED_CARD } ?: GOAL
             )
         }
 
         /** Legacy "goals" line from an older phone build: "52' Name", no side. */
         fun legacy(line: String): ScorerLine {
             val minute = line.substringBefore("'", "").takeIf { it.isNotEmpty() && it.all { c -> c.isDigit() || c == '+' } }
-            return if (minute != null) ScorerLine(null, minute, line.substringAfter("'").trim(), false)
-            else ScorerLine(null, "", line.trim(), false)
+            return if (minute != null) ScorerLine(null, minute, line.substringAfter("'").trim())
+            else ScorerLine(null, "", line.trim())
         }
     }
 }
