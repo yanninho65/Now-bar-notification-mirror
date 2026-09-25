@@ -1,88 +1,143 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- NEW 25/09/2026 — une notification Sofascore de l'écran "Sport" (SportActivity.kt), entourée
-     d'une pilule façon One UI Watch (bg_notif_pill) :
-     - gauche : l'image de la complication "Score en direct" (logos, score, période —
-       ComplicationImageComposer.composeRoundImage) et, dessous, la punaise "suivre ce match" ;
-     - centre : le titre de la notification ;
-     - droite : "Aff. sur tél." (ouvre sans supprimer) et supprimer, empilés. -->
+<!-- NEW 25/09/2026, REWORKED the same day (Yann) — une notification Sofascore de l'écran "Sport"
+     (SportActivity.kt), dans une pilule façon One UI Watch presque pleine largeur :
+     - en haut : image de la notif (petite) puis le titre à sa droite ;
+     - période en haut (au-dessus du score) si le dernier événement est un changement de période ;
+     - au milieu : le score (crochets = côté qui vient de marquer), en grand ;
+     - dessous : la période sinon, la dernière info de la notif telle quelle, puis les buteurs
+       (foot), minute décroissante, un par ligne ;
+     - en bas : punaise "suivre", "Aff. sur tél.", supprimer. -->
 <LinearLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/sport_pill"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:orientation="horizontal"
-    android:gravity="center_vertical"
+    android:orientation="vertical"
+    android:gravity="center_horizontal"
     android:background="@drawable/bg_notif_pill"
-    android:paddingStart="10dp"
-    android:paddingEnd="10dp"
-    android:paddingTop="10dp"
-    android:paddingBottom="10dp"
-    android:layout_marginBottom="8dp">
+    android:paddingStart="22dp"
+    android:paddingEnd="22dp"
+    android:paddingTop="14dp"
+    android:paddingBottom="14dp"
+    android:layout_marginBottom="10dp">
 
     <LinearLayout
-        android:layout_width="wrap_content"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:gravity="center_horizontal">
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
 
         <ImageView
             android:id="@+id/sport_match_image"
-            android:layout_width="52dp"
-            android:layout_height="52dp"
+            android:layout_width="wrap_content"
+            android:layout_height="26dp"
+            android:maxWidth="52dp"
+            android:adjustViewBounds="true"
             android:scaleType="fitCenter"
+            android:layout_marginEnd="8dp"
             android:contentDescription="@null" />
 
-        <ImageButton
-            android:id="@+id/sport_follow_button"
-            android:layout_width="30dp"
-            android:layout_height="30dp"
-            android:layout_marginTop="4dp"
-            android:background="@drawable/bg_delete_button"
-            android:src="@drawable/ic_pin"
-            android:scaleType="fitCenter"
-            android:padding="7dp"
-            android:contentDescription="@string/sport_follow" />
+        <TextView
+            android:id="@+id/sport_match_title"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:textColor="@color/detail_text_primary"
+            android:textSize="15sp"
+            android:textStyle="bold"
+            android:maxLines="2"
+            android:ellipsize="end" />
     </LinearLayout>
 
     <TextView
-        android:id="@+id/sport_match_title"
-        android:layout_width="0dp"
+        android:id="@+id/sport_period_top"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_weight="1"
-        android:layout_marginStart="8dp"
-        android:layout_marginEnd="8dp"
-        android:textAppearance="?android:attr/textAppearanceSmall"
-        android:textColor="@color/detail_text_primary"
-        android:textStyle="bold"
+        android:layout_marginTop="10dp"
         android:gravity="center"
-        android:maxLines="4"
-        android:ellipsize="end" />
+        android:textColor="@color/detail_text_primary"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:visibility="gone" />
+
+    <TextView
+        android:id="@+id/sport_score"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:gravity="center"
+        android:textColor="@color/detail_text_primary"
+        android:textSize="40sp"
+        android:textStyle="bold"
+        android:maxLines="1" />
+
+    <TextView
+        android:id="@+id/sport_period_bottom"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:textColor="@color/detail_text_primary"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:visibility="gone" />
+
+    <TextView
+        android:id="@+id/sport_last_line"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:gravity="center"
+        android:textColor="@color/detail_text_secondary"
+        android:textSize="15sp"
+        android:maxLines="3"
+        android:ellipsize="end"
+        android:visibility="gone" />
+
+    <LinearLayout
+        android:id="@+id/sport_goals"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:orientation="vertical"
+        android:visibility="gone" />
 
     <LinearLayout
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:gravity="center_horizontal">
+        android:layout_marginTop="12dp"
+        android:orientation="horizontal"
+        android:gravity="center">
+
+        <ImageButton
+            android:id="@+id/sport_follow_button"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:background="@drawable/bg_delete_button"
+            android:src="@drawable/ic_pin"
+            android:scaleType="fitCenter"
+            android:padding="10dp"
+            android:contentDescription="@string/sport_follow" />
 
         <ImageButton
             android:id="@+id/sport_open_button"
-            android:layout_width="30dp"
-            android:layout_height="30dp"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_marginStart="14dp"
+            android:layout_marginEnd="14dp"
             android:background="@drawable/bg_delete_button"
             android:src="@drawable/ic_phone"
             android:scaleType="fitCenter"
-            android:padding="7dp"
+            android:padding="10dp"
             android:contentDescription="@string/action_view_on_phone" />
 
         <ImageButton
             android:id="@+id/sport_delete_button"
-            android:layout_width="30dp"
-            android:layout_height="30dp"
-            android:layout_marginTop="6dp"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
             android:background="@drawable/bg_delete_button"
             android:src="@drawable/ic_delete"
             android:scaleType="fitCenter"
-            android:padding="7dp"
+            android:padding="10dp"
             android:contentDescription="@string/action_delete" />
     </LinearLayout>
 </LinearLayout>
