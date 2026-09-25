@@ -562,12 +562,12 @@ object SofascoreNotificationParser {
                 return build(homeTeam, awayTeam, m.groupValues[1], m.groupValues[2], "HT", periodLabel = "Mi-temps", eventKind = PERIOD)
             }
             secondHalfStarted.find(line)?.let { m ->
-                return build(homeTeam, awayTeam, m.groupValues[1], m.groupValues[2], "2H", periodLabel = "Début 2ème mi-temps", eventKind = PERIOD)
+                return build(homeTeam, awayTeam, m.groupValues[1], m.groupValues[2], "2H", periodLabel = "2ème mi-temps", eventKind = PERIOD)
             }
             firstHalfStarted.find(line)?.let { m ->
                 val home = m.groupValues[1].ifBlank { "0" }
                 val away = m.groupValues[2].ifBlank { "0" }
-                return build(homeTeam, awayTeam, home, away, "1H", periodLabel = "Début du match", eventKind = PERIOD)
+                return build(homeTeam, awayTeam, home, away, "1H", periodLabel = "Match commencé", eventKind = PERIOD)
             }
             // Prolongation — voir doc de classe pour l'exemple réel confirmé (Italie U20 (F) -
             // Chine U20 (F), 20/09/2026) et la séquence complète.
@@ -575,7 +575,7 @@ object SofascoreNotificationParser {
                 return build(homeTeam, awayTeam, m.groupValues[1], m.groupValues[2], "ET", periodLabel = "Prolongation à venir", eventKind = PERIOD)
             }
             extraTimeFirstStarted.find(line)?.let { m ->
-                return build(homeTeam, awayTeam, m.groupValues[1], m.groupValues[2], "ET1", periodLabel = "Début prolongation", eventKind = PERIOD)
+                return build(homeTeam, awayTeam, m.groupValues[1], m.groupValues[2], "ET1", periodLabel = "1ère prolongation", eventKind = PERIOD)
             }
             extraTimeHalftime.find(line)?.let { m ->
                 return build(homeTeam, awayTeam, m.groupValues[1], m.groupValues[2], "MTP", periodLabel = "Mi-temps prolongation", eventKind = PERIOD)

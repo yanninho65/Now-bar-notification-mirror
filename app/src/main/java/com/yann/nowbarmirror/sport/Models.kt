@@ -8,7 +8,7 @@ package com.yann.nowbarmirror.sport
  * widget/SofascoreMatchPresentation.kt; [lastScorer] = "home"/"away" when the notification
  * brackets who just scored / won the last set, else null. Null scores = unparsed ("vs").
  * Watch Sport screen only (25/09/2026): [periodLabel] = long French label of the event the status
- * came from ("Début du match", "Min 16", "Début 2ème mi-temps"…, null → the watch spells [status]);
+ * came from ("Match commencé", "Mi-temps", "2ème mi-temps", "Min 23 · Carton rouge"…, null → the watch spells [status]);
  * [eventKind] = kind of that event (SofascoreNotificationParser.PERIOD/GOAL/OTHER); [goals] = every
  * goal still in the notification, most recent first ("16' Ehsan Kari").
  */
