@@ -212,4 +212,26 @@ object MatchClock {
         val setLabel = if (setsPlayed <= 0) "1er set" else "${setsPlayed + 1}e set"
         return "$setLabel $homeGames-$awayGames"
     }
+
+    /**
+     * NEW 25/09/2026 — readable label of the watch Sport screen: the phone's own long label when it
+     * sent one (football events: "Début du match", "Min 16", "Début 2ème mi-temps"…), otherwise the
+     * status code spelled out ("3e quart-temps", "2e set", "Match terminé"…), else [label].
+     */
+    fun longLabel(match: MatchScore): String {
+        match.periodLabel?.let { return it }
+        val status = match.status.trim()
+        Regex("""Q(\d)""", RegexOption.IGNORE_CASE).matchEntire(status)?.let { return "${ordinal(it.groupValues[1].toInt())} quart-temps" }
+        Regex("""S(\d)""", RegexOption.IGNORE_CASE).matchEntire(status)?.let { return "${ordinal(it.groupValues[1].toInt())} set" }
+        return when {
+            status.equals("1H", ignoreCase = true) -> "1ère mi-temps"
+            status.equals("2H", ignoreCase = true) -> "2ème mi-temps"
+            status.equals("HT", ignoreCase = true) -> "Mi-temps"
+            status.equals("FT", ignoreCase = true) || status.equals("Fin", ignoreCase = true) -> "Match terminé"
+            status.endsWith("+") && status.dropLast(1).toIntOrNull() != null -> "Min ${status.dropLast(1)}"
+            else -> label(match)
+        }
+    }
+
+    private fun ordinal(n: Int) = if (n == 1) "1er" else "${n}e"
 }

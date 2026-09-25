@@ -1,8 +1,9 @@
 package com.yann.nowbarmirror.wear
 
 import android.app.Activity
-import android.graphics.Bitmap
 import android.os.Bundle
+import android.util.TypedValue
+import android.view.Gravity
 import android.view.View
 import android.widget.ImageButton
 import android.widget.ImageView
@@ -17,9 +18,11 @@ import androidx.wear.widget.SwipeDismissFrameLayout
  * from [DetailViews]):
  * - top: the sport apps chosen on the phone (SportAppsPrefs), ONE scrollable line with count badges;
  * - below: EVERY active Sofascore notification (SportStore, "/sport") — the one also shown by the
- *   "Notification" complication included — one pill per match (item_sport_match.xml): the
- *   complication's image (composeRoundImage), the notification's title, "Aff. sur tél." (opens,
- *   doesn't dismiss), delete, and the pin that makes "Score en direct" follow only this match.
+ *   "Notification" complication included — one near-full-width pill per match (item_sport_match.xml,
+ *   reworked 25/09/2026): small notification image + title, big score, period (above the score when
+ *   the last event is a period change), the latest line as-is, the scorers (football, most recent
+ *   first, cancelled ones removed on the phone), then pin / "Aff. sur tél." (opens, doesn't dismiss) /
+ *   delete. The pin makes "Score en direct" follow only this match.
  *   The followed match is listed first (blue outline, blue pin); tapping its pin again goes back
  *   to automatic. Order otherwise: most recent first.
  * Taps are optimistic (hidden / pinned locally) until the next phone push confirms them.
@@ -38,7 +41,8 @@ class SportActivity : Activity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_messages)
         container = findViewById(R.id.messages_container)
-        DetailViews.applyRoundInsets(container)
+        // Pills almost full width, like the watch's own notification cards (25/09/2026).
+        DetailViews.applyRoundInsets(container, sideFraction = 0.03f)
         findViewById<SwipeDismissFrameLayout>(R.id.swipe_layout).addCallback(object : SwipeDismissFrameLayout.Callback() {
             override fun onDismissed(layout: SwipeDismissFrameLayout) {
                 layout.visibility = View.GONE
@@ -72,12 +76,11 @@ class SportActivity : Activity() {
         val followed = (pendingFollow ?: list?.followedKey)?.takeIf { key -> key.isNotBlank() && all.any { it.key == key } }
         val matches = all.filterNot { it.key in pendingDismissed }
             .sortedWith(compareByDescending<SportMatch> { it.key == followed }.thenByDescending { it.postTimeMillis })
-        pruneImages(all)
 
         container.removeAllViews()
         val apps = list?.apps.orEmpty()
         if (apps.isNotEmpty()) {
-            container.addView(DetailViews.appIconRow(this, apps))
+            container.addView(DetailViews.appIconRow(this, apps, extraSideFraction = 0.07f))
             container.addView(DetailViews.separator(this))
         }
         if (matches.isEmpty()) {
@@ -92,9 +95,58 @@ class SportActivity : Activity() {
     }
 
     private fun bind(row: View, item: SportMatch, isFollowed: Boolean, syncTimestamp: Long) {
+        val match = item.match
         row.setBackgroundResource(if (isFollowed) R.drawable.bg_notif_pill_followed else R.drawable.bg_notif_pill)
-        row.findViewById<ImageView>(R.id.sport_match_image).setImageBitmap(imageFor(item))
+        row.findViewById<ImageView>(R.id.sport_match_image).apply {
+            val image = match.notifImage
+            if (image != null) {
+                setImageBitmap(image)
+                visibility = View.VISIBLE
+            } else {
+                visibility = View.GONE
+            }
+        }
         row.findViewById<TextView>(R.id.sport_match_title).text = item.title
+        row.findViewById<TextView>(R.id.sport_score).text = scoreText(item)
+
+        // Period above the score when the last event IS a period change; below otherwise, except
+        // after a goal (the scorer list already shows its minute).
+        val period = MatchClock.longLabel(match)
+        val top = row.findViewById<TextView>(R.id.sport_period_top)
+        val bottom = row.findViewById<TextView>(R.id.sport_period_bottom)
+        top.visibility = View.GONE
+        bottom.visibility = View.GONE
+        if (period.isNotBlank()) {
+            when (match.eventKind) {
+                EVENT_PERIOD -> top.apply { text = period; visibility = View.VISIBLE }
+                EVENT_GOAL -> Unit
+                else -> bottom.apply { text = period; visibility = View.VISIBLE }
+            }
+        }
+
+        row.findViewById<TextView>(R.id.sport_last_line).apply {
+            if (item.lastLine.isNotBlank()) {
+                text = item.lastLine
+                visibility = View.VISIBLE
+            } else {
+                visibility = View.GONE
+            }
+        }
+
+        val goals = row.findViewById<LinearLayout>(R.id.sport_goals)
+        goals.removeAllViews()
+        goals.visibility = if (match.goals.isEmpty()) View.GONE else View.VISIBLE
+        match.goals.forEach { goal ->
+            goals.addView(TextView(this).apply {
+                text = "⚽ $goal"
+                setTextColor(getColor(R.color.detail_text_primary))
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+                gravity = Gravity.CENTER
+                maxLines = 2
+            }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                topMargin = DetailViews.dp(this@SportActivity, 2)
+            })
+        }
 
         row.findViewById<ImageButton>(R.id.sport_follow_button).apply {
             setBackgroundResource(if (isFollowed) R.drawable.bg_follow_active else R.drawable.bg_delete_button)
@@ -122,22 +174,19 @@ class SportActivity : Activity() {
         }
     }
 
-    /** Same bitmap as the "Score en direct" SMALL_IMAGE, composed once per match value. */
-    private fun imageFor(item: SportMatch): Bitmap =
-        images.getOrPut(imageKey(item)) { ComplicationImageComposer.composeRoundImage(item.match) }
-
-    // Content key (not the push timestamp): a push that only changes the app row recomposes nothing.
-    private fun imageKey(item: SportMatch) = with(item.match) {
-        "${item.key}|${item.postTimeMillis}|$homeScore|$awayScore|$lastScorer|$status|${notifImage != null}"
-    }
-
-    private fun pruneImages(current: List<SportMatch>) {
-        val keep = current.map(::imageKey).toSet()
-        images.keys.retainAll(keep)
+    /** "0 - [1]": raw score strings as sent, brackets on the side that just scored; "vs" before any score. */
+    private fun scoreText(item: SportMatch): String {
+        val home = item.homeScoreText
+        val away = item.awayScoreText
+        if (home.isEmpty() || away.isEmpty()) return "vs"
+        val h = if (item.match.lastScorer == "home" && !home.contains('[')) "[$home]" else home
+        val a = if (item.match.lastScorer == "away" && !away.contains('[')) "[$away]" else away
+        return "$h - $a"
     }
 
     private companion object {
-        // Kept across openings (process lifetime): reopening the screen doesn't recompose unchanged matches.
-        val images = HashMap<String, Bitmap>()
+        // mobile SofascoreNotificationParser.PERIOD / GOAL
+        const val EVENT_PERIOD = "period"
+        const val EVENT_GOAL = "goal"
     }
 }

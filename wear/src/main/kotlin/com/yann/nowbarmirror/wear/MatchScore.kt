@@ -61,7 +61,12 @@ data class MatchScore(
     // AUDIT 23/09/2026 — the phone's send timestamp for this value (DataMap "timestamp"): lets the
     // codec reuse this instance (and skip re-decoding its image) when the persisted item hasn't
     // changed. 0 for preview data.
-    val syncTimestamp: Long = 0L
+    val syncTimestamp: Long = 0L,
+    // 25/09/2026, Sport screen only (see mobile Models.MatchResult): long period label, kind of the
+    // last event ("period"/"goal"/"other"), every goal most recent first ("16' Ehsan Kari").
+    val periodLabel: String? = null,
+    val eventKind: String? = null,
+    val goals: List<String> = emptyList()
 )
 
 /**

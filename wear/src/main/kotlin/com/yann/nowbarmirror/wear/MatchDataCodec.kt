@@ -51,7 +51,10 @@ object MatchDataCodec {
             kickoffEpochMillis = if (item.containsKey("kickoffEpochMillis")) item.getLong("kickoffEpochMillis") else null,
             notifImage = PhoneDataLayer.decodeImageAsset(context, assetSource, imageKey),
             apiSource = item.getString("apiSource") ?: "SPORTS_DB",
-            syncTimestamp = syncTimestamp
+            syncTimestamp = syncTimestamp,
+            periodLabel = item.getString("periodLabel")?.takeIf { it.isNotBlank() },
+            eventKind = item.getString("eventKind"),
+            goals = item.getStringArrayList("goals") ?: emptyList()
         )
     }
 }

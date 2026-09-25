@@ -8,9 +8,19 @@ import com.google.android.gms.wearable.DataMap
  * NEW 25/09/2026 — one active Sofascore notification as pushed on "/sport" by
  * mobile/sport/SportWatchSync.kt: [key] = the phone's StatusBarNotification key (addresses
  * follow/dismiss/open, see [PhoneRelay]), [title] = the notification's own title, [match] = the same
- * fields "Score en direct" gets (drawn with ComplicationImageComposer.composeRoundImage).
+ * fields "Score en direct" gets.
  */
-data class SportMatch(val key: String, val postTimeMillis: Long, val title: String, val match: MatchScore)
+data class SportMatch(
+    val key: String,
+    val postTimeMillis: Long,
+    val title: String,
+    val match: MatchScore,
+    // Raw score strings as sent (e.g. "1 ([4])" after a shoot-out), which the Int fields of [match] can't hold.
+    val homeScoreText: String,
+    val awayScoreText: String,
+    // The notification's most recent line, as-is (e.g. "16' But : 0 - [1] Ehsan Kari").
+    val lastLine: String = ""
+)
 
 /** The whole "/sport" push: matches most recent first, the sport-app row (same [MessageApp] as Messages), the followed match key. */
 class SportList(
@@ -40,7 +50,10 @@ object SportDataCodec {
                 key = key,
                 postTimeMillis = item.getLong("postTimeMillis", 0L),
                 title = item.getString("title").orEmpty().ifBlank { "${match.homeTeam} - ${match.awayTeam}" },
-                match = match
+                match = match,
+                homeScoreText = item.getString("homeScore").orEmpty().trim(),
+                awayScoreText = item.getString("awayScore").orEmpty().trim(),
+                lastLine = item.getString("lastLine").orEmpty().trim()
             )
         }
         return SportList(

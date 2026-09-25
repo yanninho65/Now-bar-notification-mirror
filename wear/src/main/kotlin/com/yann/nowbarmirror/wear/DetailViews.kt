@@ -117,7 +117,7 @@ object DetailViews {
      * Tap opens the app on the watch when it's installed there, otherwise on the phone
      * ([PhoneRelay.sendOpenAppOnPhone]). Each icon carries its count as a red badge.
      */
-    fun appIconRow(context: Context, apps: List<MessageApp>): View {
+    fun appIconRow(context: Context, apps: List<MessageApp>, extraSideFraction: Float = 0f): View {
         val row = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
@@ -130,6 +130,10 @@ object DetailViews {
             addView(row, ViewGroup.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
                 bottomMargin = dp(context, 10)
+                // Screens with narrower side insets (Sport) keep the row inside the top of the circle.
+                val extra = (context.resources.displayMetrics.widthPixels * extraSideFraction).toInt()
+                leftMargin = extra
+                rightMargin = extra
             }
         }
     }
@@ -227,9 +231,9 @@ object DetailViews {
      * Round-screen insets as fractions of the display (Wear OS guidance), shared by the list screens:
      * sides ~10 %, top ~13 %, bottom ~25 % so the last row can be scrolled up to the middle.
      */
-    fun applyRoundInsets(container: View) {
+    fun applyRoundInsets(container: View, sideFraction: Float = 0.10f) {
         val metrics = container.resources.displayMetrics
-        val side = (metrics.widthPixels * 0.10f).toInt()
+        val side = (metrics.widthPixels * sideFraction).toInt()
         container.setPadding(side, (metrics.heightPixels * 0.13f).toInt(), side, (metrics.heightPixels * 0.25f).toInt())
     }
 }
