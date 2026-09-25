@@ -18,4 +18,5 @@
     <!-- NEW 25/09/2026, écran Messages : descriptions des boutons ronds -->
     <string name="action_delete_on_phone">Supprimer sur le téléphone</string>
     <string name="action_show_more">Afficher tout le message</string>
+    <string name="sport_mute">Mettre l\'événement en silencieux</string>
 </resources>

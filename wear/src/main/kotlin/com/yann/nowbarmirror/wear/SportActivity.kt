@@ -22,7 +22,7 @@ import androidx.wear.widget.SwipeDismissFrameLayout
  *   reworked 25/09/2026): small notification image + title, big score, the period right under it,
  *   the scorers (football, most recent first, cancelled ones removed on the phone; since 25/09/2026
  *   minute centered, home scorer left / away scorer right, missed penalties shown as "Pénalty X"),
- *   then pin / "Aff. sur tél." (opens, doesn't dismiss) / delete. Compact so 4 scorers fit. The pin makes "Score en direct" follow only this match.
+ *   then pin / bell-off (Sofascore's mute action, only when present — also deletes the notification) / "Aff. sur tél." (opens, doesn't dismiss) / delete. Compact so 4 scorers fit. The pin makes "Score en direct" follow only this match.
  *   The followed match is listed first (blue outline, blue pin); tapping its pin again goes back
  *   to automatic. Order otherwise: most recent first.
  * Taps are optimistic (hidden / pinned locally) until the next phone push confirms them.
@@ -132,6 +132,15 @@ class SportActivity : Activity() {
                 PhoneRelay.sendSportFollow(applicationContext, newKey)
                 pendingFollow = newKey
                 pendingFollowSince = syncTimestamp
+                render(SportStore.current)
+            }
+        }
+        row.findViewById<ImageButton>(R.id.sport_mute_button).apply {
+            visibility = if (item.canMute) View.VISIBLE else View.GONE
+            DetailViews.addPressFeedback(this)
+            setOnClickListener {
+                PhoneRelay.sendSportMute(applicationContext, item.key)
+                pendingDismissed.add(item.key)
                 render(SportStore.current)
             }
         }

@@ -74,6 +74,11 @@ object PhoneRelay {
         send(context, "/sportdetail/dismiss", JSONObject().put("key", key).toString().toByteArray(Charsets.UTF_8))
     }
 
+    /** Fires Sofascore's "Mettre l'événement en silencieux" on the phone, which then deletes the notification. */
+    fun sendSportMute(context: Context, key: String) {
+        send(context, "/sportdetail/mute", JSONObject().put("key", key).toString().toByteArray(Charsets.UTF_8))
+    }
+
     fun sendSportOpen(context: Context, key: String) {
         send(context, "/sportdetail/open", JSONObject().put("key", key).toString().toByteArray(Charsets.UTF_8))
     }

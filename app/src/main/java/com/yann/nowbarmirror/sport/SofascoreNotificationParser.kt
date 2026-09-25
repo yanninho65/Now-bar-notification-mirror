@@ -607,7 +607,7 @@ object SofascoreNotificationParser {
             correctionScore.find(line)?.let { m ->
                 val home = m.groupValues[1].ifBlank { m.groupValues[2] }
                 val away = m.groupValues[3].ifBlank { m.groupValues[4] }
-                return build(homeTeam, awayTeam, home, away, "", lastScorer = bracketedSide(m.groupValues, 1, 3), periodLabel = "Correction du score", eventKind = OTHER)
+                return build(homeTeam, awayTeam, home, away, "", lastScorer = bracketedSide(m.groupValues, 1, 3), periodLabel = periodAt(lines, i + 1), eventKind = OTHER)
             }
             goalNoMinute.find(line)?.let { m ->
                 val home = m.groupValues[1].ifBlank { m.groupValues[2] }
@@ -784,6 +784,35 @@ object SofascoreNotificationParser {
             m > 45 -> "2ème mi-temps"
             else -> halfLabel(currentHalfStatus(lines, index))
         }
+    }
+
+    /**
+     * Period in progress at [fromIndex] (older lines = higher indexes), from the most recent marker or
+     * timed event found there. Used for "Correction du score" (25/09/2026, Yann: show the period, not
+     * "Correction du score").
+     */
+    private fun periodAt(lines: List<String>, fromIndex: Int): String {
+        for (j in fromIndex until lines.size) {
+            val line = lines[j].trim()
+            when {
+                extraTimeSecondStarted.containsMatchIn(line) -> return "2ème prolongation"
+                extraTimeHalftime.containsMatchIn(line) -> return "Mi-temps prolongation"
+                extraTimeFirstStarted.containsMatchIn(line) -> return "1ère prolongation"
+                awaitingExtraTime.containsMatchIn(line) -> return "Prolongation à venir"
+                secondHalfStarted.containsMatchIn(line) -> return "2ème mi-temps"
+                halfTime.containsMatchIn(line) -> return "Mi-temps"
+                firstHalfStarted.containsMatchIn(line) -> return "1ère mi-temps"
+            }
+            timedEvent.find(line)?.let { m ->
+                val minute = m.groupValues[1].toIntOrNull() ?: 0
+                return when {
+                    minute > 90 -> "Prolongation"
+                    minute > 45 -> "2ème mi-temps"
+                    else -> halfLabel(currentHalfStatus(lines, j))
+                }
+            }
+        }
+        return "1ère mi-temps"
     }
 
     private fun halfLabel(status: String) = if (status == "2H") "2ème mi-temps" else "1ère mi-temps"

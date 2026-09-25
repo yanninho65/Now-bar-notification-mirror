@@ -6,7 +6,8 @@
      - le score (crochets = côté qui vient de marquer), en grand, collé au titre ;
      - juste dessous, la période (toujours ici, pas en gras) ;
      - les buteurs (foot), minute décroissante, un par ligne, sur toute la largeur ;
-     - en bas : punaise "suivre", "Aff. sur tél.", supprimer. -->
+     - en bas : punaise "suivre", cloche barrée (action Sofascore "Mettre l'événement en
+       silencieux", seulement si présente — supprime aussi la notif), "Aff. sur tél.", supprimer. -->
 <LinearLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/sport_pill"
@@ -93,34 +94,46 @@
 
         <ImageButton
             android:id="@+id/sport_follow_button"
-            android:layout_width="36dp"
-            android:layout_height="36dp"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
             android:background="@drawable/bg_delete_button"
             android:src="@drawable/ic_pin"
             android:scaleType="fitCenter"
-            android:padding="9dp"
+            android:padding="8dp"
             android:contentDescription="@string/sport_follow" />
 
         <ImageButton
+            android:id="@+id/sport_mute_button"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:layout_marginStart="8dp"
+            android:background="@drawable/bg_delete_button"
+            android:src="@drawable/ic_mute"
+            android:scaleType="fitCenter"
+            android:padding="8dp"
+            android:visibility="gone"
+            android:contentDescription="@string/sport_mute" />
+
+        <ImageButton
             android:id="@+id/sport_open_button"
-            android:layout_width="36dp"
-            android:layout_height="36dp"
-            android:layout_marginStart="14dp"
-            android:layout_marginEnd="14dp"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:layout_marginStart="8dp"
+            android:layout_marginEnd="8dp"
             android:background="@drawable/bg_delete_button"
             android:src="@drawable/ic_phone"
             android:scaleType="fitCenter"
-            android:padding="9dp"
+            android:padding="8dp"
             android:contentDescription="@string/action_view_on_phone" />
 
         <ImageButton
             android:id="@+id/sport_delete_button"
-            android:layout_width="36dp"
-            android:layout_height="36dp"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
             android:background="@drawable/bg_delete_button"
             android:src="@drawable/ic_delete"
             android:scaleType="fitCenter"
-            android:padding="9dp"
+            android:padding="8dp"
             android:contentDescription="@string/action_delete" />
     </LinearLayout>
 </LinearLayout>

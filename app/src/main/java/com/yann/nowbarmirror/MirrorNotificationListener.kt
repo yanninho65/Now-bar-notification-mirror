@@ -557,18 +557,23 @@ class MirrorNotificationListener : NotificationListenerService() {
             val userDismissed = reason == REASON_CANCEL || reason == REASON_CANCEL_ALL
             if (!userDismissed) return
 
+            // 25/09/2026: cancel exactly the original stamped in the swiped mirror's own extras,
+            // never whatever in-memory state points at now (a slot swapped meanwhile, or state
+            // rebuilt after a restart, could otherwise delete a different notification).
+            val stampedKey = sbn.notification.extras.getString(EXTRA_ORIGINAL_KEY)
             if (sbn.id == MIRROR_ID) {
                 // User swiped the shared slot: cancel the original that was showing in it,
                 // drop it from the fallback queue, then promote whatever is now the most
                 // recent survivor instead of leaving the slot empty.
-                latestOriginalKey?.let { key ->
+                val key = stampedKey ?: latestOriginalKey
+                if (key != null) {
                     cancelOriginal(key)
                     latestModeActive.remove(key)
                 }
                 latestOriginalKey = null
                 promoteNextLatestMode()
             } else {
-                val originalKey = allModeMirrors.entries.firstOrNull { it.value == sbn.id }?.key
+                val originalKey = stampedKey ?: allModeMirrors.entries.firstOrNull { it.value == sbn.id }?.key
                 if (originalKey != null) {
                     cancelOriginal(originalKey)
                     allModeMirrors.remove(originalKey)

@@ -42,7 +42,7 @@ object SportWatchSync {
         val apps = MessagesWatchSync.appEntries(context, active, SportAppsPrefs.getOrdered(context))
 
         val signature = matches.joinToString("\u0001") {
-            listOf(it.sbn.key, it.sbn.postTime, it.title, it.match).joinToString("\u0003")
+            listOf(it.sbn.key, it.sbn.postTime, it.title, it.match, muteActionOf(it.sbn.notification) != null).joinToString("\u0003")
         } + "\u0004" + (followed ?: "") + "\u0004" + MessagesWatchSync.appsSignature(apps)
         if (signature == lastSignature) return
 
@@ -54,6 +54,8 @@ object SportWatchSync {
                         putString("key", item.sbn.key)
                         putLong("postTimeMillis", item.sbn.postTime)
                         putString("title", item.title)
+                        // 25/09/2026: shows the watch's bell-off button ("/sportdetail/mute").
+                        putBoolean("canMute", muteActionOf(item.sbn.notification) != null)
                         WatchSync.putMatch(this, item.match)
                     })
                     imageAsset(context, item.sbn)?.let { dataMap.putAsset("img_$index", it) }
@@ -71,6 +73,18 @@ object SportWatchSync {
             // Best effort, like the other watch syncs.
         }
     }
+
+    /**
+     * Sofascore's "Mettre l'événement en silencieux" action (semantic MUTE, else by label), or null.
+     * Fired by SofascoreNotificationListenerService.muteFromWatch, which then deletes the notification.
+     */
+    fun muteActionOf(notification: android.app.Notification): android.app.Notification.Action? =
+        notification.actions.orEmpty().firstOrNull { action ->
+            action.actionIntent != null && (
+                (android.os.Build.VERSION.SDK_INT >= 28 && action.semanticAction == android.app.Notification.Action.SEMANTIC_ACTION_MUTE) ||
+                    action.title?.toString()?.lowercase()?.let { "silenc" in it || "mute" in it || "sourdine" in it } == true
+                )
+        }
 
     private fun imageAsset(context: Context, sbn: StatusBarNotification): Asset? {
         val cacheKey = "${sbn.key}@${sbn.postTime}"

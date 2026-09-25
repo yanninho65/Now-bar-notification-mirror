@@ -157,6 +157,15 @@ class SofascoreNotificationListenerService : NotificationListenerService() {
         dismiss(sbn.key, sbn.postTime)
     }
 
+    private fun doMuteFromWatch(key: String) {
+        val sbn = findActive(key) ?: return
+        try {
+            SportWatchSync.muteActionOf(sbn.notification)?.actionIntent?.send()
+        } catch (_: Throwable) {
+        }
+        dismiss(sbn.key, sbn.postTime)
+    }
+
     /** Watch "Sport" screen, "Aff. sur tél.": opens the match (not dismissed) — same relay as the other watch screens. */
     private fun doOpenOnPhoneFromWatch(key: String) {
         val sbn = findActive(key) ?: return
@@ -794,6 +803,11 @@ class SofascoreNotificationListenerService : NotificationListenerService() {
 
         fun dismissFromWatch(key: String) {
             instance?.let { it.mainHandler.post { it.doDismissFromWatch(key) } }
+        }
+
+        /** Watch "Sport" screen bell-off button: fires Sofascore's own mute action, then deletes the notification (Yann, 25/09/2026). */
+        fun muteFromWatch(key: String) {
+            instance?.let { it.mainHandler.post { it.doMuteFromWatch(key) } }
         }
 
         fun openOnPhoneFromWatch(key: String) {
