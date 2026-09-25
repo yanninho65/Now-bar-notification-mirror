@@ -28,35 +28,29 @@ object MatchDataCodec {
         val syncTimestamp = PhoneDataLayer.timestampOf(dataMap)
         if (reuse != null && syncTimestamp != 0L && reuse.syncTimestamp == syncTimestamp) return reuse
 
-        val homeTeam = dataMap.getString("homeTeam") ?: return null
-        val awayTeam = dataMap.getString("awayTeam") ?: return null
+        return matchFrom(context, dataMap, dataMap, "notifImage", syncTimestamp)
+    }
 
+    /**
+     * Match fields of [item] (keys written by mobile WatchSync.putMatch) — shared 25/09/2026 by
+     * "/match" and each item of "/sport" (SportDataCodec), whose images are top-level assets of
+     * [assetSource] under [imageKey]. Null when the team names are missing.
+     */
+    fun matchFrom(context: Context, item: DataMap, assetSource: DataMap, imageKey: String, syncTimestamp: Long): MatchScore? {
+        val homeTeam = item.getString("homeTeam") ?: return null
+        val awayTeam = item.getString("awayTeam") ?: return null
         return MatchScore(
             homeTeam = homeTeam,
             awayTeam = awayTeam,
-            homeScore = dataMap.getString("homeScore")?.toIntOrNull(),
-            awayScore = dataMap.getString("awayScore")?.toIntOrNull(),
-            currentSetHomeGames = if (dataMap.containsKey("currentSetHomeGames")) {
-                dataMap.getInt("currentSetHomeGames")
-            } else {
-                null
-            },
-            currentSetAwayGames = if (dataMap.containsKey("currentSetAwayGames")) {
-                dataMap.getInt("currentSetAwayGames")
-            } else {
-                null
-            },
-            lastScorer = dataMap.getString("lastScorer"),
-            status = dataMap.getString("status").orEmpty(),
-            kickoffEpochMillis = if (dataMap.containsKey("kickoffEpochMillis")) {
-                dataMap.getLong("kickoffEpochMillis")
-            } else {
-                null
-            },
-            notifImage = PhoneDataLayer.decodeImageAsset(context, dataMap, "notifImage"),
-            // Repli SPORTS_DB : un téléphone avec une version de l'app antérieure à
-            // l'introduction du tennis n'enverrait pas cette clé.
-            apiSource = dataMap.getString("apiSource") ?: "SPORTS_DB",
+            homeScore = item.getString("homeScore")?.toIntOrNull(),
+            awayScore = item.getString("awayScore")?.toIntOrNull(),
+            currentSetHomeGames = if (item.containsKey("currentSetHomeGames")) item.getInt("currentSetHomeGames") else null,
+            currentSetAwayGames = if (item.containsKey("currentSetAwayGames")) item.getInt("currentSetAwayGames") else null,
+            lastScorer = item.getString("lastScorer"),
+            status = item.getString("status").orEmpty(),
+            kickoffEpochMillis = if (item.containsKey("kickoffEpochMillis")) item.getLong("kickoffEpochMillis") else null,
+            notifImage = PhoneDataLayer.decodeImageAsset(context, assetSource, imageKey),
+            apiSource = item.getString("apiSource") ?: "SPORTS_DB",
             syncTimestamp = syncTimestamp
         )
     }

@@ -24,4 +24,6 @@
     <color name="detail_delete_bg_pressed">#58585A</color>
     <!-- NEW 24/09/2026 : pastille de nombre (bg_count_badge.xml) -->
     <color name="detail_count_badge">#E5372F</color>
+    <!-- NEW 25/09/2026 : punaise "suivi" pressée (bg_follow_active.xml) -->
+    <color name="detail_accent_pressed">#4C8DFF</color>
 </resources>

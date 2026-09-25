@@ -36,6 +36,7 @@ object PhoneDataLayer {
     const val MATCH_PATH = "/match"
     const val NOTIFICATION_PATH = "/notification"
     const val MESSAGES_PATH = "/messages"   // NEW 24/09/2026, "Messages" complication
+    const val SPORT_PATH = "/sport"         // NEW 25/09/2026, "Sport" screen (tap on "Score en direct")
     private const val FETCH_TIMEOUT_SECONDS = 2L
 
     /** Result of re-reading a persisted item: [Success] (value may be null = cleared/never sent) or [Failed] (the local read itself failed — conclude nothing). */
@@ -71,6 +72,13 @@ object PhoneDataLayer {
         read(context, MESSAGES_PATH) { dataMap ->
             val list = dataMap?.let { MessagesDataCodec.decode(context, it, reuse = MessagesStore.current) }
             MessagesStore.updateIfNotOlder(list, dataMap?.let(::timestampOf) ?: 0L)
+        }
+
+    /** Same as [readNotification], for "/sport" and [SportStore]. */
+    fun readSport(context: Context): Read<SportList> =
+        read(context, SPORT_PATH) { dataMap ->
+            val list = dataMap?.let { SportDataCodec.decode(context, it, reuse = SportStore.current) }
+            SportStore.updateIfNotOlder(list, dataMap?.let(::timestampOf) ?: 0L)
         }
 
     private fun <T> read(context: Context, path: String, apply: (DataMap?) -> T?): Read<T> {

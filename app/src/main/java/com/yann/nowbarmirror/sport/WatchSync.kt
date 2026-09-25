@@ -3,6 +3,7 @@ package com.yann.nowbarmirror.sport
 import android.content.Context
 import android.graphics.Bitmap
 import com.google.android.gms.wearable.Asset
+import com.google.android.gms.wearable.DataMap
 import com.yann.nowbarmirror.BitmapUtils
 import com.google.android.gms.wearable.PutDataMapRequest
 import com.google.android.gms.wearable.Wearable
@@ -44,14 +45,7 @@ object WatchSync {
         notifImage: Asset? = null
     ) {
         val request = PutDataMapRequest.create(MATCH_PATH).apply {
-            // The watch still reads this key (MatchDataCodec); SPORTS_DB = the generic status vocabulary.
-            dataMap.putString("apiSource", "SPORTS_DB")
-            dataMap.putString("homeTeam", match.homeTeam)
-            dataMap.putString("awayTeam", match.awayTeam)
-            dataMap.putString("homeScore", match.homeScore ?: "")
-            dataMap.putString("awayScore", match.awayScore ?: "")
-            match.lastScorer?.let { dataMap.putString("lastScorer", it) }
-            dataMap.putString("status", match.status)
+            putMatch(dataMap, match)
             notifImage?.let { dataMap.putAsset("notifImage", it) }
             // Force un DataChanged même si le contenu texte n'a pas bougé
             // depuis le dernier envoi (la Data Layer API ignore sinon un
@@ -60,6 +54,21 @@ object WatchSync {
         }.asPutDataRequest().setUrgent()
 
         Wearable.getDataClient(context).putDataItem(request)
+    }
+
+    /**
+     * Match fields, same keys for "/match" and each item of "/sport" (NEW 25/09/2026, see
+     * SportWatchSync) — decoded on the watch by MatchDataCodec.matchFrom.
+     */
+    fun putMatch(dataMap: DataMap, match: MatchResult) {
+        // The watch still reads this key (MatchDataCodec); SPORTS_DB = the generic status vocabulary.
+        dataMap.putString("apiSource", "SPORTS_DB")
+        dataMap.putString("homeTeam", match.homeTeam)
+        dataMap.putString("awayTeam", match.awayTeam)
+        dataMap.putString("homeScore", match.homeScore ?: "")
+        dataMap.putString("awayScore", match.awayScore ?: "")
+        match.lastScorer?.let { dataMap.putString("lastScorer", it) }
+        dataMap.putString("status", match.status)
     }
 
     /**

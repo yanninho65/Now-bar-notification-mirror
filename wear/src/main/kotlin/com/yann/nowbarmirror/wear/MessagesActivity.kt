@@ -4,8 +4,6 @@ import android.app.Activity
 import android.content.Intent
 import android.os.Bundle
 import android.view.View
-import android.view.ViewGroup
-import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -27,9 +25,11 @@ import androidx.wear.widget.SwipeDismissFrameLayout
  * (tap = open on the phone, PhoneRelay.sendOpenAppOnPhone). An app on both is only in the watch row.
  * Each icon carries its unread count as a badge at its top-right ([MessageApp.count]).
  *
- * UPDATED 24/09/2026 — round screen: paddings are fractions of the screen ([applyRoundInsets]),
- * and app icons wrap in rows of at most [ICONS_PER_ROW], sized so a full row fits the circle's
- * chord at the top of the list — no horizontal scrolling. App order = the phone's order.
+ * UPDATED 24/09/2026 — round screen: paddings are fractions of the screen (DetailViews.applyRoundInsets).
+ *
+ * UPDATED 25/09/2026 — app row: ONE horizontally scrollable line (DetailViews.appIconRow, shared with
+ * SportActivity), no more "Sur la montre" / "Sur le téléphone" split. Tap still opens on the watch
+ * when the app is installed there, otherwise on the phone.
  */
 class MessagesActivity : Activity() {
 
@@ -42,7 +42,7 @@ class MessagesActivity : Activity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_messages)
         container = findViewById(R.id.messages_container)
-        applyRoundInsets()
+        DetailViews.applyRoundInsets(container)
         findViewById<SwipeDismissFrameLayout>(R.id.swipe_layout).addCallback(object : SwipeDismissFrameLayout.Callback() {
             override fun onDismissed(layout: SwipeDismissFrameLayout) {
                 layout.visibility = View.GONE
@@ -76,15 +76,13 @@ class MessagesActivity : Activity() {
         val messages = all.filterNot { it.key in pendingDismissed }
 
         container.removeAllViews()
-        val hasAppRows = addAppRows(list?.apps.orEmpty())
-        if (hasAppRows) container.addView(separator())
+        val apps = list?.apps.orEmpty()
+        if (apps.isNotEmpty()) {
+            container.addView(DetailViews.appIconRow(this, apps))
+            container.addView(DetailViews.separator(this))
+        }
         if (messages.isEmpty()) {
-            container.addView(TextView(this).apply {
-                text = getString(R.string.messages_empty)
-                setTextAppearance(android.R.style.TextAppearance_DeviceDefault_Large)
-                setTextColor(getColor(R.color.detail_text_primary))
-                gravity = android.view.Gravity.CENTER
-            }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+            container.addView(DetailViews.emptyText(this, getString(R.string.messages_empty)))
             return
         }
         messages.forEachIndexed { index, message ->
@@ -153,127 +151,6 @@ class MessagesActivity : Activity() {
         }
     }
 
-    /** Adds the "on watch" / "on phone" app rows; returns false when there is nothing to show. */
-    private fun addAppRows(apps: List<MessageApp>): Boolean {
-        if (apps.isEmpty()) return false
-        val (onWatch, phoneOnly) = apps.partition { watchLaunchIntent(it.packageName) != null }
-        if (onWatch.isNotEmpty()) addAppRow(getString(R.string.messages_apps_on_watch), onWatch, onWatchRow = true)
-        if (phoneOnly.isNotEmpty()) addAppRow(getString(R.string.messages_apps_on_phone), phoneOnly, onWatchRow = false)
-        return true
-    }
-
-    private fun addAppRow(title: String, apps: List<MessageApp>, onWatchRow: Boolean) {
-        container.addView(TextView(this).apply {
-            text = title
-            setTextAppearance(android.R.style.TextAppearance_DeviceDefault_Small)
-            setTextColor(getColor(R.color.detail_text_secondary))
-            gravity = android.view.Gravity.CENTER
-        }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
-
-        // Up to ICONS_PER_ROW per line, centered, wrapping to a new line — never scrolls sideways.
-        apps.chunked(ICONS_PER_ROW).forEachIndexed { index, chunk ->
-            val row = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = android.view.Gravity.CENTER
-            }
-            chunk.forEach { app -> row.addView(appIconView(app, onWatchRow)) }
-            container.addView(row, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-                bottomMargin = DetailViews.dp(this@MessagesActivity, if (index == (apps.size - 1) / ICONS_PER_ROW) 10 else 2)
-            })
-        }
-    }
-
-    /**
-     * Width of one icon cell: a full row of [ICONS_PER_ROW] must fit the circle's chord near the top
-     * of the list (~78 % of the screen width), capped at the former 50dp.
-     */
-    private fun cellSizePx(): Int {
-        val width = resources.displayMetrics.widthPixels
-        return minOf((width * 0.78f / ICONS_PER_ROW).toInt(), DetailViews.dp(this, 50))
-    }
-
-    /** Round app icon (80 % of the cell), count badge at its top-right. */
-    private fun appIconView(app: MessageApp, onWatchRow: Boolean): View {
-        val dp = { v: Int -> DetailViews.dp(this, v) }
-        val cellSize = cellSizePx()
-        val iconSize = (cellSize * 0.8f).toInt()
-        val badgeHeight = (cellSize * 0.4f).toInt()
-        val cell = FrameLayout(this).apply {
-            layoutParams = LinearLayout.LayoutParams(cellSize, cellSize)
-            contentDescription = app.label
-        }
-        val icon = app.icon ?: watchIcon(app.packageName)
-        cell.addView(ImageView(this).apply {
-            icon?.let { setImageBitmap(DetailViews.circularBitmap(it)) }
-            scaleType = ImageView.ScaleType.FIT_CENTER
-        }, FrameLayout.LayoutParams(iconSize, iconSize, android.view.Gravity.BOTTOM or android.view.Gravity.START).apply {
-            bottomMargin = dp(1)
-        })
-        if (app.count > 0) {
-            cell.addView(TextView(this).apply {
-                text = if (app.count > 99) "99+" else app.count.toString()
-                setTextColor(getColor(R.color.detail_text_primary))
-                setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, badgeHeight * 0.55f)
-                setTypeface(typeface, android.graphics.Typeface.BOLD)
-                gravity = android.view.Gravity.CENTER
-                minWidth = badgeHeight
-                setPadding(dp(3), 0, dp(3), 0)
-                setBackgroundResource(R.drawable.bg_count_badge)
-            }, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, badgeHeight, android.view.Gravity.TOP or android.view.Gravity.END))
-        }
-        DetailViews.addPressFeedback(cell)
-        cell.isClickable = true
-        cell.setOnClickListener {
-            if (onWatchRow) {
-                watchLaunchIntent(app.packageName)?.let { launch ->
-                    try {
-                        startActivity(launch)
-                    } catch (_: Exception) {
-                    }
-                }
-            } else {
-                PhoneRelay.sendOpenAppOnPhone(applicationContext, app.packageName)
-            }
-        }
-        return cell
-    }
-
-    private fun separator(): View = View(this).apply {
-        setBackgroundColor(getColor(R.color.detail_chip_bg))
-        layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, DetailViews.dp(this@MessagesActivity, 1)).apply {
-            topMargin = DetailViews.dp(this@MessagesActivity, 6)
-            bottomMargin = DetailViews.dp(this@MessagesActivity, 20)
-        }
-    }
-
-    /**
-     * Round-screen insets as fractions of the display (Wear OS guidance): sides ~10 % so centered
-     * text stays inside the circle, top ~13 % for the narrow top of the circle, bottom ~25 % so the
-     * last delete button can be scrolled up to the middle.
-     */
-    private fun applyRoundInsets() {
-        val metrics = resources.displayMetrics
-        val side = (metrics.widthPixels * 0.10f).toInt()
-        container.setPadding(side, (metrics.heightPixels * 0.13f).toInt(), side, (metrics.heightPixels * 0.25f).toInt())
-    }
-
-    /** Fallback when the phone sent no icon: the watch app's own icon. */
-    private fun watchIcon(packageName: String): android.graphics.Bitmap? = try {
-        val drawable = packageManager.getApplicationIcon(packageName)
-        val size = DetailViews.dp(this, 40).coerceAtLeast(1)
-        android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888).also {
-            val canvas = android.graphics.Canvas(it)
-            drawable.setBounds(0, 0, size, size)
-            drawable.draw(canvas)
-        }
-    } catch (_: Exception) {
-        null
-    }
-
     /** The source app's own watch version, if installed (shared helper, also used by NotificationDetailActivity). */
     private fun watchLaunchIntent(packageName: String): Intent? = DetailViews.watchLaunchIntent(this, packageName)
-
-    private companion object {
-        const val ICONS_PER_ROW = 4
-    }
 }

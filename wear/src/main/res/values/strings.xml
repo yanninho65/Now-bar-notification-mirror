@@ -9,6 +9,8 @@
     <!-- NEW 24/09/2026, complication/liste "Messages" -->
     <string name="action_view_on_watch">Aff. sur montre</string>
     <string name="messages_empty">Aucun message</string>
-    <string name="messages_apps_on_watch">Sur la montre</string>
-    <string name="messages_apps_on_phone">Sur le téléphone</string>
+    <!-- NEW 25/09/2026, écran "Sport" (tap sur "Score en direct") -->
+    <string name="sport_empty">Aucun match</string>
+    <string name="sport_follow">Suivre dans Score en direct</string>
+    <string name="sport_unfollow">Ne plus suivre (auto)</string>
 </resources>

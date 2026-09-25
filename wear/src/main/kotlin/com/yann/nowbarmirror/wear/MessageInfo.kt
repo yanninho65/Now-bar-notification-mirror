@@ -23,7 +23,7 @@ data class MessageInfo(
     val appIcon: Bitmap?
 )
 
-/** A selected message app installed on the phone, with its unread count (see mobile MessagesWatchSync.unreadCount). */
+/** A selected message (or, since 25/09/2026, sport) app installed on the phone, with its count (see mobile MessagesWatchSync.unreadCount). */
 data class MessageApp(val packageName: String, val label: String, val count: Int, val icon: Bitmap?)
 
 /** The whole list from one phone push, most recent first; [syncTimestamp] = the phone's send time. */
@@ -61,7 +61,12 @@ object MessagesDataCodec {
                 appIcon = icons.getOrPut(pkg) { PhoneDataLayer.decodeImageAsset(context, dataMap, "icon_$pkg") }
             )
         }.filter { it.key.isNotBlank() }
-        val apps = dataMap.getDataMapArrayList("apps").orEmpty().mapNotNull { item ->
+        return MessageList(messages, syncTimestamp, decodeApps(context, dataMap, icons))
+    }
+
+    /** The "apps" row — same format on "/messages" and "/sport" (25/09/2026); [icons] = per-package decode cache. */
+    fun decodeApps(context: Context, dataMap: DataMap, icons: HashMap<String, Bitmap?>): List<MessageApp> =
+        dataMap.getDataMapArrayList("apps").orEmpty().mapNotNull { item ->
             val pkg = item.getString("packageName").orEmpty().takeIf { it.isNotBlank() } ?: return@mapNotNull null
             MessageApp(
                 packageName = pkg,
@@ -70,6 +75,4 @@ object MessagesDataCodec {
                 icon = icons.getOrPut(pkg) { PhoneDataLayer.decodeImageAsset(context, dataMap, "icon_$pkg") }
             )
         }
-        return MessageList(messages, syncTimestamp, apps)
-    }
 }

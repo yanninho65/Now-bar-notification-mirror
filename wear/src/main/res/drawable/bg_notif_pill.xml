@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- NEW 25/09/2026, écran Sport : chaque notification entourée d'une pilule, comme les cartes de
+     notification One UI Watch (gris très foncé sur fond noir, bouts arrondis). -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="@color/detail_card_bg" />
+    <corners android:radius="36dp" />
+</shape>

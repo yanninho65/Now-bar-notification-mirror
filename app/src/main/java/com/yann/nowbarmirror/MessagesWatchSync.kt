@@ -56,16 +56,15 @@ object MessagesWatchSync {
     private fun isSummary(sbn: StatusBarNotification) =
         sbn.notification.flags and Notification.FLAG_GROUP_SUMMARY != 0
 
-    /** Every non-ongoing notification (summaries included) of the selected message apps. */
-    private fun messageAppNotifications(context: Context, active: Array<StatusBarNotification>?): List<StatusBarNotification> {
-        val apps = MessageAppsPrefs.get(context)
+    /** Every non-ongoing notification (summaries included) of [apps]. */
+    private fun appNotifications(context: Context, active: Array<StatusBarNotification>?, apps: Collection<String>): List<StatusBarNotification> {
         if (active == null || apps.isEmpty()) return emptyList()
         return active.filter { it.packageName in apps && it.packageName != context.packageName && !it.isOngoing }
     }
 
     /** Message-app notifications currently in the shade (no group summaries), most recent first. */
     fun collect(context: Context, active: Array<StatusBarNotification>?): List<StatusBarNotification> =
-        messageAppNotifications(context, active)
+        appNotifications(context, active, MessageAppsPrefs.get(context))
             .filterNot(::isSummary)
             .sortedByDescending { it.postTime }
             .take(MAX_MESSAGES)
@@ -106,15 +105,44 @@ object MessagesWatchSync {
         }.toSet().size
     }
 
-    private data class AppEntry(val packageName: String, val label: String, val count: Int)
+    data class AppEntry(val packageName: String, val label: String, val count: Int)
 
-    /** Selected message apps installed (launchable) on the phone, with counts, in Yann's order (MessageAppsActivity, 24/09/2026). */
-    private fun appEntries(context: Context, active: Array<StatusBarNotification>?): List<AppEntry> {
+    /**
+     * [ordered] apps installed (launchable) on the phone, with counts, in Yann's order
+     * (MessageAppsActivity). Shared 25/09/2026 with the watch "Sport" screen's app row
+     * (sport/SportWatchSync, SportAppsPrefs) — same counting rules.
+     */
+    fun appEntries(context: Context, active: Array<StatusBarNotification>?, ordered: List<String>): List<AppEntry> {
         val pm = context.packageManager
-        val notifs = messageAppNotifications(context, active).groupBy { it.packageName }
-        return MessageAppsPrefs.getOrdered(context)
+        val notifs = appNotifications(context, active, ordered.toSet()).groupBy { it.packageName }
+        return ordered
             .filter { it != context.packageName && pm.getLaunchIntentForPackage(it) != null }
             .map { pkg -> AppEntry(pkg, appName(context, pkg), unreadCount(pkg, notifs[pkg].orEmpty())) }
+    }
+
+    /** Signature part of an app row (dedup). */
+    fun appsSignature(apps: List<AppEntry>): String =
+        apps.joinToString("\u0001") { "${it.packageName}\u0003${it.label}\u0003${it.count}" }
+
+    /** Writes the "apps" DataMap list (same format for "/messages" and "/sport"); adds their packages to [iconPackages]. */
+    fun putApps(dataMap: DataMap, apps: List<AppEntry>, iconPackages: MutableSet<String>) {
+        val appList = ArrayList<DataMap>()
+        apps.forEach { app ->
+            appList.add(DataMap().apply {
+                putString("packageName", app.packageName)
+                putString("label", app.label)
+                putInt("count", app.count)
+            })
+            iconPackages.add(app.packageName)
+        }
+        dataMap.putDataMapArrayList("apps", appList)
+    }
+
+    /** Top-level "icon_<package>" assets. */
+    fun putIcons(context: Context, dataMap: DataMap, iconPackages: Set<String>) {
+        iconPackages.forEach { pkg ->
+            BitmapUtils.AppIcons.get(context, pkg)?.let { dataMap.putAsset("icon_$pkg", WatchSync.bitmapToAsset(it)) }
+        }
     }
 
     /**
@@ -158,7 +186,7 @@ object MessagesWatchSync {
     fun sync(context: Context, active: Array<StatusBarNotification>?) {
         val enabled = ServicePrefs.isEnabled(context)
         val messages = if (enabled) collect(context, active) else emptyList()
-        val apps = appEntries(context, if (enabled) active else null)
+        val apps = appEntries(context, if (enabled) active else null, MessageAppsPrefs.getOrdered(context))
 
         data class Item(val sbn: StatusBarNotification, val title: String, val text: String, val lines: List<String>, val actions: List<String>)
         val items = messages.map { sbn ->
@@ -168,7 +196,7 @@ object MessagesWatchSync {
         val signature = items.joinToString("\u0001") {
             listOf(it.sbn.key, it.sbn.postTime, it.title, it.text, it.lines.joinToString("\u0002"), it.actions.joinToString("\u0002"))
                 .joinToString("\u0003")
-        } + "\u0004" + apps.joinToString("\u0001") { "${it.packageName}\u0003${it.label}\u0003${it.count}" }
+        } + "\u0004" + appsSignature(apps)
         if (signature == lastSignature) return
 
         try {
@@ -188,19 +216,8 @@ object MessagesWatchSync {
                     imageAsset(context, item.sbn)?.let { dataMap.putAsset("img_$index", it) }
                     iconPackages.add(item.sbn.packageName)
                 }
-                val appList = ArrayList<DataMap>()
-                apps.forEach { app ->
-                    appList.add(DataMap().apply {
-                        putString("packageName", app.packageName)
-                        putString("label", app.label)
-                        putInt("count", app.count)
-                    })
-                    iconPackages.add(app.packageName)
-                }
-                dataMap.putDataMapArrayList("apps", appList)
-                iconPackages.forEach { pkg ->
-                    BitmapUtils.AppIcons.get(context, pkg)?.let { dataMap.putAsset("icon_$pkg", WatchSync.bitmapToAsset(it)) }
-                }
+                putApps(dataMap, apps, iconPackages)
+                putIcons(context, dataMap, iconPackages)
                 dataMap.putDataMapArrayList("messages", list)
                 dataMap.putLong("timestamp", System.currentTimeMillis())
             }.asPutDataRequest().setUrgent()

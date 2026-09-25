@@ -1,11 +1,15 @@
 package com.yann.nowbarmirror.sport
 
 import android.app.Notification
+import android.app.PendingIntent
 import android.content.Intent
 import android.graphics.Bitmap
+import android.os.Handler
+import android.os.Looper
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import com.yann.nowbarmirror.NotificationImageExtractor
+import com.yann.nowbarmirror.settings.SportAppsPrefs
 import com.yann.nowbarmirror.settings.WidgetActionsPrefs
 import com.yann.nowbarmirror.widget.AllNotifEntryPush
 import com.yann.nowbarmirror.widget.NowBarWidgetProvider
@@ -105,6 +109,65 @@ class SofascoreNotificationListenerService : NotificationListenerService() {
     private val ready = AtomicBoolean(false)
     private var pendingDismissKey: String? = null
     private var pendingDismissPostTime: Long = -1L
+
+    // NEW 25/09/2026 — watch "Sport" screen ("/sport", SportWatchSync): coalesced like the
+    // "/messages" sync (MirrorNotificationListener.scheduleMessagesSync).
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val sportSyncRunnable = Runnable { runSportSync() }
+
+    private fun scheduleSportSync() {
+        mainHandler.removeCallbacks(sportSyncRunnable)
+        mainHandler.postDelayed(sportSyncRunnable, SPORT_SYNC_DELAY_MILLIS)
+    }
+
+    private fun runSportSync() {
+        if (!ready.get()) return
+        try {
+            val all = activeNotifications
+            val items = all.orEmpty().filter { it.packageName == SOFASCORE_PACKAGE }.mapNotNull { sbn ->
+                val match = toMatchResult(sbn) ?: return@mapNotNull null
+                SportWatchSync.Item(sbn, rawTitleAndText(sbn, match).first, match)
+            }
+            val followedKey = SofascorePrefs.loadChosenKey(this)
+                ?.takeIf { SofascorePrefs.loadMode(this) == SofascorePrefs.Mode.CHOSEN }
+            SportWatchSync.sync(applicationContext, all, items, followedKey)
+        } catch (_: Throwable) {
+            // The watch screen must never take this service down.
+        }
+    }
+
+    private fun findActive(key: String): StatusBarNotification? =
+        try { activeNotifications?.firstOrNull { it.key == key } } catch (_: Throwable) { null }
+
+    /** Watch "Sport" screen, follow pill: [key] blank = back to automatic (latest). */
+    private fun doFollowFromWatch(key: String) {
+        val sbn = key.takeIf { it.isNotBlank() }?.let { findActive(it) }
+        val teams = sbn?.let { extractTeams(it) }
+        if (sbn == null || teams == null) {
+            SofascorePrefs.saveLatest(this)
+        } else {
+            SofascorePrefs.saveChosen(this, sbn.key, "${teams.first} - ${teams.second}")
+        }
+        refresh()
+    }
+
+    /** Watch "Sport" screen, delete button: same path as the widget's dismiss. */
+    private fun doDismissFromWatch(key: String) {
+        val sbn = findActive(key) ?: return
+        dismiss(sbn.key, sbn.postTime)
+    }
+
+    /** Watch "Sport" screen, "Aff. sur tél.": opens the match (not dismissed) — same relay as the other watch screens. */
+    private fun doOpenOnPhoneFromWatch(key: String) {
+        val sbn = findActive(key) ?: return
+        val openIntent = sbn.notification.contentIntent ?: packageManager.getLaunchIntentForPackage(SOFASCORE_PACKAGE)?.let {
+            PendingIntent.getActivity(this, OPEN_SOFASCORE_REQUEST_CODE, it, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        } ?: return
+        val match = toMatchResult(sbn)
+        val (title, text) = match?.let { rawTitleAndText(sbn, it) }
+            ?: ((sbn.notification.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString() ?: "") to "")
+        NowBarWidgetProvider.postOpenOnPhone(applicationContext, title, text, extractNotificationImage(sbn), openIntent)
+    }
 
     override fun onListenerConnected() {
         super.onListenerConnected()
@@ -245,6 +308,7 @@ class SofascoreNotificationListenerService : NotificationListenerService() {
 
     override fun onListenerDisconnected() {
         instance = null
+        ready.set(false)
         super.onListenerDisconnected()
     }
 
@@ -258,6 +322,9 @@ class SofascoreNotificationListenerService : NotificationListenerService() {
             // en direct" est aussi celui que "Dernière notif" affiche.
             pushToAllNotificationsHistory(sbn)
             refresh()
+        } else if (SportAppsPrefs.isSportApp(applicationContext, sbn.packageName)) {
+            // Count badge of the watch Sport screen's app row (25/09/2026).
+            scheduleSportSync()
         }
     }
 
@@ -380,6 +447,8 @@ class SofascoreNotificationListenerService : NotificationListenerService() {
                 NowBarWidgetProvider.closePeekIfShowing(applicationContext, sbn.key, sbn.postTime)
             } catch (_: Throwable) {
             }
+        } else if (SportAppsPrefs.isSportApp(applicationContext, sbn.packageName)) {
+            scheduleSportSync()
         }
     }
 
@@ -430,6 +499,8 @@ class SofascoreNotificationListenerService : NotificationListenerService() {
      */
     fun refresh() {
         val notifications = activeSofascoreNotifications() ?: return
+        // Watch "Sport" screen (25/09/2026): every refresh (post/removal/choice change) re-pushes it.
+        scheduleSportSync()
         if (notifications.isEmpty()) {
             if (lastWatchSignature != WATCH_CLEARED) {
                 WatchSync.sendCleared(this)
@@ -705,7 +776,29 @@ class SofascoreNotificationListenerService : NotificationListenerService() {
         const val EXTRA_ACTION_POST_TIME = "mirror.widget.sofascore_action_post_time"
         const val EXTRA_ACTION_INDEX = "mirror.widget.sofascore_action_index"
 
+        @Volatile
         private var instance: SofascoreNotificationListenerService? = null
+
+        private const val SPORT_SYNC_DELAY_MILLIS = 400L
+        private const val OPEN_SOFASCORE_REQUEST_CODE = 6_100_000
+
+        /** Re-pushes the watch "Sport" screen (e.g. after the sport-app selection changed). */
+        fun requestSportSync() {
+            instance?.let { it.mainHandler.post { it.scheduleSportSync() } }
+        }
+
+        // NEW 25/09/2026 — commands from the watch "Sport" screen (WearActionRelayService, background thread).
+        fun followFromWatch(key: String) {
+            instance?.let { it.mainHandler.post { it.doFollowFromWatch(key) } }
+        }
+
+        fun dismissFromWatch(key: String) {
+            instance?.let { it.mainHandler.post { it.doDismissFromWatch(key) } }
+        }
+
+        fun openOnPhoneFromWatch(key: String) {
+            instance?.let { it.mainHandler.post { it.doOpenOnPhoneFromWatch(key) } }
+        }
 
         // AUDIT 23/09/2026 — what was last sent to the watch on "/match" (see refresh()), so an
         // unchanged match isn't re-encoded and re-sent over Bluetooth. Process-lifetime only: the

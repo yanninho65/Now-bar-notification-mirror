@@ -27,6 +27,7 @@ object SettingsBackup {
             put("modes", modes)
             put("invert_title_text", inverted)
             put("message_apps", org.json.JSONArray().apply { MessageAppsPrefs.getOrdered(context).forEach { put(it) } })
+            put("sport_apps", org.json.JSONArray().apply { SportAppsPrefs.getOrdered(context).forEach { put(it) } })
         }.toString(2)
     }
 
@@ -63,6 +64,9 @@ object SettingsBackup {
 
         root.optJSONArray("message_apps")?.let { apps ->
             MessageAppsPrefs.setOrdered(context, (0 until apps.length()).map { apps.getString(it) })
+        }
+        root.optJSONArray("sport_apps")?.let { apps ->
+            SportAppsPrefs.setOrdered(context, (0 until apps.length()).map { apps.getString(it) })
         }
 
         if (root.has("service_enabled")) {

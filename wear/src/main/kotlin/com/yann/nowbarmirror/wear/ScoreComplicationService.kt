@@ -39,35 +39,22 @@ import androidx.wear.watchface.complications.datasource.ComplicationRequest
  * seul un forçage d'arrêt de l'appli téléphone (qui relance ses NotificationListenerServices et
  * donc leur re-synchronisation au reconnect) redéclenchait dans l'immédiat.
  *
- * Un tap sur la complication ouvre l'app Sofascore SUR LA MONTRE (demandé
- * par Yann le 15/09/2026) — voir [sofascoreTapAction]. Nécessite que
- * Sofascore (ou son équivalent Wear OS) soit installé sur la montre elle
- * -même (distinct du téléphone) ; sans ça, le tap ne fait simplement rien
- * plutôt que planter (voir [sofascoreTapAction]). Nécessite aussi un
- * élément `<queries>` déclarant ce package dans AndroidManifest.xml —
- * requis à partir d'Android 11 pour que `getLaunchIntentForPackage` puisse
- * voir un package qui n'est pas le sien.
+ * Un tap ouvre l'écran "Sport" de la montre (SportActivity, 25/09/2026 — avant : l'app Sofascore
+ * sur la montre, toujours accessible depuis la ligne d'applis de cet écran).
  */
 class ScoreComplicationService : ComplicationDataSourceService() {
 
-    // Suppose que l'app Sofascore sur la montre a le même nom de package
-    // que sur le téléphone (vérifié côté téléphone via le Play Store, voir
-    // mobile/SofascoreNotificationListenerService.kt) — à corriger si
-    // jamais son équivalent Wear OS utilise un package différent.
-    private val sofascoreTapAction: PendingIntent?
-        get() {
-            val launchIntent = packageManager.getLaunchIntentForPackage(SOFASCORE_PACKAGE) ?: return null
-            return PendingIntent.getActivity(
-                this,
-                0,
-                launchIntent,
-                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-            )
-        }
+    // UPDATED 25/09/2026 — the tap opens the watch "Sport" screen (SportActivity: sport app row +
+    // every Sofascore match), no longer Sofascore itself (still one tap away in that app row).
+    private val sportScreenTapAction: PendingIntent
+        get() = PendingIntent.getActivity(
+            this,
+            0,
+            android.content.Intent(this, SportActivity::class.java),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
 
     companion object {
-        private const val SOFASCORE_PACKAGE = "com.sofascore.results"
-
         // AUDIT 23/09/2026 — see ComposedImageCache: the SMALL_IMAGE bitmap is only recomposed
         // when the match value actually changed since the last request.
         private val smallImageCache = ComposedImageCache()
@@ -128,7 +115,7 @@ class ScoreComplicationService : ComplicationDataSourceService() {
                 contentDescription = PlainComplicationText.Builder(
                     "Aucun match sélectionné"
                 ).build()
-            ).setTapAction(sofascoreTapAction).build()
+            ).setTapAction(sportScreenTapAction).build()
         }
 
         // Indication de temps (P1/MT/P2/Fin...) en premier, puis
@@ -148,7 +135,7 @@ class ScoreComplicationService : ComplicationDataSourceService() {
         return LongTextComplicationData.Builder(
             text = PlainComplicationText.Builder(text).build(),
             contentDescription = PlainComplicationText.Builder(text).build()
-        ).setTapAction(sofascoreTapAction).build()
+        ).setTapAction(sportScreenTapAction).build()
     }
 
     /**
@@ -192,6 +179,6 @@ class ScoreComplicationService : ComplicationDataSourceService() {
         return SmallImageComplicationData.Builder(
             smallImage = SmallImage.Builder(icon, SmallImageType.PHOTO).build(),
             contentDescription = PlainComplicationText.Builder(description).build()
-        ).setTapAction(sofascoreTapAction).build()
+        ).setTapAction(sportScreenTapAction).build()
     }
 }

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- NEW 25/09/2026, écran Sport : pilule du match suivi par "Score en direct" (liseré bleu). -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="@color/detail_card_bg" />
+    <corners android:radius="36dp" />
+    <stroke android:width="2dp" android:color="@color/detail_accent" />
+</shape>

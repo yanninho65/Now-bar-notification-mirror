@@ -36,6 +36,12 @@
             android:exported="true"
             android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
 
+        <!-- NEW 25/09/2026 : écran "Sport" ouvert par un tap sur "Score en direct". -->
+        <activity
+            android:name=".SportActivity"
+            android:exported="true"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+
         <service
             android:name=".ScoreComplicationService"
             android:exported="true"
@@ -70,6 +76,7 @@
                 <data android:scheme="wear" android:host="*" android:pathPrefix="/match" />
                 <data android:scheme="wear" android:host="*" android:pathPrefix="/notification" />
                 <data android:scheme="wear" android:host="*" android:pathPrefix="/messages" />
+                <data android:scheme="wear" android:host="*" android:pathPrefix="/sport" />
             </intent-filter>
         </service>
 

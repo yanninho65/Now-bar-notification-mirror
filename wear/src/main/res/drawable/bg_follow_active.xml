@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- NEW 25/09/2026, écran Sport : rond de la punaise quand ce match est suivi (bleu d'accent),
+     même forme/état pressé que bg_delete_button.xml. -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_pressed="true">
+        <shape android:shape="oval">
+            <solid android:color="@color/detail_accent_pressed" />
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="oval">
+            <solid android:color="@color/detail_accent" />
+        </shape>
+    </item>
+</selector>

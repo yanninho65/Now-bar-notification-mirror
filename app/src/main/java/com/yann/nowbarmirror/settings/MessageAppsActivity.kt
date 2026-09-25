@@ -16,14 +16,26 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.yann.nowbarmirror.MirrorNotificationListener
 import com.yann.nowbarmirror.R
+import com.yann.nowbarmirror.sport.SofascoreNotificationListenerService
 
 /**
  * Picks the apps whose notifications feed the watch "Messages" complication ([MessageAppsPrefs]).
  * UPDATED 24/09/2026: selected apps come first, in Yann's order, with ▲/▼ to reorder them — the
  * watch's app rows follow this same order. Unselected launcher apps follow alphabetically.
  * Every change is saved at once and re-pushes the list to the watch.
+ *
+ * UPDATED 25/09/2026: same screen for the sport apps of the watch "Sport" screen
+ * ([SportAppsPrefs]) when started with [EXTRA_KIND] = [KIND_SPORT] (button in SportActivity).
  */
 class MessageAppsActivity : AppCompatActivity() {
+
+    companion object {
+        const val EXTRA_KIND = "kind"
+        const val KIND_SPORT = "sport"
+    }
+
+    private val isSport by lazy { intent.getStringExtra(EXTRA_KIND) == KIND_SPORT }
+    private val prefs: OrderedAppsPrefs get() = if (isSport) SportAppsPrefs else MessageAppsPrefs
 
     private data class AppRow(val packageName: String, val label: String, val icon: Drawable)
 
@@ -34,6 +46,7 @@ class MessageAppsActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        if (isSport) title = getString(R.string.sport_apps_title)
 
         content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -52,14 +65,14 @@ class MessageAppsActivity : AppCompatActivity() {
 
         installed = loadApps().associateBy { it.packageName }
         // Keep the saved order, but only for apps still installed with a launcher icon.
-        order += MessageAppsPrefs.getOrdered(this).filter { it in installed }
+        order += prefs.getOrdered(this).filter { it in installed }
         render()
     }
 
     private fun render() {
         content.removeAllViews()
-        content.addView(text(getString(R.string.message_apps_title), 22f, R.color.one_ui_text_primary, top = 8, bottom = 4))
-        content.addView(text(getString(R.string.message_apps_hint), 14f, R.color.one_ui_text_secondary, bottom = 12))
+        content.addView(text(getString(if (isSport) R.string.sport_apps_title else R.string.message_apps_title), 22f, R.color.one_ui_text_primary, top = 8, bottom = 4))
+        content.addView(text(getString(if (isSport) R.string.sport_apps_hint else R.string.message_apps_hint), 14f, R.color.one_ui_text_secondary, bottom = 12))
 
         if (order.isNotEmpty()) {
             content.addView(text(getString(R.string.message_apps_order_label), 13f, R.color.one_ui_text_secondary, top = 4, bottom = 4))
@@ -124,8 +137,8 @@ class MessageAppsActivity : AppCompatActivity() {
     }
 
     private fun save() {
-        MessageAppsPrefs.setOrdered(this, order)
-        MirrorNotificationListener.requestMessagesSync()
+        prefs.setOrdered(this, order)
+        if (isSport) SofascoreNotificationListenerService.requestSportSync() else MirrorNotificationListener.requestMessagesSync()
     }
 
     private fun text(value: String, sizeSp: Float, color: Int, top: Int = 0, bottom: Int = 0) = TextView(this).apply {

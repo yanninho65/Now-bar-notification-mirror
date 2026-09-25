@@ -3,6 +3,7 @@ package com.yann.nowbarmirror
 import android.app.PendingIntent
 import com.google.android.gms.wearable.MessageEvent
 import com.google.android.gms.wearable.WearableListenerService
+import com.yann.nowbarmirror.sport.SofascoreNotificationListenerService
 import com.yann.nowbarmirror.widget.NowBarWidgetProvider
 import org.json.JSONObject
 
@@ -45,6 +46,17 @@ class WearActionRelayService : WearableListenerService() {
             // by the connected MirrorNotificationListener against the live notification center.
             if (event.path == MSG_OPEN_APP_PATH) {
                 openAppOnPhone(json.optString("pkg"))
+                return
+            }
+            // NEW 25/09/2026 — watch "Sport" screen: Sofascore notification key (blank key on
+            // "follow" = back to automatic), handled by the connected Sport listener.
+            if (event.path.startsWith(SPORT_PREFIX)) {
+                val sportKey = json.optString("key")
+                when (event.path) {
+                    SPORT_FOLLOW_PATH -> SofascoreNotificationListenerService.followFromWatch(sportKey)
+                    SPORT_DISMISS_PATH -> if (sportKey.isNotBlank()) SofascoreNotificationListenerService.dismissFromWatch(sportKey)
+                    SPORT_OPEN_PATH -> if (sportKey.isNotBlank()) SofascoreNotificationListenerService.openOnPhoneFromWatch(sportKey)
+                }
                 return
             }
             if (event.path.startsWith(MSG_PREFIX)) {
@@ -125,5 +137,9 @@ class WearActionRelayService : WearableListenerService() {
         const val MSG_ACTION_PATH = "/msgdetail/action"
         const val MSG_DISMISS_PATH = "/msgdetail/dismiss"
         const val MSG_OPEN_PATH = "/msgdetail/open"
+        const val SPORT_PREFIX = "/sportdetail/"
+        const val SPORT_FOLLOW_PATH = "/sportdetail/follow"
+        const val SPORT_DISMISS_PATH = "/sportdetail/dismiss"
+        const val SPORT_OPEN_PATH = "/sportdetail/open"
     }
 }

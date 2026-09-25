@@ -1,5 +1,6 @@
 package com.yann.nowbarmirror.sport
 
+import android.content.Intent
 import android.os.Bundle
 import android.widget.TextView
 import androidx.activity.enableEdgeToEdge
@@ -9,12 +10,15 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.yann.nowbarmirror.R
+import com.yann.nowbarmirror.settings.MessageAppsActivity
 import com.yann.nowbarmirror.settings.PermissionsActivity
 
 /**
  * "Sport" screen (24/09/2026 — was a tab of MainActivity; API overrides removed the same day):
  * the active Sofascore notifications, "Dernière notification (auto)" first. Tapping a row picks
  * what drives the watch "Score en direct" complication (SofascorePrefs). Rebuilt on every resume.
+ * UPDATED 25/09/2026: "Applications sport (montre)" button → MessageAppsActivity in sport mode
+ * (apps + order of the watch Sport screen's app row).
  */
 class SportActivity : AppCompatActivity() {
 
@@ -33,6 +37,10 @@ class SportActivity : AppCompatActivity() {
         status = findViewById(R.id.sport_status)
         list = findViewById(R.id.sport_list)
         list.layoutManager = LinearLayoutManager(this)
+        findViewById<android.view.View>(R.id.sport_apps_button).setOnClickListener {
+            startActivity(Intent(this, MessageAppsActivity::class.java)
+                .putExtra(MessageAppsActivity.EXTRA_KIND, MessageAppsActivity.KIND_SPORT))
+        }
     }
 
     override fun onResume() {

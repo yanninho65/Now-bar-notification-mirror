@@ -4,6 +4,9 @@
     <string name="message_apps_title">Applications de messagerie (montre)</string>
     <string name="message_apps_hint">Leurs notifications alimentent la complication montre « Messages ».</string>
     <string name="message_apps_order_label">Sélectionnées — même ordre sur la montre (▲ ▼)</string>
+    <!-- NEW 25/09/2026 : applis sport de l'écran "Sport" de la montre (même écran de choix). -->
+    <string name="sport_apps_title">Applications sport (montre)</string>
+    <string name="sport_apps_hint">Affichées en haut de l\'écran Sport de la montre, avec leur nombre de notifications. La liste des matchs en dessous reste celle de Sofascore.</string>
     <string name="message_apps_others_label">Autres applications</string>
 
     <!-- Order must match MirrorMode enum ordinals: NONE, LATEST, ALL -->

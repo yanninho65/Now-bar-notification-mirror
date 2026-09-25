@@ -50,6 +50,10 @@ class PhoneDataListenerService : WearableListenerService() {
                         PhoneDataLayer.requestComplicationRefresh(applicationContext, MessagesComplicationService::class.java)
                         MessagesStore.onChanged?.invoke()
                     }
+                    PhoneDataLayer.SPORT_PATH -> {
+                        SportStore.setLive(SportDataCodec.decode(applicationContext, dataMap), timestamp)
+                        SportStore.onChanged?.invoke()
+                    }
                 }
             }
         } finally {

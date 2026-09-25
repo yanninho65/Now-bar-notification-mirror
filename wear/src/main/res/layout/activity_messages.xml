@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- NEW 24/09/2026 — liste "Messages" (voir MessagesActivity.kt) : même cadre que
+<!-- NEW 24/09/2026 — liste "Messages" (voir MessagesActivity.kt ; aussi l'écran Sport, SportActivity.kt, 25/09/2026) : même cadre que
      activity_notification_detail.xml (fond noir, balayage pour fermer, marges écran rond), un
      bloc item_message.xml par message, les uns après les autres. Marges : valeurs par défaut,
      remplacées en code par des fractions de l'écran rond (MessagesActivity.applyRoundInsets). -->

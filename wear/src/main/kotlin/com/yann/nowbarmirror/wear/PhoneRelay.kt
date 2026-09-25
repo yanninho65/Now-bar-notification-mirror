@@ -63,6 +63,21 @@ object PhoneRelay {
         send(context, "/msgdetail/openapp", JSONObject().put("pkg", packageName).toString().toByteArray(Charsets.UTF_8))
     }
 
+    // NEW 25/09/2026 — "Sport" screen (SportActivity), addressed by the phone's Sofascore notification
+    // key; handled on the phone by WearActionRelayService -> SofascoreNotificationListenerService.
+    // Follow with a blank key = back to automatic (latest match).
+    fun sendSportFollow(context: Context, key: String) {
+        send(context, "/sportdetail/follow", JSONObject().put("key", key).toString().toByteArray(Charsets.UTF_8))
+    }
+
+    fun sendSportDismiss(context: Context, key: String) {
+        send(context, "/sportdetail/dismiss", JSONObject().put("key", key).toString().toByteArray(Charsets.UTF_8))
+    }
+
+    fun sendSportOpen(context: Context, key: String) {
+        send(context, "/sportdetail/open", JSONObject().put("key", key).toString().toByteArray(Charsets.UTF_8))
+    }
+
     private inline fun payload(info: NotificationInfo, extra: JSONObject.() -> Unit = {}): ByteArray {
         val json = JSONObject().apply {
             put("kind", info.kind)

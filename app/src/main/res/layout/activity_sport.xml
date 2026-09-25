@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Sport (24/09/2026, ex-onglet de l'écran principal) — voir sport/SportActivity. -->
+<!-- Sport (24/09/2026, ex-onglet de l'écran principal) — voir sport/SportActivity.
+     UPDATED 25/09/2026 : carte avec le bouton "Applications sport (montre)" (même écran que les
+     applis de messagerie, voir settings/MessageAppsActivity). -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/root"
     android:layout_width="match_parent"
@@ -17,6 +19,20 @@
         android:paddingHorizontal="20dp"
         android:paddingTop="20dp"
         android:paddingBottom="8dp" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:layout_marginHorizontal="16dp"
+        android:layout_marginBottom="8dp"
+        android:background="@drawable/bg_card">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/sport_apps_button"
+            style="@style/MainMenuButton"
+            android:text="@string/sport_apps_title" />
+    </LinearLayout>
 
     <TextView
         android:id="@+id/sport_status"

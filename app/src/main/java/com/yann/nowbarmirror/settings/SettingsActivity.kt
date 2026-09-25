@@ -12,6 +12,7 @@ import androidx.core.view.WindowInsetsCompat
 import com.google.android.material.switchmaterial.SwitchMaterial
 import com.yann.nowbarmirror.MirrorNotificationListener
 import com.yann.nowbarmirror.R
+import com.yann.nowbarmirror.sport.SofascoreNotificationListenerService
 
 /** "Paramètres" (24/09/2026): the three switches and export/import, formerly at the top of the app list. */
 class SettingsActivity : AppCompatActivity() {
@@ -41,6 +42,7 @@ class SettingsActivity : AppCompatActivity() {
                 SettingsBackup.import(this, json)
                 bindSwitches()
                 MirrorNotificationListener.requestMessagesSync()
+                SofascoreNotificationListenerService.requestSportSync()
                 Toast.makeText(this, R.string.import_success, Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
                 Toast.makeText(this, R.string.import_failed, Toast.LENGTH_SHORT).show()
