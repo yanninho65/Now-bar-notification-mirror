@@ -215,7 +215,7 @@ object MatchClock {
 
     /**
      * NEW 25/09/2026 — readable label of the watch Sport screen: the phone's own long label when it
-     * sent one (football events: "Début du match", "Min 16", "Début 2ème mi-temps"…), otherwise the
+     * sent one (football events: "Match commencé", "Mi-temps", "2ème mi-temps"…), otherwise the
      * status code spelled out ("3e quart-temps", "2e set", "Match terminé"…), else [label].
      */
     fun longLabel(match: MatchScore): String {

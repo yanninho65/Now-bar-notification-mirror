@@ -121,8 +121,8 @@ class SportActivity : Activity() {
         goals.visibility = if (match.goals.isEmpty()) View.GONE else View.VISIBLE
         match.goals.forEach { goal ->
             goals.addView(TextView(this).apply {
-                text = "⚽ $goal"
-                setTextColor(getColor(R.color.detail_text_primary))
+                text = goal   // "52' Name" — no ball icon (25/09/2026)
+                setTextColor(android.graphics.Color.WHITE)
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
                 gravity = Gravity.CENTER
                 maxLines = 1
