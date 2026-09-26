@@ -28,18 +28,27 @@
         <activity
             android:name=".NotificationDetailActivity"
             android:exported="true"
+            android:noHistory="true"
+            android:excludeFromRecents="true"
             android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+
+        <!-- 26/09/2026 : noHistory + excludeFromRecents sur les 3 écrans (et CLEAR_TASK dans les taps des
+             complications) : rien n'est gardé en mémoire, chaque tap rouvre juste l'écran voulu. -->
 
         <!-- NEW 24/09/2026 : liste ouverte par un tap sur la complication "Messages". -->
         <activity
             android:name=".MessagesActivity"
             android:exported="true"
+            android:noHistory="true"
+            android:excludeFromRecents="true"
             android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
 
         <!-- NEW 25/09/2026 : écran "Sport" ouvert par un tap sur "Score en direct". -->
         <activity
             android:name=".SportActivity"
             android:exported="true"
+            android:noHistory="true"
+            android:excludeFromRecents="true"
             android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
 
         <service
