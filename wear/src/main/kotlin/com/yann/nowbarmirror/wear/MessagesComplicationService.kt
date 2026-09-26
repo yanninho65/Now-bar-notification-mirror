@@ -52,7 +52,9 @@ class MessagesComplicationService : ComplicationDataSourceService() {
     }
 
     private fun tapAction(): PendingIntent = PendingIntent.getActivity(
-        this, 0, Intent(this, MessagesActivity::class.java),
+        this, 0,
+        // Fresh task on every tap (26/09/2026): no stack of previous screens.
+        Intent(this, MessagesActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK),
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
     )
 

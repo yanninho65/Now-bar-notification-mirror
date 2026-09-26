@@ -50,7 +50,9 @@ class ScoreComplicationService : ComplicationDataSourceService() {
         get() = PendingIntent.getActivity(
             this,
             0,
-            android.content.Intent(this, SportActivity::class.java),
+            android.content.Intent(this, SportActivity::class.java)
+                // Fresh task on every tap (26/09/2026): no stack of previous screens.
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 

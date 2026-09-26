@@ -53,6 +53,7 @@ class NotificationComplicationService : ComplicationDataSourceService() {
     private val notificationDetailTapAction: PendingIntent
         get() {
             val intent = Intent(this, NotificationDetailActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)   // no stack of previous screens (26/09/2026)
             return PendingIntent.getActivity(
                 this,
                 0,
