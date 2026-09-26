@@ -56,6 +56,7 @@ class SportActivity : Activity() {
     override fun onResume() {
         super.onResume()
         SportStore.onChanged = { runOnUiThread { if (!isFinishing && !isDestroyed) render(SportStore.current) } }
+        PhoneRelay.sendSportWatching(this, true)
         Thread {
             val read = PhoneDataLayer.readSport(this)
             runOnUiThread {
@@ -68,6 +69,7 @@ class SportActivity : Activity() {
     override fun onPause() {
         super.onPause()
         SportStore.onChanged = null
+        PhoneRelay.sendSportWatching(this, false)
     }
 
     private fun render(list: SportList?) {

@@ -597,6 +597,16 @@ class SofascoreNotificationListenerService : NotificationListenerService() {
      * comportement pour la notif active.
      */
     private fun toMatchResult(sbn: StatusBarNotification): MatchResult? {
+        // AUDIT 26/09/2026 — one event used to re-parse EVERY active match 3-4 times (refresh,
+        // widget push, history push, "/sport"); same posting (key + postTime) = same result.
+        val cacheKey = "${sbn.key}@${sbn.postTime}"
+        synchronized(parsedMatches) { parsedMatches.get(cacheKey) }?.let { return it as? MatchResult }
+        val result = parseMatch(sbn)
+        synchronized(parsedMatches) { parsedMatches.put(cacheKey, result ?: NOT_PARSED) }
+        return result
+    }
+
+    private fun parseMatch(sbn: StatusBarNotification): MatchResult? {
         val (homeTeam, awayTeam) = extractTeams(sbn) ?: return null
         val lines = collectLines(sbn)
         if (lines.isEmpty()) return null
@@ -790,6 +800,16 @@ class SofascoreNotificationListenerService : NotificationListenerService() {
 
         private const val SPORT_SYNC_DELAY_MILLIS = 400L
         private const val OPEN_SOFASCORE_REQUEST_CODE = 6_100_000
+
+        // Parsed MatchResult per posting (see toMatchResult), NOT_PARSED for unparseable ones.
+        private val parsedMatches = android.util.LruCache<String, Any>(64)
+        private val NOT_PARSED = Any()
+
+        /** Watch Sport screen opened/closed (AUDIT 26/09/2026, see SportWatchSync.setWatching). */
+        fun setWatchScreenOpen(open: Boolean) {
+            SportWatchSync.setWatching(open)
+            if (open) requestSportSync()
+        }
 
         /** Re-pushes the watch "Sport" screen (e.g. after the sport-app selection changed). */
         fun requestSportSync() {

@@ -103,12 +103,22 @@ object PhoneDataLayer {
     /** Shared by MatchDataCodec/NotificationDataCodec. Blocking (Tasks.await) — only ever called off the main thread. */
     fun decodeImageAsset(context: Context, dataMap: DataMap, key: String): Bitmap? {
         val asset: Asset = dataMap.getAsset(key) ?: return null
+        // AUDIT 26/09/2026 — "/messages" and "/sport" resend the same icons/photos on every push:
+        // same digest = same bytes, so reuse the decoded bitmap instead of reading + decoding again.
+        val digest = asset.digest
+        digest?.let { d -> synchronized(decodedAssets) { decodedAssets.get(d) }?.let { return it } }
         return try {
             val response = Tasks.await(Wearable.getDataClient(context).getFdForAsset(asset))
             response.inputStream.use { BitmapFactory.decodeStream(it) }
+                ?.also { bmp -> digest?.let { d -> synchronized(decodedAssets) { decodedAssets.put(d, bmp) } } }
         } catch (e: Exception) {
             null
         }
+    }
+
+    // Sized in KB (images are ≤ 256 px on the phone side, ≤ 256 KB each).
+    private val decodedAssets = object : android.util.LruCache<String, Bitmap>(8 * 1024) {
+        override fun sizeOf(key: String, value: Bitmap) = (value.byteCount / 1024).coerceAtLeast(1)
     }
 
     /** Asks the watch face to re-request [serviceClass]'s complication(s) right away. */

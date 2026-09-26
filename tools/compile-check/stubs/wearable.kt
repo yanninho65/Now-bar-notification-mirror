@@ -5,7 +5,7 @@ import android.net.Uri
 import com.google.android.gms.tasks.Task
 import java.io.InputStream
 
-class Asset { companion object { @JvmStatic fun createFromBytes(b: ByteArray): Asset = TODO() } }
+class Asset { val digest: String? get() = TODO(); companion object { @JvmStatic fun createFromBytes(b: ByteArray): Asset = TODO() } }
 class DataMap {
     fun putString(k: String, v: String) {}
     fun putLong(k: String, v: Long) {}

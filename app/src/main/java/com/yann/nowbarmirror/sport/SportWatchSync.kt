@@ -35,6 +35,24 @@ object SportWatchSync {
     private val imageAssets = LruCache<String, Any>(MAX_MATCHES * 2)   // Asset, or NO_IMAGE
     private val NO_IMAGE = Any()
 
+    // AUDIT 26/09/2026 — "/sport" only feeds the watch Sport screen, yet changes on EVERY
+    // Sofascore event of ANY match (17 active on a busy evening), and was sent urgent (immediate
+    // Bluetooth wake of both devices each time). Now non-urgent (batched by the Data Layer)
+    // except while the watch screen is open: the watch sends "/sportdetail/watching" on
+    // resume/pause, which opens/closes an urgent window (capped, in case "closed" is lost).
+    private const val WATCHING_MAX_MILLIS = 10 * 60 * 1000L
+
+    @Volatile
+    private var watchingUntil = 0L
+
+    fun setWatching(open: Boolean) {
+        watchingUntil = if (open) System.currentTimeMillis() + WATCHING_MAX_MILLIS else 0L
+        // Re-put on open even if unchanged: a pending non-urgent item must reach the watch now.
+        if (open) lastSignature = null
+    }
+
+    private fun isWatching() = System.currentTimeMillis() < watchingUntil
+
     /** [items] = the active Sofascore matches; call on the listener's main thread. */
     fun sync(context: Context, active: Array<StatusBarNotification>?, items: List<Item>, followedKey: String?) {
         val matches = items.sortedByDescending { it.sbn.postTime }.take(MAX_MATCHES)
@@ -66,7 +84,7 @@ object SportWatchSync {
                 MessagesWatchSync.putApps(dataMap, apps, iconPackages)
                 MessagesWatchSync.putIcons(context, dataMap, iconPackages)
                 dataMap.putLong("timestamp", System.currentTimeMillis())
-            }.asPutDataRequest().setUrgent()
+            }.asPutDataRequest().let { if (isWatching()) it.setUrgent() else it }
             Wearable.getDataClient(context).putDataItem(request)
             lastSignature = signature
         } catch (_: Throwable) {

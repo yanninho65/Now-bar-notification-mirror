@@ -113,11 +113,25 @@ object MessagesWatchSync {
      * (sport/SportWatchSync, SportAppsPrefs) — same counting rules.
      */
     fun appEntries(context: Context, active: Array<StatusBarNotification>?, ordered: List<String>): List<AppEntry> {
-        val pm = context.packageManager
         val notifs = appNotifications(context, active, ordered.toSet()).groupBy { it.packageName }
         return ordered
-            .filter { it != context.packageName && pm.getLaunchIntentForPackage(it) != null }
-            .map { pkg -> AppEntry(pkg, appName(context, pkg), unreadCount(pkg, notifs[pkg].orEmpty())) }
+            .filter { it != context.packageName }
+            .mapNotNull { pkg -> appInfo(context, pkg)?.let { label -> AppEntry(pkg, label, unreadCount(pkg, notifs[pkg].orEmpty())) } }
+    }
+
+    // AUDIT 26/09/2026 — label + "launchable on the phone" per package, cached 10 min: both are
+    // PackageManager binder calls, and appEntries runs on every message/sport-app event.
+    private class AppInfo(val label: String?, val at: Long)
+    private val appInfos = LruCache<String, AppInfo>(32)
+    private const val APP_INFO_TTL_MILLIS = 10 * 60 * 1000L
+
+    /** The app's label if it's launchable on the phone, else null. */
+    private fun appInfo(context: Context, pkg: String): String? {
+        val now = System.currentTimeMillis()
+        appInfos.get(pkg)?.takeIf { now - it.at < APP_INFO_TTL_MILLIS }?.let { return it.label }
+        val label = if (context.packageManager.getLaunchIntentForPackage(pkg) != null) appName(context, pkg) else null
+        appInfos.put(pkg, AppInfo(label, now))
+        return label
     }
 
     /** Signature part of an app row (dedup). */
@@ -141,7 +155,7 @@ object MessagesWatchSync {
     /** Top-level "icon_<package>" assets. */
     fun putIcons(context: Context, dataMap: DataMap, iconPackages: Set<String>) {
         iconPackages.forEach { pkg ->
-            BitmapUtils.AppIcons.get(context, pkg)?.let { dataMap.putAsset("icon_$pkg", WatchSync.bitmapToAsset(it)) }
+            WatchSync.iconAsset(context, pkg)?.let { dataMap.putAsset("icon_$pkg", it) }
         }
     }
 

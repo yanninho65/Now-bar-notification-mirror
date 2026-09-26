@@ -51,8 +51,11 @@ class PhoneDataListenerService : WearableListenerService() {
                         MessagesStore.onChanged?.invoke()
                     }
                     PhoneDataLayer.SPORT_PATH -> {
+                        // AUDIT 26/09/2026 — only the Sport screen uses it, and it re-reads the
+                        // persisted item on resume: don't decode 20 matches' images while it's closed.
+                        val onChanged = SportStore.onChanged ?: continue
                         SportStore.setLive(SportDataCodec.decode(applicationContext, dataMap), timestamp)
-                        SportStore.onChanged?.invoke()
+                        onChanged.invoke()
                     }
                 }
             }

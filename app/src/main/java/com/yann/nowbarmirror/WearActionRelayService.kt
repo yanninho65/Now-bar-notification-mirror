@@ -57,6 +57,7 @@ class WearActionRelayService : WearableListenerService() {
                     SPORT_DISMISS_PATH -> if (sportKey.isNotBlank()) SofascoreNotificationListenerService.dismissFromWatch(sportKey)
                     SPORT_MUTE_PATH -> if (sportKey.isNotBlank()) SofascoreNotificationListenerService.muteFromWatch(sportKey)
                     SPORT_OPEN_PATH -> if (sportKey.isNotBlank()) SofascoreNotificationListenerService.openOnPhoneFromWatch(sportKey)
+                    SPORT_WATCHING_PATH -> SofascoreNotificationListenerService.setWatchScreenOpen(json.optBoolean("open", false))
                 }
                 return
             }
@@ -143,5 +144,6 @@ class WearActionRelayService : WearableListenerService() {
         const val SPORT_DISMISS_PATH = "/sportdetail/dismiss"
         const val SPORT_OPEN_PATH = "/sportdetail/open"
         const val SPORT_MUTE_PATH = "/sportdetail/mute"
+        const val SPORT_WATCHING_PATH = "/sportdetail/watching"
     }
 }

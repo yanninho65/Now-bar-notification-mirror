@@ -83,6 +83,11 @@ object PhoneRelay {
         send(context, "/sportdetail/open", JSONObject().put("key", key).toString().toByteArray(Charsets.UTF_8))
     }
 
+    /** Sport screen shown/hidden (AUDIT 26/09/2026): the phone sends "/sport" urgent only while it's shown. */
+    fun sendSportWatching(context: Context, open: Boolean) {
+        send(context, "/sportdetail/watching", JSONObject().put("open", open).toString().toByteArray(Charsets.UTF_8))
+    }
+
     private inline fun payload(info: NotificationInfo, extra: JSONObject.() -> Unit = {}): ByteArray {
         val json = JSONObject().apply {
             put("kind", info.kind)

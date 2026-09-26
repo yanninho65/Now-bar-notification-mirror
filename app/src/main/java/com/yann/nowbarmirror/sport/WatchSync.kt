@@ -33,6 +33,18 @@ object WatchSync {
         return Asset.createFromBytes(stream.toByteArray())
     }
 
+    // AUDIT 26/09/2026 — app icons never change between pushes: encode each one to PNG once per
+    // process instead of on every "/messages", "/sport" and "/notification" push.
+    private val iconAssets = android.util.LruCache<String, Asset>(32)
+
+    /** Source-app icon as an Asset, cached per package. */
+    fun iconAsset(context: Context, packageName: String): Asset? {
+        if (packageName.isBlank()) return null
+        iconAssets.get(packageName)?.let { return it }
+        val icon = BitmapUtils.AppIcons.get(context, packageName) ?: return null
+        return bitmapToAsset(icon).also { iconAssets.put(packageName, it) }
+    }
+
     /**
      * [notifImage] : image combinée des deux logos telle que fournie par
      * la notif Sofascore elle-même — voir MatchScore.kt (côté montre) et

@@ -107,9 +107,6 @@ object WatchNotificationSync {
     }
 
     /** Source-app icon, from the shared per-package cache (AUDIT 23/09/2026 — BitmapUtils.AppIcons), downscaled like the image. */
-    private fun appIconAsset(context: Context, packageName: String): Asset? {
-        if (packageName.isBlank()) return null
-        val icon = BitmapUtils.AppIcons.get(context, packageName) ?: return null
-        return WatchSync.bitmapToAsset(icon)
-    }
+    private fun appIconAsset(context: Context, packageName: String): Asset? =
+        WatchSync.iconAsset(context, packageName)   // encoded once per package (AUDIT 26/09/2026)
 }
